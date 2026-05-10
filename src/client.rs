@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -11,6 +12,31 @@ use crate::output::{CliError, CliResult};
 pub struct ApiClient {
     client: Client,
     context: RuntimeContext,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AuthSessionCreated {
+    pub session_id: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub authorize_url: String,
+    pub qr_code_text: String,
+    pub required_scopes: Vec<String>,
+    pub expires_at: String,
+    pub expires_in_seconds: u64,
+    pub poll_interval_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AuthSessionStatus {
+    pub session_id: String,
+    pub status: String,
+    pub required_scopes: Vec<String>,
+    pub expires_at: String,
+    pub poll_interval_seconds: u64,
+    pub access_token: Option<String>,
+    pub token_type: Option<String>,
+    pub scopes: Vec<String>,
 }
 
 impl ApiClient {
@@ -103,6 +129,89 @@ impl ApiClient {
         }
         Ok(value.get("data").cloned().unwrap_or_else(|| json!(null)))
     }
+}
+
+pub fn create_auth_session(
+    base_url: &str,
+    scopes: &[String],
+    client_name: &str,
+) -> CliResult<AuthSessionCreated> {
+    let body = json!({
+        "scopes": scopes,
+        "client_name": client_name
+    });
+    public_request(base_url, "POST", "/api/v1/agent/auth/sessions", Some(body))
+}
+
+pub fn get_auth_session(base_url: &str, session_id: &str) -> CliResult<AuthSessionStatus> {
+    public_request(
+        base_url,
+        "GET",
+        &format!("/api/v1/agent/auth/sessions/{session_id}"),
+        None,
+    )
+}
+
+fn public_request<T: for<'de> Deserialize<'de>>(
+    base_url: &str,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> CliResult<T> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|err| CliError::internal(format!("failed to create HTTP client: {err}")))?;
+    let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+    let builder = match method {
+        "GET" => client.get(&url),
+        "POST" => client.post(&url),
+        _ => {
+            return Err(CliError::validation(format!(
+                "unsupported method: {method}"
+            )))
+        }
+    }
+    .header(
+        "User-Agent",
+        concat!("HyacinthusCLI/", env!("CARGO_PKG_VERSION")),
+    );
+    let builder = if let Some(body) = body {
+        builder.json(&body)
+    } else {
+        builder
+    };
+    let response = builder
+        .send()
+        .map_err(|err| CliError::network(format!("request failed: {err}")))?;
+    let status = response.status();
+    let value = response.json::<Value>().map_err(|err| {
+        CliError::api(format!("invalid backend JSON response: {err}"), None, None)
+    })?;
+    if !status.is_success() {
+        let message = value
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("backend request failed")
+            .to_string();
+        return Err(CliError::api(message, backend_code(&value), Some(value)));
+    }
+    let code = value.get("code").and_then(Value::as_i64).unwrap_or(0);
+    if code != 0 {
+        let message = value
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("backend returned non-zero code")
+            .to_string();
+        return Err(CliError::api(
+            message,
+            backend_code(&value).or_else(|| Some(code.to_string())),
+            Some(value),
+        ));
+    }
+    let data = value.get("data").cloned().unwrap_or_else(|| json!(null));
+    serde_json::from_value(data)
+        .map_err(|err| CliError::api(format!("invalid auth session response: {err}"), None, None))
 }
 
 fn backend_code(value: &Value) -> Option<String> {

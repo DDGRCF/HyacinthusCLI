@@ -113,6 +113,22 @@ impl CliError {
         }
     }
 
+    pub fn auth_required(message: impl Into<String>, detail: Value) -> Self {
+        Self {
+            exit_code: EXIT_AUTH,
+            error_type: "auth_required",
+            code: Some("AUTH_REQUIRED".to_string()),
+            message: message.into(),
+            hint: Some(
+                "open authorize_url or send qr_code_text to the user, then run auth login --wait"
+                    .to_string(),
+            ),
+            detail: Some(detail),
+            risk: None,
+            retryable: true,
+        }
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self {
             exit_code: EXIT_INTERNAL,

@@ -180,6 +180,27 @@ fn mock_sequence(bodies: Vec<&'static str>) -> String {
     format!("http://{}", addr)
 }
 
+fn mock_public_sequence(bodies: Vec<&'static str>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("mock addr");
+    thread::spawn(move || {
+        for body in bodies {
+            let (mut stream, _) = listener.accept().expect("accept mock request");
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).expect("read request");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
+    });
+    format!("http://{}", addr)
+}
+
 fn remote_requirements_options_capability() -> &'static str {
     r#"{"id":"requirements.options","title":"需求选项","description":"远端需求选项","domain":"requirements","command":"hyacinthus requirements options","method":"GET","path":"/api/v1/agent/requirements/options","required_scopes":["requirements:parse"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":false,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","deprecated":false,"request_schema":{"type":"object","properties":{}},"response_schema":{"type":"object","properties":{}},"examples":[]}"#
 }
@@ -663,6 +684,68 @@ fn auth_status_reports_env_overrides_without_secrets() {
     assert!(!serde_json::to_string(&value)
         .unwrap()
         .contains("secret-token"));
+}
+
+#[test]
+fn auth_login_wait_saves_agent_token_and_scopes() {
+    let base_url = mock_public_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-1","user_code":"ABCD-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=ABCD-1234","qr_code_text":"http://auth/verify?user_code=ABCD-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-1","status":"approved","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":"hat_test","token_type":"agent","scopes":["requirements:parse"]}}"#,
+    ]);
+    let config_dir = tempfile::tempdir().unwrap();
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "auth",
+            "login",
+            "--scope",
+            "requirements:parse",
+            "--wait",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
+        .output()
+        .expect("auth login wait");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"]["token_saved"], true);
+    let config_text =
+        fs::read_to_string(config_dir.path().join("config.json")).expect("read config");
+    let config_value: serde_json::Value = serde_json::from_str(&config_text).expect("config json");
+    assert_eq!(config_value["profiles"]["default"]["token"], "hat_test");
+    assert_eq!(
+        config_value["profiles"]["default"]["scopes"][0],
+        "requirements:parse"
+    );
+}
+
+#[test]
+fn missing_scope_with_token_returns_auth_required_link() {
+    let base_url = mock_public_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-2","user_code":"EFGH-5678","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=EFGH-5678","qr_code_text":"http://auth/verify?user_code=EFGH-5678","required_scopes":["admin:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":2}}"#,
+    ]);
+    let output = cli()
+        .args(["--base-url", &base_url, "admin", "status"])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "hat_limited")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
+        .output()
+        .expect("auth required link");
+    assert_eq!(output.status.code(), Some(3));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["error"]["type"], "auth_required");
+    assert_eq!(value["error"]["detail"]["session_id"], "sess-2");
+    assert_eq!(
+        value["error"]["detail"]["authorize_url"],
+        "http://auth/verify?user_code=EFGH-5678"
+    );
 }
 
 #[test]
@@ -1415,6 +1498,11 @@ fn skills_are_discoverable_from_cli() {
         .unwrap()
         .iter()
         .any(|skill| skill["name"] == "hyacinthus-requirements"));
+    assert!(value["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|skill| skill["name"] == "hyacinthus-hermes-agent"));
 }
 
 #[test]
@@ -1447,7 +1535,7 @@ fn skills_export_and_check_round_trip() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["data"]["exported"].as_array().unwrap().len(), 2);
+    assert_eq!(value["data"]["exported"].as_array().unwrap().len(), 3);
     assert!(export_dir
         .path()
         .join("hyacinthus-shared")

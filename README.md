@@ -35,6 +35,8 @@ hyacinthus admin status
 hyacinthus claw status
 hyacinthus claw skills list
 hyacinthus auth status
+hyacinthus auth login --scope requirements:parse --wait
+hyacinthus auth grant --scope admin:read
 hyacinthus auth scopes
 hyacinthus auth check --scope requirements:parse
 hyacinthus doctor
@@ -127,6 +129,16 @@ hyacinthus config set-profile dev --base-url http://localhost:8000 --raw-api-ena
 ```
 
 Raw API paths must start with `/api/v1/`.
+
+Interactive Agent authorization is supported for hermes-agent, Claw, and other automation clients:
+
+```bash
+hyacinthus auth login --scope requirements:parse --client-name hermes-agent
+hyacinthus auth login --scope requirements:parse --client-name hermes-agent --wait
+hyacinthus auth grant --scope "requirements:parse requirements:write" --wait
+```
+
+`auth login` creates a backend authorization session and prints `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. Agents should send the URL or QR text to the user. With `--wait`, the CLI polls until approval and saves the issued Agent token plus scopes into the selected profile.
 
 Commands that return backend data can write the successful `data` payload to a file:
 

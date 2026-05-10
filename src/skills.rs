@@ -7,6 +7,7 @@ use crate::output::{CliError, CliResult};
 
 const SHARED_SKILL: &str = include_str!("../skills/hyacinthus-shared/SKILL.md");
 const REQUIREMENTS_SKILL: &str = include_str!("../skills/hyacinthus-requirements/SKILL.md");
+const HERMES_AGENT_SKILL: &str = include_str!("../skills/hyacinthus-hermes-agent/SKILL.md");
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Skill {
@@ -62,6 +63,13 @@ pub fn list() -> Vec<Skill> {
             name: "hyacinthus-requirements",
             description: "Requirement parsing and import workflow rules for Agent operators.",
             path: "skills/hyacinthus-requirements/SKILL.md",
+            version: env!("CARGO_PKG_VERSION"),
+            content: None,
+        },
+        Skill {
+            name: "hyacinthus-hermes-agent",
+            description: "Hermes Agent handoff rules for Hyacinthus CLI link and QR authorization.",
+            path: "skills/hyacinthus-hermes-agent/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: None,
         },
@@ -175,6 +183,13 @@ pub fn show(name: &str) -> CliResult<Skill> {
             version: env!("CARGO_PKG_VERSION"),
             content: Some(REQUIREMENTS_SKILL),
         }),
+        "hyacinthus-hermes-agent" => Ok(Skill {
+            name: "hyacinthus-hermes-agent",
+            description: "Hermes Agent handoff rules for Hyacinthus CLI link and QR authorization.",
+            path: "skills/hyacinthus-hermes-agent/SKILL.md",
+            version: env!("CARGO_PKG_VERSION"),
+            content: Some(HERMES_AGENT_SKILL),
+        }),
         _ => Err(CliError::validation(format!("unknown skill: {name}"))),
     }
 }
@@ -194,6 +209,13 @@ fn full_skills() -> Vec<Skill> {
             path: "skills/hyacinthus-requirements/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(REQUIREMENTS_SKILL),
+        },
+        Skill {
+            name: "hyacinthus-hermes-agent",
+            description: "Hermes Agent handoff rules for Hyacinthus CLI link and QR authorization.",
+            path: "skills/hyacinthus-hermes-agent/SKILL.md",
+            version: env!("CARGO_PKG_VERSION"),
+            content: Some(HERMES_AGENT_SKILL),
         },
     ]
 }

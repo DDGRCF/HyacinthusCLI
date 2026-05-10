@@ -97,6 +97,34 @@ pub fn save_config(config: &ConfigFile) -> CliResult<()> {
     })
 }
 
+pub fn save_agent_credentials(
+    profile_name: &str,
+    base_url: &str,
+    token: String,
+    scopes: Vec<String>,
+) -> CliResult<()> {
+    let mut config = load_config()?;
+    let profile = config
+        .profiles
+        .entry(profile_name.to_string())
+        .or_insert_with(|| Profile {
+            name: profile_name.to_string(),
+            base_url: base_url.to_string(),
+            default_instance_id: None,
+            default_format: OutputFormat::Json,
+            token: None,
+            scopes: Vec::new(),
+            raw_api_enabled: false,
+        });
+    profile.base_url = base_url.to_string();
+    profile.token = Some(token);
+    profile.scopes = scopes;
+    if config.active_profile.is_none() {
+        config.active_profile = Some(profile_name.to_string());
+    }
+    save_config(&config)
+}
+
 pub fn normalize_base_url(raw: &str) -> CliResult<String> {
     let trimmed = raw.trim().trim_end_matches('/');
     if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {

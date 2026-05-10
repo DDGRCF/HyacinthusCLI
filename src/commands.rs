@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
+use std::thread;
+use std::time::Duration;
 
 use clap::CommandFactory;
 use clap_complete::{generate, Shell};
@@ -8,11 +10,11 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::cli::{
-    AdminSubcommand, AuthSubcommand, CapabilitySubcommand, ClawSkillsSubcommand, ClawSubcommand,
-    Cli, Command, ConfigSubcommand, RequirementsImportArgs, RequirementsParseArgs,
+    AdminSubcommand, AuthLoginArgs, AuthSubcommand, CapabilitySubcommand, ClawSkillsSubcommand,
+    ClawSubcommand, Cli, Command, ConfigSubcommand, RequirementsImportArgs, RequirementsParseArgs,
     RequirementsSubcommand,
 };
-use crate::client::ApiClient;
+use crate::client::{self, ApiClient};
 use crate::config::{self, Profile};
 use crate::manifest;
 use crate::output::{self, CliError, CliResult};
@@ -311,6 +313,8 @@ fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)
                 json!({ "command": "auth status" }),
             ))
         }
+        AuthSubcommand::Login(args) => auth_login(cli, args, "auth login"),
+        AuthSubcommand::Grant(args) => auth_login(cli, args, "auth grant"),
         AuthSubcommand::Check(args) => {
             if let Some(scope) = args.scope.as_deref() {
                 return auth_scope_check(cli, scope);
@@ -375,6 +379,87 @@ fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)
             ))
         }
     }
+}
+
+fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_auth_status_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        cli.instance_id,
+        cli.request_id.as_deref(),
+    )?;
+    let base_url = ctx
+        .base_url
+        .ok_or_else(|| CliError::validation("base_url is not configured"))?;
+    let requested_scopes = args
+        .scope
+        .as_deref()
+        .map(config::parse_scope_list)
+        .unwrap_or_default();
+    let session = client::create_auth_session(&base_url, &requested_scopes, &args.client_name)?;
+    let mut status = None;
+    if args.wait {
+        for _ in 0..args.poll_limit {
+            let current = client::get_auth_session(&base_url, &session.session_id)?;
+            if current.status == "approved" {
+                let token = current.access_token.clone().ok_or_else(|| {
+                    CliError::api(
+                        "approved auth session did not return access_token",
+                        None,
+                        None,
+                    )
+                })?;
+                config::save_agent_credentials(
+                    &ctx.profile_name,
+                    &base_url,
+                    token,
+                    current.scopes.clone(),
+                )?;
+                status = Some(current);
+                break;
+            }
+            if current.status != "pending" {
+                status = Some(current);
+                break;
+            }
+            if current.poll_interval_seconds > 0 {
+                thread::sleep(Duration::from_secs(current.poll_interval_seconds));
+            }
+        }
+    }
+    let data = if let Some(status) = status {
+        json!({
+            "session_id": session.session_id,
+            "status": status.status,
+            "authorize_url": session.authorize_url,
+            "qr_code_text": session.qr_code_text,
+            "user_code": session.user_code,
+            "required_scopes": session.required_scopes,
+            "token_saved": status.access_token.is_some(),
+            "scopes": status.scopes
+        })
+    } else {
+        json!({
+            "session_id": session.session_id,
+            "status": "pending",
+            "authorize_url": session.authorize_url,
+            "qr_code_text": session.qr_code_text,
+            "user_code": session.user_code,
+            "verification_uri": session.verification_uri,
+            "required_scopes": session.required_scopes,
+            "expires_at": session.expires_at,
+            "expires_in_seconds": session.expires_in_seconds,
+            "poll_interval_seconds": session.poll_interval_seconds,
+            "token_saved": false
+        })
+    };
+    Ok((
+        data,
+        json!({
+            "command": command_name,
+            "profile": ctx.profile_name
+        }),
+    ))
 }
 
 fn auth_scope_check(cli: &Cli, scope: &str) -> CliResult<(Value, Value)> {
@@ -1092,7 +1177,25 @@ fn ensure_scopes(ctx: &crate::config::RuntimeContext, required: &[String]) -> Cl
     if missing.is_empty() {
         Ok(())
     } else {
-        Err(CliError::missing_scope(missing, required.to_vec()))
+        if ctx.token.is_none() {
+            return Err(CliError::missing_scope(missing, required.to_vec()));
+        }
+        let session = client::create_auth_session(&ctx.base_url, required, "hyacinthus-cli")?;
+        Err(CliError::auth_required(
+            format!("authorization required for scope: {}", missing.join(", ")),
+            json!({
+                "missing_scopes": missing,
+                "required_scopes": required,
+                "session_id": session.session_id,
+                "authorize_url": session.authorize_url,
+                "qr_code_text": session.qr_code_text,
+                "user_code": session.user_code,
+                "verification_uri": session.verification_uri,
+                "expires_at": session.expires_at,
+                "expires_in_seconds": session.expires_in_seconds,
+                "poll_interval_seconds": session.poll_interval_seconds
+            }),
+        ))
     }
 }
 

@@ -11,6 +11,12 @@
       "name": "hyacinthus-requirements",
       "path": "skills/hyacinthus-requirements/SKILL.md",
       "version": "0.1.0"
+    },
+    {
+      "description": "Hermes Agent handoff rules for Hyacinthus CLI link and QR authorization.",
+      "name": "hyacinthus-hermes-agent",
+      "path": "skills/hyacinthus-hermes-agent/SKILL.md",
+      "version": "0.1.0"
     }
   ],
   "meta": {

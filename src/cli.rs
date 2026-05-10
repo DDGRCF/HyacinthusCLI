@@ -147,9 +147,23 @@ pub struct AuthCommand {
 #[derive(Clone, Debug, Subcommand)]
 pub enum AuthSubcommand {
     Status,
+    Login(AuthLoginArgs),
+    Grant(AuthLoginArgs),
     Check(AuthCheckArgs),
     Scopes(AuthScopesArgs),
     Logout,
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct AuthLoginArgs {
+    #[arg(long)]
+    pub scope: Option<String>,
+    #[arg(long, default_value = "hyacinthus-cli")]
+    pub client_name: String,
+    #[arg(long)]
+    pub wait: bool,
+    #[arg(long, default_value_t = 30)]
+    pub poll_limit: u64,
 }
 
 #[derive(Clone, Debug, Args)]
