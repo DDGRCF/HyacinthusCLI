@@ -1,0 +1,22 @@
+{
+  "error": {
+    "code": "MISSING_SCOPE",
+    "detail": {
+      "missing_scopes": [
+        "admin:read"
+      ],
+      "required_scopes": [
+        "admin:read"
+      ]
+    },
+    "hint": "ask an owner/super_admin to issue an Agent token with the required scope",
+    "message": "missing required scope: admin:read",
+    "retryable": false,
+    "risk": null,
+    "type": "missing_scope"
+  },
+  "meta": {
+    "profile": null
+  },
+  "ok": false
+}

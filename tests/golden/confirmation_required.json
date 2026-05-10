@@ -1,0 +1,18 @@
+{
+  "error": {
+    "code": "CONFIRMATION_REQUIRED",
+    "detail": null,
+    "hint": "add --yes to confirm",
+    "message": "requirements import contains rows needing confirmation requires confirmation",
+    "retryable": true,
+    "risk": {
+      "action": "requirements import contains rows needing confirmation",
+      "level": "write"
+    },
+    "type": "confirmation_required"
+  },
+  "meta": {
+    "profile": null
+  },
+  "ok": false
+}

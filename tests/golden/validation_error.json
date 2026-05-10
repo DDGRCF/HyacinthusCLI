@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "detail": null,
+    "hint": null,
+    "message": "raw API is disabled; enable profile raw_api_enabled or set HYACINTHUS_RAW_API=1",
+    "retryable": false,
+    "risk": null,
+    "type": "validation"
+  },
+  "meta": {
+    "profile": null
+  },
+  "ok": false
+}

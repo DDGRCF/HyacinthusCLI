@@ -1,0 +1,20 @@
+{
+  "data": {
+    "checks": [
+      {
+        "message": "0.1.0",
+        "name": "cli_version",
+        "status": "pass"
+      },
+      {
+        "message": "base_url is not configured",
+        "name": "config_resolved",
+        "status": "fail"
+      }
+    ]
+  },
+  "meta": {
+    "command": "doctor"
+  },
+  "ok": true
+}

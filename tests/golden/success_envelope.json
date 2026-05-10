@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "description": "Shared Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+      "name": "hyacinthus-shared",
+      "path": "skills/hyacinthus-shared/SKILL.md",
+      "version": "0.1.0"
+    },
+    {
+      "description": "Requirement parsing and import workflow rules for Agent operators.",
+      "name": "hyacinthus-requirements",
+      "path": "skills/hyacinthus-requirements/SKILL.md",
+      "version": "0.1.0"
+    }
+  ],
+  "meta": {
+    "command": "skills list"
+  },
+  "ok": true
+}

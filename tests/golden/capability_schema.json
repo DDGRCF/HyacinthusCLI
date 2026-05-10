@@ -1,0 +1,175 @@
+{
+  "data": {
+    "command": "hyacinthus requirements parse",
+    "deprecated": false,
+    "description": "Agent 专用需求批量解析能力，返回候选记录、置信度、自动提交提示和确认原因。",
+    "domain": "requirements",
+    "examples": [
+      {
+        "command": "hyacinthus requirements parse --file input.txt --instance-id 1",
+        "title": "从文本文件解析需求"
+      },
+      {
+        "command": "hyacinthus requirements parse --file input.txt --instance-id 1 --skip-geocode",
+        "title": "跳过地理编码解析"
+      }
+    ],
+    "id": "requirements.batch_parse",
+    "introduced_in": "0.1.0",
+    "method": "POST",
+    "min_backend_version": "0.1.0",
+    "path": "/api/v1/agent/requirements/batch-parse",
+    "request_schema": {
+      "properties": {
+        "enable_ai_fallback": {
+          "default": true,
+          "description": "是否允许 AI fallback。",
+          "type": "boolean"
+        },
+        "force_ai": {
+          "default": true,
+          "description": "是否强制使用 AI 解析。",
+          "type": "boolean"
+        },
+        "instance_id": {
+          "description": "Claw 实例 ID，用于解析 Agent 操作身份。",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "preset_city": {
+          "description": "默认城市。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preset_contact_phone": {
+          "description": "默认联系电话。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preset_contact_wechat": {
+          "description": "默认微信号。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priority_rules_json": {
+          "description": "优先级规则 JSON 字符串。",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_text": {
+          "description": "待批量解析的原始需求文本。",
+          "minLength": 1,
+          "type": "string"
+        },
+        "skip_geocode": {
+          "default": false,
+          "description": "是否跳过地理编码。",
+          "type": "boolean"
+        },
+        "subject_group_aliases_json": {
+          "description": "科目别名 JSON 字符串。",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "instance_id",
+        "raw_text"
+      ],
+      "type": "object"
+    },
+    "required_scopes": [
+      "requirements:parse"
+    ],
+    "response_schema": {
+      "properties": {
+        "rows": {
+          "items": {
+            "properties": {
+              "can_auto_commit": {
+                "type": "boolean"
+              },
+              "confidence": {
+                "type": "number"
+              },
+              "confirmation_reasons": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "errors": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "needs_confirmation": {
+                "type": "boolean"
+              },
+              "parsed": {
+                "description": "解析后的需求字段。",
+                "type": "object"
+              },
+              "warnings": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "can_auto_commit",
+              "needs_confirmation",
+              "confirmation_reasons"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "properties": {
+            "auto_commit_ready": {
+              "description": "可自动提交的行数。",
+              "type": "integer"
+            },
+            "needs_confirmation": {
+              "description": "需要人工确认的行数。",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "auto_commit_ready",
+            "needs_confirmation"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "rows",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "risk_level": "read",
+    "supports_dry_run": "cli",
+    "supports_file_upload": false,
+    "supports_idempotency": false,
+    "supports_pagination": false,
+    "title": "批量解析需求"
+  },
+  "meta": {
+    "command": "schema"
+  },
+  "ok": true
+}

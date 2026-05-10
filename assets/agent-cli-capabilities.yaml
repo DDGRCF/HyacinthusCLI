@@ -1,0 +1,537 @@
+version: "2026-05-10"
+backend_min_version: "0.1.0"
+capabilities:
+  - id: requirements.batch_parse
+    title: 批量解析需求
+    description: Agent 专用需求批量解析能力，返回候选记录、置信度、自动提交提示和确认原因。
+    domain: requirements
+    command: hyacinthus requirements parse
+    method: POST
+    path: /api/v1/agent/requirements/batch-parse
+    required_scopes:
+      - requirements:parse
+    risk_level: read
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - instance_id
+        - raw_text
+      properties:
+        instance_id:
+          type: integer
+          minimum: 1
+          description: Claw 实例 ID，用于解析 Agent 操作身份。
+        raw_text:
+          type: string
+          minLength: 1
+          description: 待批量解析的原始需求文本。
+        preset_contact_phone:
+          type:
+            - string
+            - "null"
+          description: 默认联系电话。
+        preset_contact_wechat:
+          type:
+            - string
+            - "null"
+          description: 默认微信号。
+        preset_city:
+          type:
+            - string
+            - "null"
+          description: 默认城市。
+        subject_group_aliases_json:
+          type:
+            - string
+            - "null"
+          description: 科目别名 JSON 字符串。
+        priority_rules_json:
+          type:
+            - string
+            - "null"
+          description: 优先级规则 JSON 字符串。
+        force_ai:
+          type: boolean
+          default: true
+          description: 是否强制使用 AI 解析。
+        enable_ai_fallback:
+          type: boolean
+          default: true
+          description: 是否允许 AI fallback。
+        skip_geocode:
+          type: boolean
+          default: false
+          description: 是否跳过地理编码。
+    response_schema:
+      type: object
+      required:
+        - rows
+        - summary
+      properties:
+        summary:
+          type: object
+          required:
+            - auto_commit_ready
+            - needs_confirmation
+          properties:
+            auto_commit_ready:
+              type: integer
+              description: 可自动提交的行数。
+            needs_confirmation:
+              type: integer
+              description: 需要人工确认的行数。
+        rows:
+          type: array
+          items:
+            type: object
+            required:
+              - can_auto_commit
+              - needs_confirmation
+              - confirmation_reasons
+            properties:
+              parsed:
+                type: object
+                description: 解析后的需求字段。
+              warnings:
+                type: array
+                items:
+                  type: string
+              errors:
+                type: array
+                items:
+                  type: string
+              confidence:
+                type: number
+              can_auto_commit:
+                type: boolean
+              needs_confirmation:
+                type: boolean
+              confirmation_reasons:
+                type: array
+                items:
+                  type: string
+    examples:
+      - title: 从文本文件解析需求
+        command: hyacinthus requirements parse --file input.txt --instance-id 1
+      - title: 跳过地理编码解析
+        command: hyacinthus requirements parse --file input.txt --instance-id 1 --skip-geocode
+
+  - id: requirements.batch_import
+    title: 批量导入需求
+    description: Agent 专用需求批量导入能力，创建或更新已确认需求，并返回逐批统计与失败行。
+    domain: requirements
+    command: hyacinthus requirements import
+    method: POST
+    path: /api/v1/agent/requirements/batch-import
+    required_scopes:
+      - requirements:write
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: true
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - instance_id
+        - confirmed_rows
+      properties:
+        instance_id:
+          type: integer
+          minimum: 1
+          description: Claw 实例 ID，用于解析 Agent 操作身份。
+        idempotency_key:
+          type:
+            - string
+            - "null"
+          description: 批量导入幂等 key；重试同一批导入时必须复用。
+        confirmed_rows:
+          type: array
+          minItems: 1
+          description: 已确认可导入的需求创建 payload 列表。
+          items:
+            type: object
+            required:
+              - requirement_type
+              - title
+            properties:
+              requirement_type:
+                type: string
+                description: 需求类型，例如 tutoring。
+              title:
+                type: string
+                minLength: 1
+                description: 需求标题。
+              description:
+                type:
+                  - string
+                  - "null"
+                description: 需求描述。
+              requirement_code:
+                type:
+                  - string
+                  - "null"
+                description: 外部需求编号；为空时由后端处理。
+              subject_ids:
+                type: array
+                items:
+                  type: integer
+                description: 科目 ID 列表。
+              grade_ids:
+                type: array
+                items:
+                  type: integer
+                description: 年级 ID 列表。
+              address_detail:
+                type:
+                  - string
+                  - "null"
+                description: 上课地址详情。
+              latitude:
+                type:
+                  - number
+                  - "null"
+                description: 地址纬度。
+              longitude:
+                type:
+                  - number
+                  - "null"
+                description: 地址经度。
+              contact_phone:
+                type:
+                  - string
+                  - "null"
+                description: 联系电话。
+              contact_wechat:
+                type:
+                  - string
+                  - "null"
+                description: 微信号。
+              expires_at:
+                type:
+                  - string
+                  - "null"
+                format: date-time
+                description: 过期时间；为空时后端使用默认过期时间。
+              time_slots:
+                type: array
+                items:
+                  type: object
+                description: 可上课时间段。
+              ext:
+                type:
+                  - object
+                  - "null"
+                description: 需求扩展字段。
+    response_schema:
+      type: object
+      required:
+        - created
+        - updated
+        - failed
+        - created_ids
+        - updated_ids
+        - failed_rows
+      properties:
+        created:
+          type: integer
+        updated:
+          type: integer
+        failed:
+          type: integer
+        created_ids:
+          type: array
+          items:
+            type: integer
+        updated_ids:
+          type: array
+          items:
+            type: integer
+        failed_rows:
+          type: array
+          items:
+            type: object
+        idempotency_key:
+          type: string
+        idempotent_replay:
+          type: boolean
+          description: true 表示后端返回的是同一幂等 key 的历史结果。
+    examples:
+      - title: 使用幂等 key 批量导入
+        command: hyacinthus requirements import --file confirmed.json --instance-id 1 --idempotency-key cli-20260510-demo
+      - title: 预览批量导入请求
+        command: hyacinthus requirements import --file confirmed.json --instance-id 1 --idempotency-key cli-20260510-demo --dry-run
+
+  - id: requirements.options
+    title: 需求元数据选项
+    description: Agent 专用需求元数据查询能力，返回需求解析和导入可用的角色、科目、年级与授课方式选项。
+    domain: requirements
+    command: hyacinthus requirements options
+    method: GET
+    path: /api/v1/agent/requirements/options
+    required_scopes:
+      - requirements:parse
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      properties: {}
+    response_schema:
+      type: object
+      required:
+        - target_roles
+        - subjects
+        - grades
+        - preferred_modes
+        - batch_force_ai_text_limit
+      properties:
+        target_roles:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - display_name
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              display_name:
+                type: string
+        subjects:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              category:
+                type:
+                  - string
+                  - "null"
+        grades:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - sort_order
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              category:
+                type:
+                  - string
+                  - "null"
+              sort_order:
+                type: integer
+        preferred_modes:
+          type: array
+          items:
+            type: object
+            required:
+              - value
+              - label
+            properties:
+              value:
+                type: string
+              label:
+                type: string
+        batch_force_ai_text_limit:
+          type: integer
+    examples:
+      - title: 查询需求元数据选项
+        command: hyacinthus requirements options
+
+  - id: admin.status
+    title: 后台基础状态
+    description: Agent 专用后台状态查询能力，返回非敏感运行状态与 capability manifest 摘要。
+    domain: admin
+    command: hyacinthus admin status
+    method: GET
+    path: /api/v1/agent/admin/status
+    required_scopes:
+      - admin:read
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      properties: {}
+    response_schema:
+      type: object
+      required:
+        - project_name
+        - api_prefix
+        - server_time
+        - manifest_version
+        - backend_min_version
+        - capability_count
+      properties:
+        project_name:
+          type: string
+        api_prefix:
+          type: string
+        server_time:
+          type: string
+          format: date-time
+        manifest_version:
+          type: string
+        backend_min_version:
+          type: string
+        capability_count:
+          type: integer
+    examples:
+      - title: 查询后台状态
+        command: hyacinthus admin status
+
+  - id: claw.status
+    title: Claw 运行状态
+    description: Agent 专用 Claw 只读状态查询能力，返回非敏感 host 与 provider profile 摘要。
+    domain: claw
+    command: hyacinthus claw status
+    method: GET
+    path: /api/v1/agent/claw/status
+    required_scopes:
+      - claw:read
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      properties: {}
+    response_schema:
+      type: object
+      required:
+        - host
+        - provider_profile_count
+      properties:
+        host:
+          type: object
+          required:
+            - provider
+            - running
+            - instance_count
+          properties:
+            provider:
+              type: string
+            running:
+              type: boolean
+            status:
+              type:
+                - string
+                - "null"
+            image:
+              type:
+                - string
+                - "null"
+            instance_count:
+              type: integer
+        provider_profile_count:
+          type: integer
+    examples:
+      - title: 查询 Claw 运行状态
+        command: hyacinthus claw status
+
+  - id: claw.skills_list
+    title: Claw Skills 列表
+    description: Agent 专用 Claw Skills 只读查询能力，返回服务端已登记 Skill 的非敏感摘要。
+    domain: claw
+    command: hyacinthus claw skills list
+    method: GET
+    path: /api/v1/agent/claw/skills
+    required_scopes:
+      - claw:read
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      properties:
+        source:
+          type:
+            - string
+            - "null"
+    response_schema:
+      type: array
+      items:
+        type: object
+        required:
+          - id
+          - name
+          - display_name
+          - version
+          - source
+          - is_featured
+          - tags
+        properties:
+          id:
+            type: integer
+          name:
+            type: string
+          display_name:
+            type: string
+          description:
+            type:
+              - string
+              - "null"
+          version:
+            type: string
+          source:
+            type: string
+          is_featured:
+            type: boolean
+          tags:
+            type: array
+            items:
+              type: string
+          config_schema:
+            type:
+              - object
+              - "null"
+    examples:
+      - title: 查询全部 Claw Skills
+        command: hyacinthus claw skills list
+      - title: 按来源查询 Claw Skills
+        command: hyacinthus claw skills list --source builtin

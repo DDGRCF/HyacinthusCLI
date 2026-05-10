@@ -1,0 +1,49 @@
+{
+  "data": {
+    "checks": [
+      {
+        "message": "0.1.0",
+        "name": "cli_version",
+        "status": "pass"
+      },
+      {
+        "message": "default",
+        "name": "config_resolved",
+        "status": "pass"
+      },
+      {
+        "message": "token missing",
+        "name": "token_present",
+        "status": "fail"
+      },
+      {
+        "message": {
+          "backend_min_version": "0.1.0",
+          "cli_version": "0.1.0",
+          "manifest_version": "2026-05-10",
+          "ok": true,
+          "unsupported_capabilities": []
+        },
+        "name": "embedded_manifest_compatibility",
+        "status": "pass"
+      },
+      {
+        "message": {
+          "issue_count": 0,
+          "issues": []
+        },
+        "name": "embedded_manifest_integrity",
+        "status": "pass"
+      },
+      {
+        "message": "offline",
+        "name": "capability_endpoint",
+        "status": "skip"
+      }
+    ]
+  },
+  "meta": {
+    "command": "doctor"
+  },
+  "ok": true
+}

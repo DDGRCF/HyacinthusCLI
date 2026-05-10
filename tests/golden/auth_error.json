@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": "AUTH_FAILED",
+    "detail": null,
+    "hint": "configure HYACINTHUS_AGENT_TOKEN or run `hyacinthus config set-token`",
+    "message": "agent token is not configured",
+    "retryable": false,
+    "risk": null,
+    "type": "auth"
+  },
+  "meta": {
+    "profile": null
+  },
+  "ok": false
+}

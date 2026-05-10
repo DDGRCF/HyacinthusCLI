@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": "NETWORK_ERROR",
+    "detail": null,
+    "hint": "check backend base_url, network, and proxy settings",
+    "message": "<network error>",
+    "retryable": true,
+    "risk": null,
+    "type": "network"
+  },
+  "meta": {
+    "profile": null
+  },
+  "ok": false
+}

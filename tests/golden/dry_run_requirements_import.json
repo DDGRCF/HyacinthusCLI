@@ -1,0 +1,23 @@
+{
+  "data": {
+    "dry_run": true,
+    "request": {
+      "body": {
+        "confirmed_rows": [
+          {
+            "requirement_type": "tutoring",
+            "title": "高一数学"
+          }
+        ],
+        "idempotency_key": "snapshot-key",
+        "instance_id": 1
+      },
+      "method": "POST",
+      "path": "/api/v1/agent/requirements/batch-import"
+    }
+  },
+  "meta": {
+    "command": "requirements import"
+  },
+  "ok": true
+}
