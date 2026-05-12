@@ -9,13 +9,24 @@ fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_hyacinthus"))
 }
 
+fn with_default_identity(command: &mut Command) {
+    command
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent");
+}
+
 fn run_json(args: &[&str]) -> serde_json::Value {
-    let output = cli()
+    let mut command = cli();
+    command
         .args(args)
         .env_clear()
-        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
-        .output()
-        .expect("run hyacinthus");
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path());
+    with_default_identity(&mut command);
+    let output = command.output().expect("run hyacinthus");
     assert!(
         output.status.success(),
         "stderr={} stdout={}",
@@ -35,7 +46,11 @@ fn run_json_expect_code(
     command
         .args(args)
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", config_dir.path());
+    with_default_identity(&mut command);
     for (key, value) in envs {
         command.env(key, value);
     }
@@ -77,6 +92,12 @@ fn mock_once(body: &'static str) -> String {
         assert!(request_text
             .to_ascii_lowercase()
             .contains("x-agent-key: test-token"));
+        assert!(request_text
+            .to_ascii_lowercase()
+            .contains("x-agent-client-instance: hermes-wechat-a"));
+        assert!(request_text
+            .to_ascii_lowercase()
+            .contains("x-agent-client-type: hermes-agent"));
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             body.len(),
@@ -98,6 +119,8 @@ fn mock_once_with_request_id(body: &'static str, request_id: &'static str) -> St
         let size = stream.read(&mut request).expect("read request");
         let request_text = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
         assert!(request_text.contains("x-agent-key: test-token"));
+        assert!(request_text.contains("x-agent-client-instance: hermes-wechat-a"));
+        assert!(request_text.contains("x-agent-client-type: hermes-agent"));
         assert!(request_text.contains(&format!("x-request-id: {request_id}")));
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
@@ -122,6 +145,12 @@ fn mock_once_status(status: u16, body: &'static str) -> String {
         assert!(request_text
             .to_ascii_lowercase()
             .contains("x-agent-key: test-token"));
+        assert!(request_text
+            .to_ascii_lowercase()
+            .contains("x-agent-client-instance: hermes-wechat-a"));
+        assert!(request_text
+            .to_ascii_lowercase()
+            .contains("x-agent-client-type: hermes-agent"));
         let response = format!(
             "HTTP/1.1 {} mock\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             status,
@@ -167,6 +196,12 @@ fn mock_sequence(bodies: Vec<&'static str>) -> String {
             assert!(request_text
                 .to_ascii_lowercase()
                 .contains("x-agent-key: test-token"));
+            assert!(request_text
+                .to_ascii_lowercase()
+                .contains("x-agent-client-instance: hermes-wechat-a"));
+            assert!(request_text
+                .to_ascii_lowercase()
+                .contains("x-agent-client-type: hermes-agent"));
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
                 body.len(),
@@ -325,6 +360,24 @@ fn dry_run_snapshots_match_golden() {
 }
 
 #[test]
+fn requirements_parse_force_ai_flag_overrides_default() {
+    let value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "--instance-id",
+        "1",
+        "requirements",
+        "parse",
+        "--text",
+        "高一数学，瓯海区，周末上课",
+        "--force-ai",
+        "--dry-run",
+    ]);
+
+    assert_eq!(value["data"]["request"]["body"]["force_ai"], true);
+}
+
+#[test]
 fn doctor_snapshots_match_golden() {
     let pass = run_json(&["--base-url", "http://localhost:8000", "doctor", "--offline"]);
     assert_golden("doctor_pass.json", pass);
@@ -409,6 +462,9 @@ fn admin_status_posts_to_agent_status_endpoint() {
     let output = cli()
         .args(["--base-url", &base_url, "admin", "status"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "admin:read")
@@ -430,6 +486,9 @@ fn admin_status_prechecks_missing_scope() {
     let output = cli()
         .args(["--base-url", "http://localhost:8000", "admin", "status"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
         .output()
@@ -490,6 +549,9 @@ fn requirements_options_uses_agent_options_endpoint() {
     let output = cli()
         .args(["--base-url", &base_url, "requirements", "options"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
@@ -512,6 +574,9 @@ fn requirements_options_rejects_backend_response_schema_mismatch() {
     let output = cli()
         .args(["--base-url", &base_url, "requirements", "options"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
@@ -543,6 +608,9 @@ fn explicit_request_id_is_sent_to_backend() {
             "options",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
@@ -575,6 +643,9 @@ fn doctor_strict_fails_when_checks_fail() {
     let output = cli()
         .args(["doctor", "--offline", "--strict"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("strict doctor");
@@ -602,6 +673,9 @@ fn config_show_redacts_token() {
             "http://localhost:8000",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", config_dir)
         .output()
         .expect("set profile");
@@ -622,6 +696,9 @@ fn config_show_redacts_token() {
             "secret-token",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", config_dir)
         .output()
         .expect("set token");
@@ -635,6 +712,9 @@ fn config_show_redacts_token() {
     let output = cli()
         .args(["config", "show", "--profile", "dev"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", config_dir)
         .output()
         .expect("show profile");
@@ -689,8 +769,8 @@ fn auth_status_reports_env_overrides_without_secrets() {
 #[test]
 fn auth_login_wait_saves_agent_token_and_scopes() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-1","user_code":"ABCD-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=ABCD-1234","qr_code_text":"http://auth/verify?user_code=ABCD-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-1","status":"approved","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":"hat_test","token_type":"agent","scopes":["requirements:parse"]}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-1","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes-agent","user_code":"ABCD-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=ABCD-1234","qr_code_text":"http://auth/verify?user_code=ABCD-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-1","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes-agent","status":"approved","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":"hat_test","token_type":"agent","scopes":["requirements:parse"]}}"#,
     ]);
     let config_dir = tempfile::tempdir().unwrap();
     let output = cli()
@@ -704,6 +784,9 @@ fn auth_login_wait_saves_agent_token_and_scopes() {
             "--wait",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
         .output()
         .expect("auth login wait");
@@ -726,13 +809,80 @@ fn auth_login_wait_saves_agent_token_and_scopes() {
 }
 
 #[test]
+fn auth_login_wait_times_out_with_auth_error() {
+    let base_url = mock_public_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-timeout","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes-agent","user_code":"TIME-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=TIME-1234","qr_code_text":"http://auth/verify?user_code=TIME-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-timeout","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes-agent","status":"pending","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":null,"token_type":null,"scopes":[]}}"#,
+    ]);
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "auth",
+            "login",
+            "--scope",
+            "requirements:parse",
+            "--wait",
+            "--poll-limit",
+            "1",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .output()
+        .expect("auth login wait timeout");
+    assert_eq!(output.status.code(), Some(3));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["error"]["type"], "auth");
+    assert_eq!(value["error"]["code"], "AUTH_SESSION_TIMEOUT");
+    assert_eq!(value["error"]["detail"]["status"], "pending");
+}
+
+#[test]
+fn auth_login_wait_rejects_terminal_non_pending_status() {
+    let base_url = mock_public_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-denied","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes-agent","user_code":"NOPE-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=NOPE-1234","qr_code_text":"http://auth/verify?user_code=NOPE-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-denied","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes-agent","status":"denied","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":null,"token_type":null,"scopes":[]}}"#,
+    ]);
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "auth",
+            "login",
+            "--scope",
+            "requirements:parse",
+            "--wait",
+            "--poll-limit",
+            "2",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .output()
+        .expect("auth login wait denied");
+    assert_eq!(output.status.code(), Some(3));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["error"]["type"], "auth");
+    assert_eq!(value["error"]["code"], "AUTH_SESSION_DENIED");
+    assert_eq!(value["error"]["detail"]["status"], "denied");
+}
+
+#[test]
 fn missing_scope_with_token_returns_auth_required_link() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-2","user_code":"EFGH-5678","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=EFGH-5678","qr_code_text":"http://auth/verify?user_code=EFGH-5678","required_scopes":["admin:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":2}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-2","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes-agent","user_code":"EFGH-5678","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=EFGH-5678","qr_code_text":"http://auth/verify?user_code=EFGH-5678","required_scopes":["admin:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":2}}"#,
     ]);
     let output = cli()
         .args(["--base-url", &base_url, "admin", "status"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "hat_limited")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
@@ -795,6 +945,18 @@ fn auth_check_scope_uses_local_precheck() {
 }
 
 #[test]
+fn auth_check_scope_accepts_wildcard_scope() {
+    let value = run_json_expect_code(
+        &["auth", "check", "--scope", "requirements:parse claw:read"],
+        &[("HYACINTHUS_AGENT_SCOPES", "*")],
+        0,
+    );
+
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["data"]["checked_scopes"].as_array().unwrap().len(), 2);
+}
+
+#[test]
 fn auth_check_scope_reports_missing_scope() {
     let value = run_json_expect_code(
         &[
@@ -819,6 +981,9 @@ fn completion_does_not_emit_json_envelope() {
     let output = cli()
         .args(["completion", "bash"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .output()
         .expect("completion");
     assert!(
@@ -837,6 +1002,9 @@ fn notice_can_be_emitted_and_suppressed() {
     let output = cli()
         .args(["capability", "list"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_CLI_LATEST_VERSION", "0.2.0")
         .output()
@@ -853,6 +1021,9 @@ fn notice_can_be_emitted_and_suppressed() {
     let output = cli()
         .args(["--no-notice", "capability", "list"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_CLI_LATEST_VERSION", "0.2.0")
         .output()
@@ -879,6 +1050,9 @@ fn raw_api_is_disabled_by_default() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("raw api");
@@ -903,6 +1077,9 @@ fn requirements_import_prechecks_missing_scope() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
         .output()
@@ -932,6 +1109,9 @@ fn profile_scopes_are_used_for_precheck() {
             "requirements:parse,requirements:write",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", dir.path())
         .output()
         .expect("set scoped profile");
@@ -951,6 +1131,9 @@ fn profile_scopes_are_used_for_precheck() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", dir.path())
         .output()
         .expect("scoped import dry-run");
@@ -965,6 +1148,268 @@ fn profile_scopes_are_used_for_precheck() {
 }
 
 #[test]
+fn wildcard_profile_scope_allows_precheck() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = cli()
+        .args([
+            "config",
+            "set-profile",
+            "dev",
+            "--base-url",
+            "http://localhost:8000",
+            "--default-instance-id",
+            "1",
+            "--scopes",
+            "*",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("set wildcard profile");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = cli()
+        .args([
+            "--profile",
+            "dev",
+            "auth",
+            "check",
+            "--scope",
+            "requirements:parse admin:read",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("wildcard profile precheck");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn set_profile_preserves_existing_fields_when_not_explicitly_overridden() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = cli()
+        .args([
+            "config",
+            "set-profile",
+            "dev",
+            "--base-url",
+            "http://localhost:8000",
+            "--default-instance-id",
+            "7",
+            "--default-format",
+            "table",
+            "--scopes",
+            "requirements:parse,requirements:write",
+            "--raw-api-enabled",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("initial set-profile");
+    assert!(first.status.success());
+
+    let second = cli()
+        .args([
+            "config",
+            "set-profile",
+            "dev",
+            "--base-url",
+            "http://localhost:9000",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("incremental set-profile");
+    assert!(second.status.success());
+
+    let shown = cli()
+        .args(["--format", "json", "config", "show", "--profile", "dev"])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("show profile");
+    assert!(shown.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&shown.stdout).expect("json stdout");
+    let profile = &value["data"];
+    assert_eq!(profile["base_url"], "http://localhost:9000");
+    assert_eq!(profile["default_instance_id"], 7);
+    assert_eq!(profile["default_format"], "table");
+    assert_eq!(profile["raw_api_enabled"], true);
+    assert_eq!(profile["scopes"][0], "requirements:parse");
+}
+
+#[test]
+fn set_profile_does_not_persist_global_output_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = cli()
+        .args([
+            "config",
+            "set-profile",
+            "dev",
+            "--base-url",
+            "http://localhost:8000",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("initial set-profile");
+    assert!(first.status.success());
+
+    let second = cli()
+        .args([
+            "--format",
+            "table",
+            "config",
+            "set-profile",
+            "dev",
+            "--base-url",
+            "http://localhost:9000",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("set-profile with global format");
+    assert!(second.status.success());
+
+    let shown = cli()
+        .args(["--format", "json", "config", "show", "--profile", "dev"])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("show profile");
+    assert!(shown.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&shown.stdout).expect("json stdout");
+    assert_eq!(value["data"]["default_format"], "json");
+}
+
+#[test]
+fn auth_logout_clears_profile_scopes() {
+    let dir = tempfile::tempdir().unwrap();
+    let set_profile = cli()
+        .args([
+            "config",
+            "set-profile",
+            "dev",
+            "--base-url",
+            "http://localhost:8000",
+            "--scopes",
+            "requirements:parse,requirements:write",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("set profile");
+    assert!(set_profile.status.success());
+
+    let set_token = cli()
+        .args([
+            "config",
+            "set-token",
+            "--profile",
+            "dev",
+            "--token",
+            "hat_test",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("set token");
+    assert!(set_token.status.success());
+
+    let logout = cli()
+        .args(["--profile", "dev", "auth", "logout"])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("auth logout");
+    assert!(logout.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&logout.stdout).expect("json stdout");
+    assert_eq!(value["data"]["scope_count"], 0);
+
+    let scope_check = cli()
+        .args([
+            "--profile",
+            "dev",
+            "auth",
+            "check",
+            "--scope",
+            "requirements:parse",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("scope check after logout");
+    assert_eq!(scope_check.status.code(), Some(2));
+    let scope_value: serde_json::Value =
+        serde_json::from_slice(&scope_check.stdout).expect("json stdout");
+    assert_eq!(scope_value["error"]["type"], "validation");
+}
+
+#[test]
+fn auth_logout_rejects_unknown_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let logout = cli()
+        .args(["--profile", "missing", "auth", "logout"])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("auth logout");
+    assert_eq!(logout.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&logout.stdout).expect("json stdout");
+    assert_eq!(value["error"]["type"], "validation");
+    assert_eq!(value["error"]["message"], "unknown profile: missing");
+}
+
+#[test]
 fn claw_status_uses_agent_status_endpoint() {
     let base_url = mock_once(
         r#"{"code":0,"message":"success","data":{"host":{"provider":"picoclaw","running":true,"status":"running","image":"picoclaw:latest","instance_count":2},"provider_profile_count":1}}"#,
@@ -972,6 +1417,9 @@ fn claw_status_uses_agent_status_endpoint() {
     let output = cli()
         .args(["--base-url", &base_url, "claw", "status"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
@@ -993,6 +1441,9 @@ fn claw_status_prechecks_missing_scope() {
     let output = cli()
         .args(["--base-url", "http://localhost:8000", "claw", "status"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_SCOPES", "admin:read")
         .output()
@@ -1019,6 +1470,9 @@ fn claw_skills_list_uses_agent_endpoint() {
             "builtin",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
@@ -1049,6 +1503,9 @@ fn raw_api_dry_run_appends_params_when_enabled() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_RAW_API", "1")
         .output()
@@ -1079,6 +1536,9 @@ fn raw_api_rejects_paths_outside_api_v1() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_RAW_API", "1")
         .output()
@@ -1112,6 +1572,9 @@ fn raw_api_page_all_collects_backend_pages() {
             "0",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_RAW_API", "1")
@@ -1143,6 +1606,9 @@ fn raw_api_page_all_rejects_non_get() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_RAW_API", "1")
         .output()
@@ -1165,6 +1631,9 @@ fn raw_api_write_requires_yes_for_real_execution() {
             r#"{"name":"demo"}"#,
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_RAW_API", "1")
@@ -1194,6 +1663,9 @@ fn raw_api_write_yes_posts_to_backend() {
             "--yes",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_RAW_API", "1")
@@ -1229,6 +1701,9 @@ fn raw_api_output_writes_success_data() {
         ])
         .arg(&output_path)
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_RAW_API", "1")
@@ -1260,6 +1735,9 @@ fn capability_run_validates_manifest_request_schema() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
         .output()
@@ -1286,6 +1764,9 @@ fn capability_run_write_requires_yes_for_real_execution() {
             r#"{"instance_id":1,"idempotency_key":"write-check","confirmed_rows":[{"requirement_type":"tutoring","title":"高一数学"}]}"#,
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:write")
         .output()
@@ -1317,6 +1798,9 @@ fn capability_run_remote_uses_backend_schema_for_dry_run() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
@@ -1358,6 +1842,9 @@ fn capability_run_remote_executes_backend_schema() {
             "--remote",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
@@ -1392,6 +1879,9 @@ fn capability_run_output_writes_success_data() {
         ])
         .arg(&output_path)
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
@@ -1422,6 +1912,9 @@ fn requirements_parse_data_validates_manifest_request_schema() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
         .output()
@@ -1440,6 +1933,9 @@ fn jq_filters_success_envelope() {
     let output = cli()
         .args(["--jq", ".data.version", "capability", "list"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("jq capability list");
@@ -1458,6 +1954,9 @@ fn table_and_csv_formats_are_tabular() {
     let output = cli()
         .args(["--format", "table", "capability", "list"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("table capability list");
@@ -1474,6 +1973,9 @@ fn table_and_csv_formats_are_tabular() {
     let output = cli()
         .args(["--format", "csv", "capability", "list"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("csv capability list");
@@ -1525,6 +2027,9 @@ fn skills_export_and_check_round_trip() {
         .args(["skills", "export", "--dir"])
         .arg(export_dir.path())
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
         .output()
         .expect("skills export");
@@ -1546,6 +2051,9 @@ fn skills_export_and_check_round_trip() {
         .args(["skills", "check", "--dir"])
         .arg(export_dir.path())
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
         .output()
         .expect("skills check");
@@ -1567,6 +2075,9 @@ fn skills_check_reports_missing_files() {
         .args(["skills", "check", "--dir"])
         .arg(missing_dir.path())
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
         .output()
         .expect("skills check missing");
@@ -1603,6 +2114,9 @@ fn import_parse_output_blocks_confirmation_rows_without_yes() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("import confirmation rows");
@@ -1625,6 +2139,9 @@ fn requirements_import_real_execution_requires_yes() {
             r#"[{"requirement_type":"tutoring","title":"高一数学"}]"#,
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:write")
         .output()
@@ -1658,6 +2175,9 @@ fn requirements_import_yes_posts_to_backend() {
             "--yes",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:write")
@@ -1689,6 +2209,9 @@ fn import_dry_run_reports_idempotency_key() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("import dry run");
@@ -1722,6 +2245,9 @@ fn requirements_import_reads_file_dash_from_stdin() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1766,6 +2292,9 @@ fn content_safety_alert_is_emitted_for_prompt_injection_text() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("content safety dry-run");
@@ -1792,6 +2321,9 @@ fn remote_capability_list_uses_backend() {
     let output = cli()
         .args(["--base-url", &base_url, "capability", "list", "--remote"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .output()
@@ -1820,6 +2352,9 @@ fn capability_diff_remote_reports_manifest_drift() {
     let output = cli()
         .args(["--base-url", &base_url, "capability", "diff", "--remote"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .output()
@@ -1861,6 +2396,9 @@ fn capability_diff_strict_fails_on_manifest_drift() {
             "--strict",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .output()
@@ -1882,6 +2420,9 @@ fn capability_diff_requires_remote() {
     let output = cli()
         .args(["capability", "diff"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("capability diff without remote");
@@ -1899,6 +2440,9 @@ fn backend_unauthorized_maps_to_auth_error() {
     let output = cli()
         .args(["--base-url", &base_url, "capability", "list", "--remote"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .output()
@@ -1918,6 +2462,9 @@ fn backend_server_error_preserves_string_code() {
     let output = cli()
         .args(["--base-url", &base_url, "requirements", "options"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
@@ -1936,6 +2483,9 @@ fn invalid_backend_json_maps_to_api_error() {
     let output = cli()
         .args(["--base-url", &base_url, "requirements", "options"])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
@@ -1971,6 +2521,9 @@ fn capability_run_get_validates_params_against_schema() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
@@ -2007,6 +2560,9 @@ fn capability_run_get_accepts_params_for_schema_validation() {
             "--dry-run",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
@@ -2042,6 +2598,9 @@ fn requirements_parse_posts_to_backend() {
             "高一数学",
         ])
         .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes-agent")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
         .output()

@@ -173,30 +173,51 @@ fn config_command(cli: &Cli, command: &ConfigSubcommand) -> CliResult<(Value, Va
     match command {
         ConfigSubcommand::SetProfile(args) => {
             let base_url = config::normalize_base_url(&args.base_url)?;
+            let existing = config.profiles.get(&args.name).cloned();
             let profile = Profile {
                 name: args.name.clone(),
                 base_url,
-                default_instance_id: args.default_instance_id,
+                client_instance_id: args.client_instance_id.clone().or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|profile| profile.client_instance_id.clone())
+                }),
+                client_display_name: args.client_display_name.clone().or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|profile| profile.client_display_name.clone())
+                }),
+                client_type: args.client_type.clone().or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|profile| profile.client_type.clone())
+                }),
+                default_instance_id: args.default_instance_id.or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|profile| profile.default_instance_id)
+                }),
                 default_format: args
                     .default_format
-                    .or(cli.format)
+                    .or_else(|| existing.as_ref().map(|profile| profile.default_format))
                     .unwrap_or(crate::cli::OutputFormat::Json),
-                token: config
-                    .profiles
-                    .get(&args.name)
-                    .and_then(|profile| profile.token.clone()),
+                token: existing.as_ref().and_then(|profile| profile.token.clone()),
                 scopes: args
                     .scopes
                     .as_deref()
                     .map(config::parse_scope_list)
-                    .or_else(|| {
-                        config
-                            .profiles
-                            .get(&args.name)
-                            .map(|profile| profile.scopes.clone())
-                    })
+                    .or_else(|| existing.as_ref().map(|profile| profile.scopes.clone()))
                     .unwrap_or_default(),
-                raw_api_enabled: args.raw_api_enabled,
+                raw_api_enabled: if args.raw_api_enabled {
+                    true
+                } else if args.no_raw_api_enabled {
+                    false
+                } else {
+                    existing
+                        .as_ref()
+                        .map(|profile| profile.raw_api_enabled)
+                        .unwrap_or(false)
+                },
             };
             config.profiles.insert(args.name.clone(), profile);
             if config.active_profile.is_none() {
@@ -303,6 +324,9 @@ fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)
                     "profile": ctx.profile_name,
                     "base_url": ctx.base_url,
                     "base_url_configured": ctx.base_url.is_some(),
+                    "client_instance_id": ctx.client_instance_id,
+                    "client_display_name": ctx.client_display_name,
+                    "client_type": ctx.client_type,
                     "token_present": ctx.token_present,
                     "token_source": ctx.token_source,
                     "scope_count": ctx.scopes.as_ref().map(Vec::len),
@@ -369,12 +393,15 @@ fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)
                 .clone()
                 .or(config.active_profile.clone())
                 .ok_or_else(|| CliError::validation("no profile selected"))?;
-            if let Some(profile) = config.profiles.get_mut(&profile_name) {
-                profile.token = None;
-            }
+            let profile = config
+                .profiles
+                .get_mut(&profile_name)
+                .ok_or_else(|| CliError::validation(format!("unknown profile: {profile_name}")))?;
+            profile.token = None;
+            profile.scopes.clear();
             config::save_config(&config)?;
             Ok((
-                json!({ "profile": profile_name, "token_present": false }),
+                json!({ "profile": profile_name, "token_present": false, "scope_count": 0 }),
                 json!({ "command": "auth logout" }),
             ))
         }
@@ -382,25 +409,28 @@ fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)
 }
 
 fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<(Value, Value)> {
-    let ctx = config::resolve_auth_status_context(
+    let ctx = config::resolve_context(
         cli.profile.as_deref(),
         cli.base_url.as_deref(),
         cli.instance_id,
         cli.request_id.as_deref(),
     )?;
-    let base_url = ctx
-        .base_url
-        .ok_or_else(|| CliError::validation("base_url is not configured"))?;
     let requested_scopes = args
         .scope
         .as_deref()
         .map(config::parse_scope_list)
         .unwrap_or_default();
-    let session = client::create_auth_session(&base_url, &requested_scopes, &args.client_name)?;
+    let session = client::create_auth_session(
+        &ctx.base_url,
+        &requested_scopes,
+        &ctx.client_instance_id,
+        &ctx.client_display_name,
+        &ctx.client_type,
+    )?;
     let mut status = None;
     if args.wait {
         for _ in 0..args.poll_limit {
-            let current = client::get_auth_session(&base_url, &session.session_id)?;
+            let current = client::get_auth_session(&ctx.base_url, &session.session_id)?;
             if current.status == "approved" {
                 let token = current.access_token.clone().ok_or_else(|| {
                     CliError::api(
@@ -411,7 +441,10 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
                 })?;
                 config::save_agent_credentials(
                     &ctx.profile_name,
-                    &base_url,
+                    &ctx.base_url,
+                    &ctx.client_instance_id,
+                    &ctx.client_display_name,
+                    &ctx.client_type,
                     token,
                     current.scopes.clone(),
                 )?;
@@ -419,12 +452,34 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
                 break;
             }
             if current.status != "pending" {
-                status = Some(current);
-                break;
+                return Err(auth_session_error(
+                    &session,
+                    &current.status,
+                    current.scopes.clone(),
+                ));
             }
             if current.poll_interval_seconds > 0 {
                 thread::sleep(Duration::from_secs(current.poll_interval_seconds));
             }
+        }
+        if status.is_none() {
+            return Err(output::CliError::auth_flow(
+                "AUTH_SESSION_TIMEOUT",
+                "authorization approval timed out",
+                json!({
+                    "session_id": session.session_id,
+                    "status": "pending",
+                    "authorize_url": session.authorize_url,
+                    "qr_code_text": session.qr_code_text,
+                    "user_code": session.user_code,
+                    "verification_uri": session.verification_uri,
+                    "required_scopes": session.required_scopes,
+                    "expires_at": session.expires_at,
+                    "expires_in_seconds": session.expires_in_seconds,
+                    "poll_interval_seconds": session.poll_interval_seconds
+                }),
+                true,
+            ));
         }
     }
     let data = if let Some(status) = status {
@@ -457,9 +512,37 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
         data,
         json!({
             "command": command_name,
-            "profile": ctx.profile_name
+            "profile": ctx.profile_name,
+            "client_instance_id": ctx.client_instance_id
         }),
     ))
+}
+
+/// Convert a terminal auth session status into a structured CLI auth error.
+fn auth_session_error(
+    session: &client::AuthSessionCreated,
+    status: &str,
+    scopes: Vec<String>,
+) -> CliError {
+    let normalized = status.trim().to_ascii_uppercase();
+    output::CliError::auth_flow(
+        format!("AUTH_SESSION_{normalized}"),
+        format!("authorization session ended with status: {status}"),
+        json!({
+            "session_id": session.session_id,
+            "status": status,
+            "authorize_url": session.authorize_url,
+            "qr_code_text": session.qr_code_text,
+            "user_code": session.user_code,
+            "verification_uri": session.verification_uri,
+            "required_scopes": session.required_scopes,
+            "expires_at": session.expires_at,
+            "expires_in_seconds": session.expires_in_seconds,
+            "poll_interval_seconds": session.poll_interval_seconds,
+            "scopes": scopes
+        }),
+        false,
+    )
 }
 
 fn auth_scope_check(cli: &Cli, scope: &str) -> CliResult<(Value, Value)> {
@@ -473,11 +556,7 @@ fn auth_scope_check(cli: &Cli, scope: &str) -> CliResult<(Value, Value)> {
             "local agent scopes are not configured; set HYACINTHUS_AGENT_SCOPES or profile scopes",
         ));
     };
-    let missing = required
-        .iter()
-        .filter(|scope| !available.iter().any(|item| item == *scope))
-        .cloned()
-        .collect::<Vec<_>>();
+    let missing = missing_scopes(required.as_slice(), available.as_slice());
     if !missing.is_empty() {
         return Err(CliError::missing_scope(missing, required));
     }
@@ -1169,18 +1248,20 @@ fn ensure_scopes(ctx: &crate::config::RuntimeContext, required: &[String]) -> Cl
     let Some(available) = &ctx.scopes else {
         return Ok(());
     };
-    let missing = required
-        .iter()
-        .filter(|scope| !available.iter().any(|item| item == *scope))
-        .cloned()
-        .collect::<Vec<_>>();
+    let missing = missing_scopes(required, available.as_slice());
     if missing.is_empty() {
         Ok(())
     } else {
         if ctx.token.is_none() {
             return Err(CliError::missing_scope(missing, required.to_vec()));
         }
-        let session = client::create_auth_session(&ctx.base_url, required, "hyacinthus-cli")?;
+        let session = client::create_auth_session(
+            &ctx.base_url,
+            required,
+            &ctx.client_instance_id,
+            &ctx.client_display_name,
+            &ctx.client_type,
+        )?;
         Err(CliError::auth_required(
             format!("authorization required for scope: {}", missing.join(", ")),
             json!({
@@ -1197,6 +1278,17 @@ fn ensure_scopes(ctx: &crate::config::RuntimeContext, required: &[String]) -> Cl
             }),
         ))
     }
+}
+
+fn missing_scopes(required: &[String], available: &[String]) -> Vec<String> {
+    if available.iter().any(|scope| scope == "*") {
+        return Vec::new();
+    }
+    required
+        .iter()
+        .filter(|scope| !available.iter().any(|item| item == *scope))
+        .cloned()
+        .collect::<Vec<_>>()
 }
 
 fn validate_request_payload(

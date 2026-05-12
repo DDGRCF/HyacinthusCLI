@@ -1,16 +1,16 @@
 ---
 name: hyacinthus-shared
 version: 0.1.0
-description: "Hyacinthus CLI shared rules: configuration, auth, doctor, capability schema, output envelopes, dry-run, and high-risk confirmation handling."
+description: "Fengxinzi Tutoring Center Hyacinthus CLI shared rules: configuration, auth, doctor, capability schema, output envelopes, dry-run, and high-risk confirmation handling."
 metadata:
   requires:
     bins: ["hyacinthus"]
   cliHelp: "hyacinthus --help"
 ---
 
-# Hyacinthus CLI Shared Rules
+# Fengxinzi Tutoring Center Hyacinthus CLI Shared Rules
 
-Use this skill whenever an Agent needs to operate Hyacinthus through `hyacinthus`.
+Use this skill whenever an Agent needs to operate Fengxinzi Tutoring Center through `hyacinthus`.
 
 ## First Step
 

@@ -6,9 +6,19 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use uuid::Uuid;
 
 use crate::cli::OutputFormat;
 use crate::output::{CliError, CliResult};
+
+pub const SUPPORTED_CLIENT_TYPES: &[&str] = &[
+    "hermes",
+    "codex",
+    "claude",
+    "picoclaw",
+    "nullclaw",
+    "hyacinthus-cli",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigFile {
@@ -20,6 +30,9 @@ pub struct ConfigFile {
 pub struct Profile {
     pub name: String,
     pub base_url: String,
+    pub client_instance_id: Option<String>,
+    pub client_display_name: Option<String>,
+    pub client_type: Option<String>,
     pub default_instance_id: Option<i64>,
     pub default_format: OutputFormat,
     pub token: Option<String>,
@@ -31,6 +44,9 @@ pub struct Profile {
 pub struct RuntimeContext {
     pub profile_name: String,
     pub base_url: String,
+    pub client_instance_id: String,
+    pub client_display_name: String,
+    pub client_type: String,
     pub instance_id: Option<i64>,
     pub request_id: Option<String>,
     pub token: Option<String>,
@@ -48,6 +64,9 @@ pub struct ScopeContext {
 pub struct AuthStatusContext {
     pub profile_name: String,
     pub base_url: Option<String>,
+    pub client_instance_id: Option<String>,
+    pub client_display_name: Option<String>,
+    pub client_type: Option<String>,
     pub instance_id: Option<i64>,
     pub request_id: Option<String>,
     pub token_present: bool,
@@ -100,6 +119,9 @@ pub fn save_config(config: &ConfigFile) -> CliResult<()> {
 pub fn save_agent_credentials(
     profile_name: &str,
     base_url: &str,
+    client_instance_id: &str,
+    client_display_name: &str,
+    client_type: &str,
     token: String,
     scopes: Vec<String>,
 ) -> CliResult<()> {
@@ -110,6 +132,9 @@ pub fn save_agent_credentials(
         .or_insert_with(|| Profile {
             name: profile_name.to_string(),
             base_url: base_url.to_string(),
+            client_instance_id: Some(client_instance_id.to_string()),
+            client_display_name: Some(client_display_name.to_string()),
+            client_type: Some(client_type.to_string()),
             default_instance_id: None,
             default_format: OutputFormat::Json,
             token: None,
@@ -117,6 +142,9 @@ pub fn save_agent_credentials(
             raw_api_enabled: false,
         });
     profile.base_url = base_url.to_string();
+    profile.client_instance_id = Some(client_instance_id.to_string());
+    profile.client_display_name = Some(client_display_name.to_string());
+    profile.client_type = Some(client_type.to_string());
     profile.token = Some(token);
     profile.scopes = scopes;
     if config.active_profile.is_none() {
@@ -135,31 +163,75 @@ pub fn normalize_base_url(raw: &str) -> CliResult<String> {
     Ok(trimmed.to_string())
 }
 
+fn resolve_client_identity(
+    profile: Option<&Profile>,
+    profile_name: &str,
+) -> CliResult<(String, String, String, bool)> {
+    let inferred_type = infer_client_type(profile_name);
+    let client_instance_id = env::var("HYACINTHUS_CLIENT_INSTANCE_ID")
+        .ok()
+        .or_else(|| profile.and_then(|item| item.client_instance_id.clone()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| generate_client_instance_id(profile_name, &inferred_type));
+    let client_display_name = env::var("HYACINTHUS_CLIENT_DISPLAY_NAME")
+        .ok()
+        .or_else(|| profile.and_then(|item| item.client_display_name.clone()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default_client_display_name(profile_name, &inferred_type));
+    let client_type = env::var("HYACINTHUS_CLIENT_TYPE")
+        .ok()
+        .or_else(|| profile.and_then(|item| item.client_type.clone()))
+        .or(Some(inferred_type))
+        .map(|value| normalize_client_type(&value))
+        .transpose()?
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| CliError::validation("client_type is not configured"))?;
+    let changed = profile.is_none_or(|profile| {
+        profile.client_instance_id.as_deref() != Some(client_instance_id.as_str())
+            || profile.client_display_name.as_deref() != Some(client_display_name.as_str())
+            || profile.client_type.as_deref() != Some(client_type.as_str())
+    });
+    Ok((client_instance_id, client_display_name, client_type, changed))
+}
+
 pub fn resolve_context(
     profile_flag: Option<&str>,
     base_url_flag: Option<&str>,
     instance_id_flag: Option<i64>,
     request_id_flag: Option<&str>,
 ) -> CliResult<RuntimeContext> {
-    let config = load_config()?;
-    let profile_name = profile_flag
-        .map(ToOwned::to_owned)
-        .or_else(|| env::var("HYACINTHUS_PROFILE").ok())
-        .or(config.active_profile.clone())
-        .unwrap_or_else(|| "default".to_string());
-    let profile = config.profiles.get(&profile_name);
+    let mut config = load_config()?;
+    let profile_name = resolve_profile_name(&config, profile_flag);
+    let profile = config.profiles.get(&profile_name).cloned();
+    let (client_instance_id, client_display_name, client_type, identity_changed) =
+        resolve_client_identity(profile, &profile_name)?;
     let base_url = base_url_flag
         .map(ToOwned::to_owned)
         .or_else(|| env::var("HYACINTHUS_BASE_URL").ok())
-        .or_else(|| profile.map(|profile| profile.base_url.clone()))
+        .or_else(|| profile.as_ref().map(|profile| profile.base_url.clone()))
         .ok_or_else(|| CliError::validation("base_url is not configured"))?;
+    let normalized_base_url = normalize_base_url(&base_url)?;
+    if identity_changed {
+        upsert_profile_identity(
+            &mut config,
+            &profile_name,
+            normalized_base_url.clone(),
+            &client_instance_id,
+            &client_display_name,
+            &client_type,
+            profile.as_ref(),
+        );
+        save_config(&config)?;
+    }
     let instance_id = instance_id_flag
         .or_else(|| {
             env::var("HYACINTHUS_INSTANCE_ID")
                 .ok()
                 .and_then(|value| value.parse::<i64>().ok())
         })
-        .or_else(|| profile.and_then(|profile| profile.default_instance_id));
+        .or_else(|| profile.as_ref().and_then(|profile| profile.default_instance_id));
     let request_id = request_id_flag
         .map(ToOwned::to_owned)
         .or_else(|| env::var("HYACINTHUS_REQUEST_ID").ok())
@@ -167,20 +239,21 @@ pub fn resolve_context(
     let env_token = env::var("HYACINTHUS_AGENT_TOKEN").ok();
     let token = if let Some(token) = env_token {
         Some(token)
-    } else if let Some(profile) = profile {
+    } else if let Some(profile) = profile.as_ref() {
         profile.token.clone()
     } else {
         None
     };
     let raw_api_enabled = env::var("HYACINTHUS_RAW_API").ok().as_deref() == Some("1")
         || profile
+            .as_ref()
             .map(|profile| profile.raw_api_enabled)
             .unwrap_or(false);
     let scopes = env::var("HYACINTHUS_AGENT_SCOPES")
         .ok()
         .map(|value| parse_scope_list(&value))
         .or_else(|| {
-            profile.and_then(|profile| {
+            profile.as_ref().and_then(|profile| {
                 if profile.scopes.is_empty() {
                     None
                 } else {
@@ -190,7 +263,10 @@ pub fn resolve_context(
         });
     Ok(RuntimeContext {
         profile_name,
-        base_url: normalize_base_url(&base_url)?,
+        base_url: normalized_base_url,
+        client_instance_id,
+        client_display_name,
+        client_type,
         instance_id,
         request_id,
         token,
@@ -201,11 +277,7 @@ pub fn resolve_context(
 
 pub fn resolve_scope_context(profile_flag: Option<&str>) -> CliResult<ScopeContext> {
     let config = load_config()?;
-    let profile_name = profile_flag
-        .map(ToOwned::to_owned)
-        .or_else(|| env::var("HYACINTHUS_PROFILE").ok())
-        .or(config.active_profile.clone())
-        .unwrap_or_else(|| "default".to_string());
+    let profile_name = resolve_profile_name(&config, profile_flag);
     let profile = config.profiles.get(&profile_name);
     let scopes = env::var("HYACINTHUS_AGENT_SCOPES")
         .ok()
@@ -232,12 +304,25 @@ pub fn resolve_auth_status_context(
     request_id_flag: Option<&str>,
 ) -> CliResult<AuthStatusContext> {
     let config = load_config()?;
-    let profile_name = profile_flag
-        .map(ToOwned::to_owned)
-        .or_else(|| env::var("HYACINTHUS_PROFILE").ok())
-        .or(config.active_profile.clone())
-        .unwrap_or_else(|| "default".to_string());
+    let profile_name = resolve_profile_name(&config, profile_flag);
     let profile = config.profiles.get(&profile_name);
+    let client_instance_id = env::var("HYACINTHUS_CLIENT_INSTANCE_ID")
+        .ok()
+        .or_else(|| profile.and_then(|item| item.client_instance_id.clone()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let client_display_name = env::var("HYACINTHUS_CLIENT_DISPLAY_NAME")
+        .ok()
+        .or_else(|| profile.and_then(|item| item.client_display_name.clone()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let client_type = env::var("HYACINTHUS_CLIENT_TYPE")
+        .ok()
+        .or_else(|| profile.and_then(|item| item.client_type.clone()))
+        .or_else(|| Some(infer_client_type(&profile_name)))
+        .map(|value| normalize_client_type(&value))
+        .transpose()?
+        .filter(|value| !value.is_empty());
     let base_url = base_url_flag
         .map(ToOwned::to_owned)
         .or_else(|| env::var("HYACINTHUS_BASE_URL").ok())
@@ -285,6 +370,9 @@ pub fn resolve_auth_status_context(
     Ok(AuthStatusContext {
         profile_name,
         base_url,
+        client_instance_id,
+        client_display_name,
+        client_type,
         instance_id,
         request_id,
         token_present,

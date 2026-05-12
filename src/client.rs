@@ -1,3 +1,4 @@
+// 改动说明：Agent 授权会话客户端升级为实例级授权模型并携带实例头。
 use std::time::Duration;
 
 use reqwest::blocking::Client;
@@ -17,6 +18,9 @@ pub struct ApiClient {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthSessionCreated {
     pub session_id: String,
+    pub client_instance_id: String,
+    pub client_display_name: String,
+    pub client_type: String,
     pub user_code: String,
     pub verification_uri: String,
     pub authorize_url: String,
@@ -30,6 +34,9 @@ pub struct AuthSessionCreated {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthSessionStatus {
     pub session_id: String,
+    pub client_instance_id: String,
+    pub client_display_name: String,
+    pub client_type: String,
     pub status: String,
     pub required_scopes: Vec<String>,
     pub expires_at: String,
@@ -85,6 +92,8 @@ impl ApiClient {
             }
         }
         .header("X-Agent-Key", token)
+        .header("X-Agent-Client-Instance", &self.context.client_instance_id)
+        .header("X-Agent-Client-Type", &self.context.client_type)
         .header("X-Request-ID", request_id)
         .header(
             "User-Agent",
@@ -134,11 +143,15 @@ impl ApiClient {
 pub fn create_auth_session(
     base_url: &str,
     scopes: &[String],
-    client_name: &str,
+    client_instance_id: &str,
+    client_display_name: &str,
+    client_type: &str,
 ) -> CliResult<AuthSessionCreated> {
     let body = json!({
         "scopes": scopes,
-        "client_name": client_name
+        "client_instance_id": client_instance_id,
+        "client_display_name": client_display_name,
+        "client_type": client_type
     });
     public_request(base_url, "POST", "/api/v1/agent/auth/sessions", Some(body))
 }

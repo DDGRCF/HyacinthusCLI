@@ -27,7 +27,7 @@
           "type": "boolean"
         },
         "force_ai": {
-          "default": true,
+          "default": false,
           "description": "是否强制使用 AI 解析。",
           "type": "boolean"
         },

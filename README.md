@@ -1,6 +1,6 @@
 # Hyacinthus CLI
 
-Agent-oriented CLI for Hyacinthus backend operations. The CLI is designed for OpenClaw, Codex, Claude Code, and internal operators that need a stable, structured, auditable command surface.
+Agent-oriented CLI for Fengxinzi Tutoring Center backend operations. The CLI is designed for OpenClaw, Codex, Claude Code, and internal operators that need a stable, structured, auditable command surface.
 
 ## Principles
 
@@ -110,6 +110,7 @@ JSON filtering supports deterministic dot paths and array expansion:
 ```bash
 hyacinthus capability list --jq '.data.capabilities[]'
 hyacinthus requirements parse --text "高一数学" --instance-id 1 --dry-run -q '.data.request.body'
+hyacinthus requirements parse --text "高一数学" --instance-id 1 --dry-run --force-ai
 hyacinthus --request-id trace-123 requirements parse --text "高一数学" --instance-id 1 --dry-run
 ```
 
@@ -133,12 +134,12 @@ Raw API paths must start with `/api/v1/`.
 Interactive Agent authorization is supported for hermes-agent, Claw, and other automation clients:
 
 ```bash
-hyacinthus auth login --scope requirements:parse --client-name hermes-agent
-hyacinthus auth login --scope requirements:parse --client-name hermes-agent --wait
+HYACINTHUS_CLIENT_INSTANCE_ID=hermes-wechat-a HYACINTHUS_CLIENT_DISPLAY_NAME="Hermes WeChat A" HYACINTHUS_CLIENT_TYPE=hermes-agent hyacinthus auth login --scope requirements:parse
+HYACINTHUS_CLIENT_INSTANCE_ID=hermes-wechat-a HYACINTHUS_CLIENT_DISPLAY_NAME="Hermes WeChat A" HYACINTHUS_CLIENT_TYPE=hermes-agent hyacinthus auth login --scope requirements:parse --wait
 hyacinthus auth grant --scope "requirements:parse requirements:write" --wait
 ```
 
-`auth login` creates a backend authorization session and prints `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. Agents should send the URL or QR text to the user. With `--wait`, the CLI polls until approval and saves the issued Agent token plus scopes into the selected profile.
+`auth login` creates a backend authorization session and prints `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. Agents should send the URL or QR text to the user. With `--wait`, the CLI polls until approval and saves the issued Agent token plus scopes into the selected profile. If approval times out or the backend returns a terminal non-`pending` status, the command exits non-zero with a structured auth error envelope.
 
 Commands that return backend data can write the successful `data` payload to a file:
 
@@ -157,6 +158,8 @@ hyacinthus config set-profile dev --base-url http://localhost:8000 --scopes requ
 hyacinthus auth scopes --domain requirements
 hyacinthus auth check --scope "requirements:parse requirements:write"
 ```
+
+`config set-profile` is incremental for existing profiles: unspecified fields keep their current values. `auth logout` clears both the saved token and saved local scopes for the selected profile.
 
 ## Agent Skills
 

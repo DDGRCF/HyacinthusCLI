@@ -1,19 +1,26 @@
 ---
 name: hyacinthus-hermes-agent
-description: Use Hyacinthus CLI from Hermes Agent, including link/QR authorization handoff.
+description: Use the Fengxinzi Tutoring Center Hyacinthus CLI from Hermes Agent, including link/QR authorization handoff.
 ---
 
-# Hyacinthus CLI for Hermes Agent
+# Fengxinzi Tutoring Center Hyacinthus CLI for Hermes Agent
 
-Use this skill when Hermes Agent needs to operate Hyacinthus through the `hyacinthus` CLI.
+Use this skill when Hermes Agent needs to operate Fengxinzi Tutoring Center through the `hyacinthus` CLI.
 
 ## Authorization
 
-1. Prefer an existing configured profile:
+1. Prefer an existing configured profile dedicated to this Hermes instance:
 
 ```bash
-hyacinthus auth status
+hyacinthus --profile <instance-profile> auth status
 ```
+
+Each Hermes instance must use its own `hyacinthus` profile plus instance identity:
+
+- `HYACINTHUS_PROFILE`
+- `HYACINTHUS_CLIENT_INSTANCE_ID`
+- `HYACINTHUS_CLIENT_DISPLAY_NAME`
+- `HYACINTHUS_CLIENT_TYPE=hermes-agent`
 
 2. If the profile has no token or the requested command returns `AUTH_REQUIRED`, forward these fields to the user:
 
@@ -28,10 +35,12 @@ hyacinthus auth status
 4. Poll and save credentials:
 
 ```bash
-hyacinthus auth login --scope "<required scopes>" --client-name hermes-agent --wait
+hyacinthus --profile <instance-profile> auth login --scope "<required scopes>" --wait
 ```
 
 5. Retry the original command only after `token_saved` is true.
+
+Never reuse the same `hyacinthus` profile across different Hermes instances.
 
 ## Scope Rules
 
@@ -44,7 +53,7 @@ Do not ask the user to paste raw tokens. Use the authorization URL/QR handoff.
 
 ## Output Rules
 
-Hyacinthus CLI returns JSON envelopes by default. Inspect:
+The Fengxinzi Tutoring Center Hyacinthus CLI returns JSON envelopes by default. Inspect:
 
 - `ok`
 - `data`

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[command(
     name = "hyacinthus",
     version,
-    about = "Agent-oriented CLI for Hyacinthus"
+    about = "Agent-oriented CLI for Fengxinzi Tutoring Center"
 )]
 pub struct Cli {
     #[arg(long, global = true)]
@@ -108,6 +108,12 @@ pub struct SetProfileArgs {
     #[arg(long)]
     pub base_url: String,
     #[arg(long)]
+    pub client_instance_id: Option<String>,
+    #[arg(long)]
+    pub client_display_name: Option<String>,
+    #[arg(long)]
+    pub client_type: Option<String>,
+    #[arg(long)]
     pub default_instance_id: Option<i64>,
     #[arg(long, value_enum)]
     pub default_format: Option<OutputFormat>,
@@ -115,6 +121,8 @@ pub struct SetProfileArgs {
     pub scopes: Option<String>,
     #[arg(long, default_value_t = false)]
     pub raw_api_enabled: bool,
+    #[arg(long = "no-raw-api-enabled", default_value_t = false)]
+    pub no_raw_api_enabled: bool,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -158,8 +166,6 @@ pub enum AuthSubcommand {
 pub struct AuthLoginArgs {
     #[arg(long)]
     pub scope: Option<String>,
-    #[arg(long, default_value = "hyacinthus-cli")]
-    pub client_name: String,
     #[arg(long)]
     pub wait: bool,
     #[arg(long, default_value_t = 30)]
@@ -317,7 +323,7 @@ pub struct RequirementsParseArgs {
     pub subject_group_aliases_json: Option<String>,
     #[arg(long)]
     pub priority_rules_json: Option<String>,
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = false)]
     pub force_ai: bool,
     #[arg(long = "no-force-ai", default_value_t = false)]
     pub no_force_ai: bool,

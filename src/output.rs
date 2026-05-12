@@ -129,6 +129,28 @@ impl CliError {
         }
     }
 
+    /// Build a structured auth error for interactive authorization handoff failures.
+    pub fn auth_flow(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        detail: Value,
+        retryable: bool,
+    ) -> Self {
+        Self {
+            exit_code: EXIT_AUTH,
+            error_type: "auth",
+            code: Some(code.into()),
+            message: message.into(),
+            hint: Some(
+                "open authorize_url or send qr_code_text to the user, then retry auth login --wait"
+                    .to_string(),
+            ),
+            detail: Some(detail),
+            risk: None,
+            retryable,
+        }
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self {
             exit_code: EXIT_INTERNAL,

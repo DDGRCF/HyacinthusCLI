@@ -54,7 +54,7 @@ pub fn list() -> Vec<Skill> {
     vec![
         Skill {
             name: "hyacinthus-shared",
-            description: "Shared Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+            description: "Shared Fengxinzi Tutoring Center Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
             path: "skills/hyacinthus-shared/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: None,
@@ -68,7 +68,7 @@ pub fn list() -> Vec<Skill> {
         },
         Skill {
             name: "hyacinthus-hermes-agent",
-            description: "Hermes Agent handoff rules for Hyacinthus CLI link and QR authorization.",
+            description: "Hermes Agent handoff rules for Fengxinzi Tutoring Center Hyacinthus CLI link and QR authorization.",
             path: "skills/hyacinthus-hermes-agent/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: None,
@@ -171,7 +171,7 @@ pub fn show(name: &str) -> CliResult<Skill> {
     match name {
         "hyacinthus-shared" => Ok(Skill {
             name: "hyacinthus-shared",
-            description: "Shared Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+            description: "Shared Fengxinzi Tutoring Center Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
             path: "skills/hyacinthus-shared/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(SHARED_SKILL),
@@ -185,7 +185,7 @@ pub fn show(name: &str) -> CliResult<Skill> {
         }),
         "hyacinthus-hermes-agent" => Ok(Skill {
             name: "hyacinthus-hermes-agent",
-            description: "Hermes Agent handoff rules for Hyacinthus CLI link and QR authorization.",
+            description: "Hermes Agent handoff rules for Fengxinzi Tutoring Center Hyacinthus CLI link and QR authorization.",
             path: "skills/hyacinthus-hermes-agent/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(HERMES_AGENT_SKILL),
@@ -198,7 +198,7 @@ fn full_skills() -> Vec<Skill> {
     vec![
         Skill {
             name: "hyacinthus-shared",
-            description: "Shared Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+            description: "Shared Fengxinzi Tutoring Center Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
             path: "skills/hyacinthus-shared/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(SHARED_SKILL),
@@ -212,7 +212,7 @@ fn full_skills() -> Vec<Skill> {
         },
         Skill {
             name: "hyacinthus-hermes-agent",
-            description: "Hermes Agent handoff rules for Hyacinthus CLI link and QR authorization.",
+            description: "Hermes Agent handoff rules for Fengxinzi Tutoring Center Hyacinthus CLI link and QR authorization.",
             path: "skills/hyacinthus-hermes-agent/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(HERMES_AGENT_SKILL),

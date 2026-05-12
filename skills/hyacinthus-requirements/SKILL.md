@@ -1,16 +1,16 @@
 ---
 name: hyacinthus-requirements
 version: 0.1.0
-description: "Hyacinthus requirements workflows: parse raw tutoring demand text and import confirmed rows through hyacinthus requirements parse/import."
+description: "Fengxinzi Tutoring Center requirements workflows: parse raw tutoring demand text and import confirmed rows through hyacinthus requirements parse/import."
 metadata:
   requires:
     bins: ["hyacinthus"]
   cliHelp: "hyacinthus requirements --help"
 ---
 
-# Hyacinthus Requirements
+# Fengxinzi Tutoring Center Requirements
 
-Use this skill when the user wants to parse, clean, confirm, or import tutoring demand records into Hyacinthus.
+Use this skill when the user wants to parse, clean, confirm, or import tutoring demand records into Fengxinzi Tutoring Center.
 
 Read `../hyacinthus-shared/SKILL.md` first for auth, doctor, dry-run, and error handling.
 
