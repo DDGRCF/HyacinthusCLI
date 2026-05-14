@@ -10,12 +10,12 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::cli::{
-    AdminSubcommand, AuthLoginArgs, AuthSubcommand, CapabilitySubcommand, ClawSkillsSubcommand,
-    ClawSubcommand, Cli, Command, ConfigSubcommand, RequirementsImportArgs, RequirementsParseArgs,
-    RequirementsSubcommand,
+    AdminSubcommand, AuthLoginArgs, AuthSubcommand, AuthWaitArgs, CapabilitySubcommand,
+    ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand, RequirementsImportArgs,
+    RequirementsParseArgs, RequirementsSubcommand,
 };
 use crate::client::{self, ApiClient};
-use crate::config::{self, Profile};
+use crate::config::{self, Profile, RuntimeContext};
 use crate::manifest;
 use crate::output::{self, CliError, CliResult};
 use crate::pagination;
@@ -174,24 +174,20 @@ fn config_command(cli: &Cli, command: &ConfigSubcommand) -> CliResult<(Value, Va
         ConfigSubcommand::SetProfile(args) => {
             let base_url = config::normalize_base_url(&args.base_url)?;
             let existing = config.profiles.get(&args.name).cloned();
+            let (client_instance_id, client_display_name, client_type) =
+                config::complete_profile_identity(
+                    &args.name,
+                    args.client_instance_id.clone(),
+                    args.client_display_name.clone(),
+                    args.client_type.clone(),
+                    existing.as_ref(),
+                )?;
             let profile = Profile {
                 name: args.name.clone(),
                 base_url,
-                client_instance_id: args.client_instance_id.clone().or_else(|| {
-                    existing
-                        .as_ref()
-                        .and_then(|profile| profile.client_instance_id.clone())
-                }),
-                client_display_name: args.client_display_name.clone().or_else(|| {
-                    existing
-                        .as_ref()
-                        .and_then(|profile| profile.client_display_name.clone())
-                }),
-                client_type: args.client_type.clone().or_else(|| {
-                    existing
-                        .as_ref()
-                        .and_then(|profile| profile.client_type.clone())
-                }),
+                client_instance_id: Some(client_instance_id),
+                client_display_name: Some(client_display_name),
+                client_type: Some(client_type),
                 default_instance_id: args.default_instance_id.or_else(|| {
                     existing
                         .as_ref()
@@ -339,6 +335,7 @@ fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)
         }
         AuthSubcommand::Login(args) => auth_login(cli, args, "auth login"),
         AuthSubcommand::Grant(args) => auth_login(cli, args, "auth grant"),
+        AuthSubcommand::Wait(args) => auth_wait(cli, args),
         AuthSubcommand::Check(args) => {
             if let Some(scope) = args.scope.as_deref() {
                 return auth_scope_check(cli, scope);
@@ -429,58 +426,12 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
     )?;
     let mut status = None;
     if args.wait {
-        for _ in 0..args.poll_limit {
-            let current = client::get_auth_session(&ctx.base_url, &session.session_id)?;
-            if current.status == "approved" {
-                let token = current.access_token.clone().ok_or_else(|| {
-                    CliError::api(
-                        "approved auth session did not return access_token",
-                        None,
-                        None,
-                    )
-                })?;
-                config::save_agent_credentials(
-                    &ctx.profile_name,
-                    &ctx.base_url,
-                    &ctx.client_instance_id,
-                    &ctx.client_display_name,
-                    &ctx.client_type,
-                    token,
-                    current.scopes.clone(),
-                )?;
-                status = Some(current);
-                break;
-            }
-            if current.status != "pending" {
-                return Err(auth_session_error(
-                    &session,
-                    &current.status,
-                    current.scopes.clone(),
-                ));
-            }
-            if current.poll_interval_seconds > 0 {
-                thread::sleep(Duration::from_secs(current.poll_interval_seconds));
-            }
-        }
-        if status.is_none() {
-            return Err(output::CliError::auth_flow(
-                "AUTH_SESSION_TIMEOUT",
-                "authorization approval timed out",
-                json!({
-                    "session_id": session.session_id,
-                    "status": "pending",
-                    "authorize_url": session.authorize_url,
-                    "qr_code_text": session.qr_code_text,
-                    "user_code": session.user_code,
-                    "verification_uri": session.verification_uri,
-                    "required_scopes": session.required_scopes,
-                    "expires_at": session.expires_at,
-                    "expires_in_seconds": session.expires_in_seconds,
-                    "poll_interval_seconds": session.poll_interval_seconds
-                }),
-                true,
-            ));
-        }
+        status = Some(wait_for_auth_session(
+            &ctx,
+            &session.session_id,
+            args.poll_limit,
+            Some(&session),
+        )?);
     }
     let data = if let Some(status) = status {
         json!({
@@ -518,19 +469,176 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
     ))
 }
 
+fn auth_wait(cli: &Cli, args: &AuthWaitArgs) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        cli.instance_id,
+        cli.request_id.as_deref(),
+    )?;
+    let status = wait_for_auth_session(&ctx, &args.session_id, args.poll_limit, None)?;
+    Ok((
+        json!({
+            "session_id": status.session_id,
+            "status": status.status,
+            "required_scopes": status.required_scopes,
+            "token_saved": status.access_token.is_some(),
+            "scopes": status.scopes
+        }),
+        json!({
+            "command": "auth wait",
+            "profile": ctx.profile_name,
+            "client_instance_id": ctx.client_instance_id
+        }),
+    ))
+}
+
+/// Poll an existing authorization session and save its token once approved.
+fn wait_for_auth_session(
+    ctx: &RuntimeContext,
+    session_id: &str,
+    poll_limit: u64,
+    created: Option<&client::AuthSessionCreated>,
+) -> CliResult<client::AuthSessionStatus> {
+    let mut last_status = None;
+    for _ in 0..poll_limit {
+        let current = client::get_auth_session(&ctx.base_url, session_id)?;
+        ensure_auth_session_belongs_to_context(ctx, &current)?;
+        if current.status == "approved" {
+            let token = current.access_token.clone().ok_or_else(|| {
+                CliError::api(
+                    "approved auth session did not return access_token",
+                    None,
+                    None,
+                )
+            })?;
+            config::save_agent_credentials(
+                &ctx.profile_name,
+                &ctx.base_url,
+                &ctx.client_instance_id,
+                &ctx.client_display_name,
+                &ctx.client_type,
+                token,
+                current.scopes.clone(),
+            )?;
+            return Ok(current);
+        }
+        if current.status != "pending" {
+            return Err(auth_session_error(created, &current));
+        }
+        if current.poll_interval_seconds > 0 {
+            thread::sleep(Duration::from_secs(current.poll_interval_seconds));
+        }
+        last_status = Some(current);
+    }
+    Err(auth_session_timeout_error(
+        created,
+        session_id,
+        last_status.as_ref(),
+    ))
+}
+
+/// Prevent saving a token from a session created for another local Agent identity.
+fn ensure_auth_session_belongs_to_context(
+    ctx: &RuntimeContext,
+    status: &client::AuthSessionStatus,
+) -> CliResult<()> {
+    if status.client_instance_id != ctx.client_instance_id {
+        return Err(CliError::validation(format!(
+            "auth session belongs to client_instance_id {}, current profile uses {}",
+            status.client_instance_id, ctx.client_instance_id
+        )));
+    }
+    if status.client_type != ctx.client_type {
+        return Err(CliError::validation(format!(
+            "auth session belongs to client_type {}, current profile uses {}",
+            status.client_type, ctx.client_type
+        )));
+    }
+    Ok(())
+}
+
+/// Build a timeout error for either a new or pre-existing auth session.
+fn auth_session_timeout_error(
+    created: Option<&client::AuthSessionCreated>,
+    session_id: &str,
+    status: Option<&client::AuthSessionStatus>,
+) -> CliError {
+    let mut detail = json!({
+        "session_id": session_id,
+        "status": "pending"
+    });
+    if let Some(status) = status {
+        detail = json!({
+            "session_id": status.session_id,
+            "status": status.status,
+            "required_scopes": status.required_scopes,
+            "expires_at": status.expires_at,
+            "poll_interval_seconds": status.poll_interval_seconds,
+            "scopes": status.scopes
+        });
+        add_auth_status_handoff_fields(&mut detail, status);
+    }
+    if let Some(session) = created {
+        detail = json!({
+            "session_id": session.session_id,
+            "status": "pending",
+            "authorize_url": session.authorize_url,
+            "qr_code_text": session.qr_code_text,
+            "user_code": session.user_code,
+            "verification_uri": session.verification_uri,
+            "required_scopes": session.required_scopes,
+            "expires_at": session.expires_at,
+            "expires_in_seconds": session.expires_in_seconds,
+            "poll_interval_seconds": session.poll_interval_seconds
+        });
+    }
+    output::CliError::auth_flow(
+        "AUTH_SESSION_TIMEOUT",
+        "authorization approval timed out",
+        detail,
+        true,
+    )
+}
+
+/// Add authorization handoff fields returned by the backend status endpoint.
+fn add_auth_status_handoff_fields(detail: &mut Value, status: &client::AuthSessionStatus) {
+    if let Some(value) = status.authorize_url.as_ref() {
+        detail["authorize_url"] = json!(value);
+    }
+    if let Some(value) = status.qr_code_text.as_ref() {
+        detail["qr_code_text"] = json!(value);
+    }
+    if let Some(value) = status.user_code.as_ref() {
+        detail["user_code"] = json!(value);
+    }
+    if let Some(value) = status.verification_uri.as_ref() {
+        detail["verification_uri"] = json!(value);
+    }
+    if let Some(value) = status.expires_in_seconds {
+        detail["expires_in_seconds"] = json!(value);
+    }
+}
+
 /// Convert a terminal auth session status into a structured CLI auth error.
 fn auth_session_error(
-    session: &client::AuthSessionCreated,
-    status: &str,
-    scopes: Vec<String>,
+    created: Option<&client::AuthSessionCreated>,
+    status: &client::AuthSessionStatus,
 ) -> CliError {
-    let normalized = status.trim().to_ascii_uppercase();
-    output::CliError::auth_flow(
-        format!("AUTH_SESSION_{normalized}"),
-        format!("authorization session ended with status: {status}"),
-        json!({
+    let normalized = status.status.trim().to_ascii_uppercase();
+    let mut detail = json!({
+        "session_id": status.session_id,
+        "status": status.status,
+        "required_scopes": status.required_scopes,
+        "expires_at": status.expires_at,
+        "poll_interval_seconds": status.poll_interval_seconds,
+        "scopes": status.scopes
+    });
+    add_auth_status_handoff_fields(&mut detail, status);
+    if let Some(session) = created {
+        detail = json!({
             "session_id": session.session_id,
-            "status": status,
+            "status": status.status,
             "authorize_url": session.authorize_url,
             "qr_code_text": session.qr_code_text,
             "user_code": session.user_code,
@@ -539,8 +647,13 @@ fn auth_session_error(
             "expires_at": session.expires_at,
             "expires_in_seconds": session.expires_in_seconds,
             "poll_interval_seconds": session.poll_interval_seconds,
-            "scopes": scopes
-        }),
+            "scopes": status.scopes
+        });
+    }
+    output::CliError::auth_flow(
+        format!("AUTH_SESSION_{normalized}"),
+        format!("authorization session ended with status: {}", status.status),
+        detail,
         false,
     )
 }
@@ -1249,12 +1362,7 @@ fn ensure_scopes(ctx: &crate::config::RuntimeContext, required: &[String]) -> Cl
         return Ok(());
     };
     let missing = missing_scopes(required, available.as_slice());
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        if ctx.token.is_none() {
-            return Err(CliError::missing_scope(missing, required.to_vec()));
-        }
+    if !missing.is_empty() {
         let session = client::create_auth_session(
             &ctx.base_url,
             required,
@@ -1277,6 +1385,8 @@ fn ensure_scopes(ctx: &crate::config::RuntimeContext, required: &[String]) -> Cl
                 "poll_interval_seconds": session.poll_interval_seconds
             }),
         ))
+    } else {
+        Ok(())
     }
 }
 

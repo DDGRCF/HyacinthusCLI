@@ -168,18 +168,6 @@ fn resolve_client_identity(
     profile_name: &str,
 ) -> CliResult<(String, String, String, bool)> {
     let inferred_type = infer_client_type(profile_name);
-    let client_instance_id = env::var("HYACINTHUS_CLIENT_INSTANCE_ID")
-        .ok()
-        .or_else(|| profile.and_then(|item| item.client_instance_id.clone()))
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| generate_client_instance_id(profile_name, &inferred_type));
-    let client_display_name = env::var("HYACINTHUS_CLIENT_DISPLAY_NAME")
-        .ok()
-        .or_else(|| profile.and_then(|item| item.client_display_name.clone()))
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| default_client_display_name(profile_name, &inferred_type));
     let client_type = env::var("HYACINTHUS_CLIENT_TYPE")
         .ok()
         .or_else(|| profile.and_then(|item| item.client_type.clone()))
@@ -188,12 +176,29 @@ fn resolve_client_identity(
         .transpose()?
         .filter(|value| !value.is_empty())
         .ok_or_else(|| CliError::validation("client_type is not configured"))?;
+    let client_instance_id = env::var("HYACINTHUS_CLIENT_INSTANCE_ID")
+        .ok()
+        .or_else(|| profile.and_then(|item| item.client_instance_id.clone()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| generate_client_instance_id(profile_name, &client_type));
+    let client_display_name = env::var("HYACINTHUS_CLIENT_DISPLAY_NAME")
+        .ok()
+        .or_else(|| profile.and_then(|item| item.client_display_name.clone()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default_client_display_name(profile_name, &client_type));
     let changed = profile.is_none_or(|profile| {
         profile.client_instance_id.as_deref() != Some(client_instance_id.as_str())
             || profile.client_display_name.as_deref() != Some(client_display_name.as_str())
             || profile.client_type.as_deref() != Some(client_type.as_str())
     });
-    Ok((client_instance_id, client_display_name, client_type, changed))
+    Ok((
+        client_instance_id,
+        client_display_name,
+        client_type,
+        changed,
+    ))
 }
 
 pub fn resolve_context(
@@ -206,7 +211,7 @@ pub fn resolve_context(
     let profile_name = resolve_profile_name(&config, profile_flag);
     let profile = config.profiles.get(&profile_name).cloned();
     let (client_instance_id, client_display_name, client_type, identity_changed) =
-        resolve_client_identity(profile, &profile_name)?;
+        resolve_client_identity(profile.as_ref(), &profile_name)?;
     let base_url = base_url_flag
         .map(ToOwned::to_owned)
         .or_else(|| env::var("HYACINTHUS_BASE_URL").ok())
@@ -231,7 +236,11 @@ pub fn resolve_context(
                 .ok()
                 .and_then(|value| value.parse::<i64>().ok())
         })
-        .or_else(|| profile.as_ref().and_then(|profile| profile.default_instance_id));
+        .or_else(|| {
+            profile
+                .as_ref()
+                .and_then(|profile| profile.default_instance_id)
+        });
     let request_id = request_id_flag
         .map(ToOwned::to_owned)
         .or_else(|| env::var("HYACINTHUS_REQUEST_ID").ok())
@@ -389,6 +398,178 @@ pub fn parse_scope_list(value: &str) -> Vec<String> {
         .filter(|scope| !scope.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+pub fn normalize_client_type(value: &str) -> CliResult<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if SUPPORTED_CLIENT_TYPES.contains(&normalized.as_str()) {
+        return Ok(normalized);
+    }
+    Err(CliError::validation(format!(
+        "unsupported client_type: {value}; supported values: {}",
+        SUPPORTED_CLIENT_TYPES.join(", ")
+    )))
+}
+
+pub fn infer_client_type(profile_name: &str) -> String {
+    let normalized = profile_name.to_ascii_lowercase();
+    for client_type in ["hermes", "codex", "claude", "picoclaw", "nullclaw"] {
+        if normalized.contains(client_type) {
+            return client_type.to_string();
+        }
+    }
+    "hyacinthus-cli".to_string()
+}
+
+pub fn complete_profile_identity(
+    profile_name: &str,
+    client_instance_id: Option<String>,
+    client_display_name: Option<String>,
+    client_type: Option<String>,
+    existing: Option<&Profile>,
+) -> CliResult<(String, String, String)> {
+    let inferred_type = client_type
+        .or_else(|| existing.and_then(|profile| profile.client_type.clone()))
+        .unwrap_or_else(|| infer_client_type(profile_name));
+    let normalized_type = normalize_client_type(&inferred_type)?;
+    let instance_id = client_instance_id
+        .or_else(|| existing.and_then(|profile| profile.client_instance_id.clone()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| generate_client_instance_id(profile_name, &normalized_type));
+    let display_name = client_display_name
+        .or_else(|| existing.and_then(|profile| profile.client_display_name.clone()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default_client_display_name(profile_name, &normalized_type));
+    Ok((instance_id, display_name, normalized_type))
+}
+
+fn resolve_profile_name(config: &ConfigFile, profile_flag: Option<&str>) -> String {
+    if let Some(profile) = profile_flag {
+        return profile.to_string();
+    }
+    if let Ok(profile) = env::var("HYACINTHUS_PROFILE") {
+        let trimmed = profile.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Some((client_type, path)) = detect_agent_home_env() {
+        return profile_name_from_home(&client_type, &path);
+    }
+    if let Some(profile) = config.active_profile.clone() {
+        return profile;
+    }
+    "local".to_string()
+}
+
+fn detect_agent_home_env() -> Option<(String, String)> {
+    for (key, client_type) in [
+        ("HERMES_HOME", "hermes"),
+        ("CODEX_HOME", "codex"),
+        ("CLAUDE_HOME", "claude"),
+        ("PICOCLAW_HOME", "picoclaw"),
+        ("NULLCLAW_HOME", "nullclaw"),
+    ] {
+        if let Ok(path) = env::var(key) {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                return Some((client_type.to_string(), trimmed.to_string()));
+            }
+        }
+    }
+    None
+}
+
+fn profile_name_from_home(client_type: &str, path: &str) -> String {
+    let path_buf = PathBuf::from(path);
+    let basename = path_buf
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("default")
+        .trim_start_matches('.');
+    format!("{client_type}-{}", sanitize_profile_part(basename))
+}
+
+fn sanitize_profile_part(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = sanitized.trim_matches('-');
+    if trimmed.is_empty() {
+        "default".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn generate_client_instance_id(profile_name: &str, client_type: &str) -> String {
+    let suffix = Uuid::new_v4().simple().to_string();
+    format!(
+        "{client_type}-{}-{}",
+        sanitize_profile_part(profile_name),
+        &suffix[..8]
+    )
+}
+
+fn default_client_display_name(profile_name: &str, client_type: &str) -> String {
+    format!("{} ({})", title_case_client_type(client_type), profile_name)
+}
+
+fn title_case_client_type(client_type: &str) -> String {
+    match client_type {
+        "hermes" => "Hermes".to_string(),
+        "codex" => "Codex".to_string(),
+        "claude" => "Claude".to_string(),
+        "picoclaw" => "PicoClaw".to_string(),
+        "nullclaw" => "NullClaw".to_string(),
+        "hyacinthus-cli" => "Hyacinthus CLI".to_string(),
+        _ => client_type.to_string(),
+    }
+}
+
+fn upsert_profile_identity(
+    config: &mut ConfigFile,
+    profile_name: &str,
+    base_url: String,
+    client_instance_id: &str,
+    client_display_name: &str,
+    client_type: &str,
+    existing: Option<&Profile>,
+) {
+    let profile = config
+        .profiles
+        .entry(profile_name.to_string())
+        .or_insert_with(|| Profile {
+            name: profile_name.to_string(),
+            base_url: base_url.clone(),
+            client_instance_id: None,
+            client_display_name: None,
+            client_type: None,
+            default_instance_id: existing.and_then(|profile| profile.default_instance_id),
+            default_format: existing
+                .map(|profile| profile.default_format)
+                .unwrap_or(OutputFormat::Json),
+            token: existing.and_then(|profile| profile.token.clone()),
+            scopes: existing
+                .map(|profile| profile.scopes.clone())
+                .unwrap_or_default(),
+            raw_api_enabled: existing
+                .map(|profile| profile.raw_api_enabled)
+                .unwrap_or(false),
+        });
+    profile.base_url = base_url;
+    profile.client_instance_id = Some(client_instance_id.to_string());
+    profile.client_display_name = Some(client_display_name.to_string());
+    profile.client_type = Some(client_type.to_string());
 }
 
 pub fn resolve_output_format(

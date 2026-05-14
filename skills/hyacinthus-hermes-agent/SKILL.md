@@ -9,38 +9,49 @@ Use this skill when Hermes Agent needs to operate Fengxinzi Tutoring Center thro
 
 ## Authorization
 
-1. Prefer an existing configured profile dedicated to this Hermes instance:
+1. Check the current authorization profile. A single Hermes instance can use the default inferred profile; multiple Hermes instances must set `HERMES_HOME` or `HYACINTHUS_PROFILE`.
 
 ```bash
-hyacinthus --profile <instance-profile> auth status
+hyacinthus auth status
 ```
 
-Each Hermes instance must use its own `hyacinthus` profile plus instance identity:
+Supported Agent client types:
 
-- `HYACINTHUS_PROFILE`
-- `HYACINTHUS_CLIENT_INSTANCE_ID`
-- `HYACINTHUS_CLIENT_DISPLAY_NAME`
-- `HYACINTHUS_CLIENT_TYPE=hermes-agent`
+- `hermes`: Hermes Agent
+- `codex`: Codex
+- `claude`: Claude Code
+- `picoclaw`: PicoClaw
+- `nullclaw`: NullClaw
+- `hyacinthus-cli`: direct terminal CLI
 
 2. If the profile has no token or the requested command returns `AUTH_REQUIRED`, forward these fields to the user:
 
+- `session_id`
 - `authorize_url`
 - `qr_code_text`
 - `user_code`
 - `required_scopes`
 - `expires_at`
 
+Keep the exact `session_id` from the authorization response. It is required for the follow-up wait command.
+
 3. Ask the user to open the URL or scan the QR text and approve the request.
 
-4. Poll and save credentials:
+4. After the user says they approved the authorization, poll the same session and save credentials:
 
 ```bash
-hyacinthus --profile <instance-profile> auth login --scope "<required scopes>" --wait
+hyacinthus auth wait --session-id "<session_id>"
 ```
 
 5. Retry the original command only after `token_saved` is true.
 
-Never reuse the same `hyacinthus` profile across different Hermes instances.
+Do not run `hyacinthus auth login --scope ... --wait` after sending an authorization link to the user. That creates a new authorization session and will not observe approval for the link already sent.
+
+For multiple Hermes instances, never reuse the same `hyacinthus` profile. Bind each Hermes home to a distinct profile:
+
+```bash
+HERMES_HOME=/home/r/.hermes-wechat-a HYACINTHUS_PROFILE=hermes-wechat-a hermes gateway run
+```
 
 ## Scope Rules
 

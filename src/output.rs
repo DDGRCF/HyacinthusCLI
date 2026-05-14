@@ -120,7 +120,7 @@ impl CliError {
             code: Some("AUTH_REQUIRED".to_string()),
             message: message.into(),
             hint: Some(
-                "open authorize_url or send qr_code_text to the user, then run auth login --wait"
+                "open authorize_url or send qr_code_text to the user, then run auth wait --session-id <session_id>"
                     .to_string(),
             ),
             detail: Some(detail),
@@ -142,7 +142,7 @@ impl CliError {
             code: Some(code.into()),
             message: message.into(),
             hint: Some(
-                "open authorize_url or send qr_code_text to the user, then retry auth login --wait"
+                "open authorize_url or send qr_code_text to the user, then retry auth wait --session-id <session_id>"
                     .to_string(),
             ),
             detail: Some(detail),

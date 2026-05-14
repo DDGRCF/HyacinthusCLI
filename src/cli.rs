@@ -157,6 +157,7 @@ pub enum AuthSubcommand {
     Status,
     Login(AuthLoginArgs),
     Grant(AuthLoginArgs),
+    Wait(AuthWaitArgs),
     Check(AuthCheckArgs),
     Scopes(AuthScopesArgs),
     Logout,
@@ -168,6 +169,14 @@ pub struct AuthLoginArgs {
     pub scope: Option<String>,
     #[arg(long)]
     pub wait: bool,
+    #[arg(long, default_value_t = 30)]
+    pub poll_limit: u64,
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct AuthWaitArgs {
+    #[arg(long)]
+    pub session_id: String,
     #[arg(long, default_value_t = 30)]
     pub poll_limit: u64,
 }

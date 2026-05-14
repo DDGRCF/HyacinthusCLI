@@ -27,6 +27,18 @@ Install from a GitHub release:
 curl -fsSL https://raw.githubusercontent.com/DDGRCF/HyacinthusCLI/main/scripts/install.sh | bash
 ```
 
+Install from the private GitHub release through the npm wrapper:
+
+```bash
+GITHUB_TOKEN=github_pat_xxx npx @ddgrcf/hyacinthus-cli install
+npx @ddgrcf/hyacinthus-cli skills install --target hermes
+npx @ddgrcf/hyacinthus-cli skills install --target nullclaw --dir ~/.nullclaw/skills
+```
+
+The npm wrapper does not contain the Rust binary. It uses `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token` to read the private `DDGRCF/HyacinthusCLI` release assets, download the matching archive, verify the `.sha256` checksum, and install `hyacinthus` into `~/.local/bin` by default. Alpine environments are detected as `x86_64-unknown-linux-musl`; other Linux x86_64 environments use `x86_64-unknown-linux-gnu`.
+
+The wrapper package lives in `npm/hyacinthus-cli` and can be published privately with `npm publish --access restricted`. Private npm access only controls the wrapper download; GitHub release access is still checked separately by GitHub.
+
 ## Core Commands
 
 ```bash
@@ -131,15 +143,18 @@ hyacinthus config set-profile dev --base-url http://localhost:8000 --raw-api-ena
 
 Raw API paths must start with `/api/v1/`.
 
-Interactive Agent authorization is supported for hermes-agent, Claw, and other automation clients:
+Interactive Agent authorization is supported for hermes, Claw, and other automation clients:
 
 ```bash
-HYACINTHUS_CLIENT_INSTANCE_ID=hermes-wechat-a HYACINTHUS_CLIENT_DISPLAY_NAME="Hermes WeChat A" HYACINTHUS_CLIENT_TYPE=hermes-agent hyacinthus auth login --scope requirements:parse
-HYACINTHUS_CLIENT_INSTANCE_ID=hermes-wechat-a HYACINTHUS_CLIENT_DISPLAY_NAME="Hermes WeChat A" HYACINTHUS_CLIENT_TYPE=hermes-agent hyacinthus auth login --scope requirements:parse --wait
+hyacinthus auth login --scope requirements:parse
+hyacinthus auth login --scope requirements:parse --wait
+hyacinthus auth wait --session-id sess_abc123
 hyacinthus auth grant --scope "requirements:parse requirements:write" --wait
 ```
 
-`auth login` creates a backend authorization session and prints `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. Agents should send the URL or QR text to the user. With `--wait`, the CLI polls until approval and saves the issued Agent token plus scopes into the selected profile. If approval times out or the backend returns a terminal non-`pending` status, the command exits non-zero with a structured auth error envelope.
+`auth login` creates a backend authorization session and prints `session_id`, `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. Agents should send the URL or QR text to the user, then use `auth wait --session-id <session_id>` after the user approves that exact link. With `--wait`, the CLI creates a new session and polls it until approval, which is useful only when the user can approve that newly created session during the same command run. If approval times out or the backend returns a terminal non-`pending` status, the command exits non-zero with a structured auth error envelope.
+
+The CLI automatically binds each profile to a stable Agent identity. Supported `client_type` values are `hermes`, `codex`, `claude`, `picoclaw`, `nullclaw`, and `hyacinthus-cli`. Single-Agent setups can rely on default homes like `~/.hermes`; multi-instance setups should set a distinct `HYACINTHUS_PROFILE` or Agent home for each instance.
 
 Commands that return backend data can write the successful `data` payload to a file:
 
@@ -219,7 +234,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release workflow builds Linux/macOS x86_64 and arm64 archives, publishes `.tar.gz` assets, and uploads SHA256 checksum files.
+The release workflow builds Linux/macOS x86_64 and arm64 archives, includes an Alpine-compatible `x86_64-unknown-linux-musl` archive, publishes `.tar.gz` assets, and uploads SHA256 checksum files.
 
 Local packaging:
 

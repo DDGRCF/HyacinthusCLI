@@ -1,0 +1,20 @@
+{
+  "name": "@ddgrcf/hyacinthus-cli",
+  "version": "0.1.0",
+  "description": "Private installer wrapper for the Hyacinthus CLI.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/DDGRCF/HyacinthusCLI.git"
+  },
+  "bin": {
+    "hyacinthus-cli": "bin/hyacinthus-cli.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -38,8 +38,18 @@ pub struct AuthSessionStatus {
     pub client_display_name: String,
     pub client_type: String,
     pub status: String,
+    #[serde(default)]
+    pub user_code: Option<String>,
+    #[serde(default)]
+    pub verification_uri: Option<String>,
+    #[serde(default)]
+    pub authorize_url: Option<String>,
+    #[serde(default)]
+    pub qr_code_text: Option<String>,
     pub required_scopes: Vec<String>,
     pub expires_at: String,
+    #[serde(default)]
+    pub expires_in_seconds: Option<u64>,
     pub poll_interval_seconds: u64,
     pub access_token: Option<String>,
     pub token_type: Option<String>,

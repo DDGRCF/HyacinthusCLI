@@ -7,7 +7,7 @@
         "status": "pass"
       },
       {
-        "message": "default",
+        "message": "local",
         "name": "config_resolved",
         "status": "pass"
       },

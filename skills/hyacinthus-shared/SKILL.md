@@ -26,11 +26,56 @@ If `doctor` reports failed checks, do not continue with business commands. Repor
 
 ```bash
 hyacinthus config set-profile local --base-url http://localhost:8000 --default-instance-id 1
-hyacinthus config set-token --profile local --token <token>
 hyacinthus auth status
 ```
 
+Do not ask the user to paste raw tokens. If `auth status` reports `token_present: false`, use the authorization link/QR flow from the Agent-specific skill.
+
 Never print tokens or secrets. `config show` redacts token fields.
+
+## Authorization Link Flow
+
+When `auth status` reports `token_present: false`, or a command returns `AUTH_REQUIRED`, create an authorization session for the required scopes:
+
+```bash
+hyacinthus auth login --scope "<required scopes>"
+```
+
+Forward these fields to the user:
+
+- `session_id`
+- `authorize_url`
+- `qr_code_text`
+- `user_code`
+- `required_scopes`
+- `expires_at`
+
+After the user says they approved the authorization, wait on the same session:
+
+```bash
+hyacinthus auth wait --session-id "<session_id>"
+```
+
+Retry the original command only after `token_saved` is true.
+
+Do not run `hyacinthus auth login --scope ... --wait` after sending an authorization link to the user. That creates a new authorization session and cannot observe approval for the link already sent.
+
+## Agent Identity
+
+`hyacinthus` binds authorization to a profile. Each profile automatically gets a stable `client_instance_id`, a display name, and one supported `client_type`.
+
+Supported client types and defaults:
+
+| Agent | Default home | Default profile | client_type | Multi-instance rule |
+| --- | --- | --- | --- | --- |
+| Hermes | `~/.hermes` | `hermes-default` | `hermes` | Use distinct `HERMES_HOME` or `HYACINTHUS_PROFILE` |
+| Codex | `~/.codex` | `codex-default` | `codex` | Use distinct `CODEX_HOME` or `HYACINTHUS_PROFILE` |
+| Claude Code | `~/.claude` | `claude-default` | `claude` | Use distinct `CLAUDE_HOME` or `HYACINTHUS_PROFILE` |
+| PicoClaw | `~/.picoclaw` | `picoclaw-default` | `picoclaw` | Use distinct `PICOCLAW_HOME` or `HYACINTHUS_PROFILE` |
+| NullClaw | `~/.nullclaw` | `nullclaw-default` | `nullclaw` | Use distinct `NULLCLAW_HOME` or `HYACINTHUS_PROFILE` |
+| Terminal CLI | `$HOME` | `local` | `hyacinthus-cli` | Use explicit `--profile` for separation |
+
+Single-agent setups usually do not need manual identity variables. For multi-agent setups, the Agent home and `HYACINTHUS_PROFILE` must point to the same logical instance.
 
 ## Capability Discovery
 
