@@ -369,6 +369,212 @@ capabilities:
       - title: 查询需求元数据选项
         command: hyacinthus requirements options
 
+  - id: catalog.create_missing
+    title: 确认创建缺失科目/年级
+    description: Agent 在解析需求发现科目或年级未命中目录后，提醒用户确认，并在确认后创建缺失目录项。
+    domain: catalog
+    command: hyacinthus requirements catalog create-missing
+    method: POST
+    path: /api/v1/agent/catalog/create-missing
+    required_scopes:
+      - catalog:write
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      properties:
+        subjects:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+            properties:
+              name:
+                type: string
+                minLength: 1
+              category:
+                type:
+                  - string
+                  - "null"
+              sort_order:
+                type:
+                  - integer
+                  - "null"
+              description:
+                type:
+                  - string
+                  - "null"
+              is_active:
+                type: boolean
+        grades:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+            properties:
+              name:
+                type: string
+                minLength: 1
+              category:
+                type:
+                  - string
+                  - "null"
+              sort_order:
+                type:
+                  - integer
+                  - "null"
+              is_active:
+                type: boolean
+    response_schema:
+      type: object
+      required:
+        - subjects
+        - grades
+        - created_subject_count
+        - created_grade_count
+      properties:
+        subjects:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - sort_order
+              - is_active
+              - action
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              category:
+                type:
+                  - string
+                  - "null"
+              sort_order:
+                type: integer
+              is_active:
+                type: boolean
+              action:
+                type: string
+        grades:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - sort_order
+              - is_active
+              - action
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              category:
+                type:
+                  - string
+                  - "null"
+              sort_order:
+                type: integer
+              is_active:
+                type: boolean
+              action:
+                type: string
+        created_subject_count:
+          type: integer
+        created_grade_count:
+          type: integer
+    examples:
+      - title: 从解析结果提示缺失目录并确认创建
+        command: hyacinthus requirements catalog create-missing --file parsed.json --yes
+      - title: 手动指定缺失科目和年级
+        command: hyacinthus requirements catalog create-missing --subject 科创编程 --grade 小升初 --yes
+
+  - id: catalog.reorder
+    title: 科目/年级目录排序
+    description: Agent 在用户确认后按指定 ID 顺序重排科目或年级目录。
+    domain: catalog
+    command: hyacinthus requirements catalog reorder
+    method: PUT
+    path: /api/v1/agent/catalog/reorder
+    required_scopes:
+      - catalog:write
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - target
+        - ordered_ids
+      properties:
+        target:
+          type: string
+          enum:
+            - subjects
+            - grades
+        ordered_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: 必须覆盖目标目录当前全部 ID，且不能重复。
+          items:
+            type: integer
+    response_schema:
+      type: object
+      required:
+        - target
+        - items
+      properties:
+        target:
+          type: string
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - sort_order
+              - is_active
+              - action
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              category:
+                type:
+                  - string
+                  - "null"
+              sort_order:
+                type: integer
+              is_active:
+                type: boolean
+              action:
+                type: string
+    examples:
+      - title: 重排科目目录
+        command: hyacinthus requirements catalog reorder --target subjects --ids 3,1,2 --yes
+      - title: 重排年级目录
+        command: hyacinthus requirements catalog reorder --target grades --ids 2,1,3 --yes
+
   - id: admin.status
     title: 后台基础状态
     description: Agent 专用后台状态查询能力，返回非敏感运行状态与 capability manifest 摘要。

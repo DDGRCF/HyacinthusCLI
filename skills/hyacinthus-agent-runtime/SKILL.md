@@ -1,15 +1,15 @@
 ---
-name: hyacinthus-hermes-agent
-description: Use the Fengxinzi Tutoring Center Hyacinthus CLI from Hermes Agent, including link/QR authorization handoff.
+name: hyacinthus-agent-runtime
+description: Use the 风信子家教中心 Hyacinthus CLI from Agent runtimes, including link/QR authorization handoff.
 ---
 
-# Fengxinzi Tutoring Center Hyacinthus CLI for Hermes Agent
+# 风信子家教中心 Hyacinthus CLI for Agent Runtimes
 
-Use this skill when Hermes Agent needs to operate Fengxinzi Tutoring Center through the `hyacinthus` CLI.
+Use this skill when an Agent runtime needs to operate 风信子家教中心 through the `hyacinthus` CLI.
 
 ## Authorization
 
-1. Check the current authorization profile. A single Hermes instance can use the default inferred profile; multiple Hermes instances must set `HERMES_HOME` or `HYACINTHUS_PROFILE`.
+1. Check the current authorization profile. A single Agent instance can use the default inferred profile; multiple instances must set the runtime home environment variable or `HYACINTHUS_PROFILE`.
 
 ```bash
 hyacinthus auth status
@@ -47,7 +47,7 @@ hyacinthus auth wait --session-id "<session_id>"
 
 Do not run `hyacinthus auth login --scope ... --wait` after sending an authorization link to the user. That creates a new authorization session and will not observe approval for the link already sent.
 
-For multiple Hermes instances, never reuse the same `hyacinthus` profile. Bind each Hermes home to a distinct profile:
+For multiple Agent instances, never reuse the same `hyacinthus` profile. Bind each runtime home to a distinct profile:
 
 ```bash
 HERMES_HOME=/home/r/.hermes-wechat-a HYACINTHUS_PROFILE=hermes-wechat-a hermes gateway run
@@ -64,7 +64,7 @@ Do not ask the user to paste raw tokens. Use the authorization URL/QR handoff.
 
 ## Output Rules
 
-The Fengxinzi Tutoring Center Hyacinthus CLI returns JSON envelopes by default. Inspect:
+The 风信子家教中心 Hyacinthus CLI returns JSON envelopes by default. Inspect:
 
 - `ok`
 - `data`

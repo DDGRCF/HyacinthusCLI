@@ -178,6 +178,25 @@ impl CliError {
             retryable: true,
         }
     }
+
+    pub fn confirmation_required_with_detail(
+        action: impl Into<String>,
+        level: impl Into<String>,
+        detail: Value,
+    ) -> Self {
+        let action = action.into();
+        let level = level.into();
+        Self {
+            exit_code: EXIT_CONFIRMATION_REQUIRED,
+            error_type: "confirmation_required",
+            code: Some("CONFIRMATION_REQUIRED".to_string()),
+            message: format!("{action} requires confirmation"),
+            hint: Some("review the listed changes and add --yes to confirm".to_string()),
+            detail: Some(detail),
+            risk: Some(json!({ "level": level, "action": action })),
+            retryable: true,
+        }
+    }
 }
 
 pub type CliResult<T> = Result<T, CliError>;

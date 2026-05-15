@@ -1,7 +1,7 @@
 {
   "data": [
     {
-      "description": "Shared Fengxinzi Tutoring Center Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+      "description": "Shared 风信子家教中心 Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
       "name": "hyacinthus-shared",
       "path": "skills/hyacinthus-shared/SKILL.md",
       "version": "0.1.0"
@@ -13,9 +13,9 @@
       "version": "0.1.0"
     },
     {
-      "description": "Hermes Agent handoff rules for Fengxinzi Tutoring Center Hyacinthus CLI link and QR authorization.",
-      "name": "hyacinthus-hermes-agent",
-      "path": "skills/hyacinthus-hermes-agent/SKILL.md",
+      "description": "Agent runtime handoff rules for 风信子家教中心 Hyacinthus CLI link and QR authorization.",
+      "name": "hyacinthus-agent-runtime",
+      "path": "skills/hyacinthus-agent-runtime/SKILL.md",
       "version": "0.1.0"
     }
   ],

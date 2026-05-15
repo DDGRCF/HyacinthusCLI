@@ -73,6 +73,10 @@ impl ApiClient {
         self.request("POST", path, Some(body))
     }
 
+    pub fn put(&self, path: &str, body: Value) -> CliResult<Value> {
+        self.request("PUT", path, Some(body))
+    }
+
     pub fn raw(&self, method: &str, path: &str, body: Option<Value>) -> CliResult<Value> {
         self.request(method, path, body)
     }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[command(
     name = "hyacinthus",
     version,
-    about = "Agent-oriented CLI for Fengxinzi Tutoring Center"
+    about = "Agent-oriented CLI for 风信子家教中心"
 )]
 pub struct Cli {
     #[arg(long, global = true)]
@@ -310,6 +310,19 @@ pub enum RequirementsSubcommand {
     Options,
     Parse(RequirementsParseArgs),
     Import(RequirementsImportArgs),
+    Catalog(RequirementsCatalogCommand),
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct RequirementsCatalogCommand {
+    #[command(subcommand)]
+    pub command: RequirementsCatalogSubcommand,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+pub enum RequirementsCatalogSubcommand {
+    CreateMissing(RequirementsCatalogCreateMissingArgs),
+    Reorder(RequirementsCatalogReorderArgs),
 }
 
 #[derive(Clone, Debug, Args)]
@@ -364,6 +377,59 @@ pub struct RequirementsImportArgs {
     pub yes: bool,
     #[arg(long, short = 'o')]
     pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct RequirementsCatalogCreateMissingArgs {
+    #[arg(long)]
+    pub file: Option<String>,
+    #[arg(long)]
+    pub data: Option<String>,
+    #[arg(long)]
+    pub subject: Vec<String>,
+    #[arg(long)]
+    pub grade: Vec<String>,
+    #[arg(long)]
+    pub subject_category: Option<String>,
+    #[arg(long)]
+    pub grade_category: Option<String>,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct RequirementsCatalogReorderArgs {
+    #[arg(long, value_enum)]
+    pub target: CatalogTarget,
+    #[arg(long)]
+    pub ids: String,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CatalogTarget {
+    Subjects,
+    Grades,
+}
+
+impl fmt::Display for CatalogTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::Subjects => "subjects",
+            Self::Grades => "grades",
+        };
+        formatter.write_str(value)
+    }
 }
 
 #[derive(Clone, Debug, Args)]

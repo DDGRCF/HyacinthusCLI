@@ -7,7 +7,7 @@ use crate::output::{CliError, CliResult};
 
 const SHARED_SKILL: &str = include_str!("../skills/hyacinthus-shared/SKILL.md");
 const REQUIREMENTS_SKILL: &str = include_str!("../skills/hyacinthus-requirements/SKILL.md");
-const HERMES_AGENT_SKILL: &str = include_str!("../skills/hyacinthus-hermes-agent/SKILL.md");
+const AGENT_RUNTIME_SKILL: &str = include_str!("../skills/hyacinthus-agent-runtime/SKILL.md");
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Skill {
@@ -54,7 +54,7 @@ pub fn list() -> Vec<Skill> {
     vec![
         Skill {
             name: "hyacinthus-shared",
-            description: "Shared Fengxinzi Tutoring Center Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+            description: "Shared 风信子家教中心 Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
             path: "skills/hyacinthus-shared/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: None,
@@ -67,9 +67,9 @@ pub fn list() -> Vec<Skill> {
             content: None,
         },
         Skill {
-            name: "hyacinthus-hermes-agent",
-            description: "Hermes Agent handoff rules for Fengxinzi Tutoring Center Hyacinthus CLI link and QR authorization.",
-            path: "skills/hyacinthus-hermes-agent/SKILL.md",
+            name: "hyacinthus-agent-runtime",
+            description: "Agent runtime handoff rules for 风信子家教中心 Hyacinthus CLI link and QR authorization.",
+            path: "skills/hyacinthus-agent-runtime/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: None,
         },
@@ -171,7 +171,7 @@ pub fn show(name: &str) -> CliResult<Skill> {
     match name {
         "hyacinthus-shared" => Ok(Skill {
             name: "hyacinthus-shared",
-            description: "Shared Fengxinzi Tutoring Center Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+            description: "Shared 风信子家教中心 Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
             path: "skills/hyacinthus-shared/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(SHARED_SKILL),
@@ -183,12 +183,12 @@ pub fn show(name: &str) -> CliResult<Skill> {
             version: env!("CARGO_PKG_VERSION"),
             content: Some(REQUIREMENTS_SKILL),
         }),
-        "hyacinthus-hermes-agent" => Ok(Skill {
-            name: "hyacinthus-hermes-agent",
-            description: "Hermes Agent handoff rules for Fengxinzi Tutoring Center Hyacinthus CLI link and QR authorization.",
-            path: "skills/hyacinthus-hermes-agent/SKILL.md",
+        "hyacinthus-agent-runtime" => Ok(Skill {
+            name: "hyacinthus-agent-runtime",
+            description: "Agent runtime handoff rules for 风信子家教中心 Hyacinthus CLI link and QR authorization.",
+            path: "skills/hyacinthus-agent-runtime/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
-            content: Some(HERMES_AGENT_SKILL),
+            content: Some(AGENT_RUNTIME_SKILL),
         }),
         _ => Err(CliError::validation(format!("unknown skill: {name}"))),
     }
@@ -198,7 +198,7 @@ fn full_skills() -> Vec<Skill> {
     vec![
         Skill {
             name: "hyacinthus-shared",
-            description: "Shared Fengxinzi Tutoring Center Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+            description: "Shared 风信子家教中心 Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
             path: "skills/hyacinthus-shared/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(SHARED_SKILL),
@@ -211,11 +211,11 @@ fn full_skills() -> Vec<Skill> {
             content: Some(REQUIREMENTS_SKILL),
         },
         Skill {
-            name: "hyacinthus-hermes-agent",
-            description: "Hermes Agent handoff rules for Fengxinzi Tutoring Center Hyacinthus CLI link and QR authorization.",
-            path: "skills/hyacinthus-hermes-agent/SKILL.md",
+            name: "hyacinthus-agent-runtime",
+            description: "Agent runtime handoff rules for 风信子家教中心 Hyacinthus CLI link and QR authorization.",
+            path: "skills/hyacinthus-agent-runtime/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
-            content: Some(HERMES_AGENT_SKILL),
+            content: Some(AGENT_RUNTIME_SKILL),
         },
     ]
 }

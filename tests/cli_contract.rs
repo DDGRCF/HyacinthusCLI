@@ -433,8 +433,143 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 6);
+    assert_eq!(value["data"]["capability_count"], 8);
     assert_eq!(value["meta"]["source"], "embedded");
+}
+
+#[test]
+fn catalog_create_missing_dry_run_extracts_unmapped_parse_warnings() {
+    let value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "requirements",
+        "catalog",
+        "create-missing",
+        "--data",
+        r#"{"ok":true,"data":{"rows":[{"warnings":["SUBJECT_NAME_UNMAPPED:科创编程","GRADE_NAME_UNMAPPED:小升初"],"confirmation_reasons":["SUBJECT_NAME_UNMAPPED:科创编程"]}]}}"#,
+        "--dry-run",
+    ]);
+
+    assert_eq!(value["ok"], true);
+    assert_eq!(
+        value["data"]["request"]["path"],
+        "/api/v1/agent/catalog/create-missing"
+    );
+    assert_eq!(
+        value["data"]["request"]["body"]["subjects"][0]["name"],
+        "科创编程"
+    );
+    assert_eq!(
+        value["data"]["request"]["body"]["grades"][0]["name"],
+        "小升初"
+    );
+}
+
+#[test]
+fn catalog_create_missing_requires_confirmation_with_missing_names() {
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            "http://localhost:8000",
+            "requirements",
+            "catalog",
+            "create-missing",
+            "--subject",
+            "科创编程",
+        ],
+        &[("HYACINTHUS_AGENT_SCOPES", "catalog:write")],
+        10,
+    );
+
+    assert_eq!(value["error"]["type"], "confirmation_required");
+    assert_eq!(value["error"]["detail"]["subjects"][0]["name"], "科创编程");
+}
+
+#[test]
+fn catalog_create_missing_posts_to_agent_endpoint() {
+    let base_url = mock_once(
+        r#"{"code":0,"message":"success","data":{"subjects":[{"id":11,"name":"科创编程","category":null,"sort_order":10,"is_active":true,"action":"created"}],"grades":[],"created_subject_count":1,"created_grade_count":0}}"#,
+    );
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "requirements",
+            "catalog",
+            "create-missing",
+            "--subject",
+            "科创编程",
+            "--yes",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "catalog:write")
+        .output()
+        .expect("catalog create missing");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"]["created_subject_count"], 1);
+    assert_eq!(value["meta"]["capability"], "catalog.create_missing");
+}
+
+#[test]
+fn catalog_reorder_dry_run_builds_put_request() {
+    let value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "requirements",
+        "catalog",
+        "reorder",
+        "--target",
+        "subjects",
+        "--ids",
+        "3,1,2",
+        "--dry-run",
+    ]);
+
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["data"]["request"]["method"], "PUT");
+    assert_eq!(
+        value["data"]["request"]["path"],
+        "/api/v1/agent/catalog/reorder"
+    );
+    assert_eq!(value["data"]["request"]["body"]["target"], "subjects");
+    assert_eq!(value["data"]["request"]["body"]["ordered_ids"][0], 3);
+}
+
+#[test]
+fn catalog_reorder_rejects_duplicate_ids_before_backend() {
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            "http://localhost:8000",
+            "requirements",
+            "catalog",
+            "reorder",
+            "--target",
+            "subjects",
+            "--ids",
+            "3,1,3",
+            "--dry-run",
+        ],
+        &[],
+        2,
+    );
+
+    assert_eq!(value["error"]["type"], "validation");
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap_or("")
+        .contains("duplicate"));
 }
 
 #[test]
@@ -2213,7 +2348,7 @@ fn skills_are_discoverable_from_cli() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|skill| skill["name"] == "hyacinthus-hermes-agent"));
+        .any(|skill| skill["name"] == "hyacinthus-agent-runtime"));
 }
 
 #[test]

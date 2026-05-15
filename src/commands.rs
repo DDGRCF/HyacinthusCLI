@@ -11,8 +11,10 @@ use uuid::Uuid;
 
 use crate::cli::{
     AdminSubcommand, AuthLoginArgs, AuthSubcommand, AuthWaitArgs, CapabilitySubcommand,
-    ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand, RequirementsImportArgs,
-    RequirementsParseArgs, RequirementsSubcommand,
+    ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand,
+    RequirementsCatalogCreateMissingArgs, RequirementsCatalogReorderArgs,
+    RequirementsCatalogSubcommand, RequirementsImportArgs, RequirementsParseArgs,
+    RequirementsSubcommand,
 };
 use crate::client::{self, ApiClient};
 use crate::config::{self, Profile, RuntimeContext};
@@ -74,6 +76,14 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
             RequirementsSubcommand::Options => requirements_options(cli),
             RequirementsSubcommand::Parse(args) => requirements_parse(cli, args),
             RequirementsSubcommand::Import(args) => requirements_import(cli, args),
+            RequirementsSubcommand::Catalog(command) => match &command.command {
+                RequirementsCatalogSubcommand::CreateMissing(args) => {
+                    requirements_catalog_create_missing(cli, args)
+                }
+                RequirementsCatalogSubcommand::Reorder(args) => {
+                    requirements_catalog_reorder(cli, args)
+                }
+            },
         },
         Command::Skills(command) => skills_command(&command.command),
         Command::Completion(_) => unreachable!("completion is handled before envelope output"),
@@ -1078,6 +1088,7 @@ fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<
             }
         }
         "POST" => client.post(&path, body)?,
+        "PUT" => client.put(&path, body)?,
         method => {
             return Err(CliError::validation(format!(
                 "unsupported capability method: {method}"
@@ -1216,6 +1227,96 @@ fn requirements_import(cli: &Cli, args: &RequirementsImportArgs) -> CliResult<(V
     ))
 }
 
+fn requirements_catalog_create_missing(
+    cli: &Cli,
+    args: &RequirementsCatalogCreateMissingArgs,
+) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        cli.instance_id,
+        cli.request_id.as_deref(),
+    )?;
+    let payload = build_catalog_create_missing_payload(args)?;
+    let capability = manifest::find_capability("catalog.create_missing")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    validate_request_payload(&capability, &payload)?;
+    if args.dry_run {
+        return Ok((
+            dry_run_payload(
+                "POST",
+                "/api/v1/agent/catalog/create-missing",
+                payload,
+                None,
+                ctx.request_id.as_deref(),
+            ),
+            json!({ "command": "requirements catalog create-missing" }),
+        ));
+    }
+    if !args.yes {
+        return Err(CliError::confirmation_required_with_detail(
+            "requirements catalog create-missing",
+            "write",
+            catalog_confirmation_detail(&payload),
+        ));
+    }
+    let data = ApiClient::new(ctx)?.post("/api/v1/agent/catalog/create-missing", payload)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements catalog create-missing", "capability": "catalog.create_missing" }),
+    ))
+}
+
+fn requirements_catalog_reorder(
+    cli: &Cli,
+    args: &RequirementsCatalogReorderArgs,
+) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        cli.instance_id,
+        cli.request_id.as_deref(),
+    )?;
+    let ordered_ids = parse_catalog_ids(&args.ids)?;
+    let payload = json!({
+        "target": args.target.to_string(),
+        "ordered_ids": ordered_ids,
+    });
+    let capability = manifest::find_capability("catalog.reorder")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    validate_request_payload(&capability, &payload)?;
+    if args.dry_run {
+        return Ok((
+            dry_run_payload(
+                "PUT",
+                "/api/v1/agent/catalog/reorder",
+                payload,
+                None,
+                ctx.request_id.as_deref(),
+            ),
+            json!({ "command": "requirements catalog reorder" }),
+        ));
+    }
+    if !args.yes {
+        return Err(CliError::confirmation_required_with_detail(
+            "requirements catalog reorder",
+            "write",
+            json!({ "target": args.target.to_string(), "ordered_ids": ordered_ids }),
+        ));
+    }
+    let data = ApiClient::new(ctx)?.put("/api/v1/agent/catalog/reorder", payload)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements catalog reorder", "capability": "catalog.reorder" }),
+    ))
+}
+
 fn completion_command(shell: &str) -> CliResult<()> {
     let shell = shell
         .parse::<Shell>()
@@ -1350,6 +1451,212 @@ fn build_import_payload(
         return Err(CliError::validation("confirmed_rows is empty"));
     }
     Ok(payload)
+}
+
+fn build_catalog_create_missing_payload(
+    args: &RequirementsCatalogCreateMissingArgs,
+) -> CliResult<Value> {
+    let source_count = [&args.file, &args.data]
+        .iter()
+        .filter(|value| value.is_some())
+        .count();
+    if source_count > 1 {
+        return Err(CliError::validation(
+            "at most one of --file or --data is allowed",
+        ));
+    }
+    let mut payload = if let Some(file) = &args.file {
+        let raw = if file == "-" {
+            read_json_arg("-")?
+        } else {
+            read_json_arg(&format!("@{file}"))?
+        };
+        catalog_payload_from_source(raw)?
+    } else if let Some(data) = args.data.as_ref() {
+        catalog_payload_from_source(read_json_arg(data)?)?
+    } else {
+        json!({ "subjects": [], "grades": [] })
+    };
+    append_catalog_names(
+        &mut payload,
+        "subjects",
+        &args.subject,
+        args.subject_category.as_deref(),
+    )?;
+    append_catalog_names(
+        &mut payload,
+        "grades",
+        &args.grade,
+        args.grade_category.as_deref(),
+    )?;
+    dedupe_catalog_payload(&mut payload)?;
+    let subject_count = payload
+        .get("subjects")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    let grade_count = payload
+        .get("grades")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    if subject_count == 0 && grade_count == 0 {
+        return Err(CliError::validation(
+            "no missing subjects or grades found; pass --subject/--grade or parse output with *_NAME_UNMAPPED warnings",
+        ));
+    }
+    Ok(payload)
+}
+
+fn catalog_payload_from_source(raw: Value) -> CliResult<Value> {
+    if raw.get("subjects").is_some() || raw.get("grades").is_some() {
+        return Ok(json!({
+            "subjects": raw.get("subjects").cloned().unwrap_or_else(|| json!([])),
+            "grades": raw.get("grades").cloned().unwrap_or_else(|| json!([])),
+        }));
+    }
+    if let Some(rows) = raw.pointer("/data/rows").and_then(Value::as_array) {
+        return Ok(catalog_payload_from_parse_rows(rows));
+    }
+    if let Some(rows) = raw.get("rows").and_then(Value::as_array) {
+        return Ok(catalog_payload_from_parse_rows(rows));
+    }
+    Err(CliError::validation(
+        "catalog input must be a catalog payload or requirements parse output",
+    ))
+}
+
+fn catalog_payload_from_parse_rows(rows: &[Value]) -> Value {
+    let mut subjects = Vec::new();
+    let mut grades = Vec::new();
+    for row in rows {
+        let mut reasons = Vec::new();
+        if let Some(items) = row.get("warnings").and_then(Value::as_array) {
+            reasons.extend(
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned),
+            );
+        }
+        if let Some(items) = row.get("confirmation_reasons").and_then(Value::as_array) {
+            reasons.extend(
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned),
+            );
+        }
+        for reason in reasons {
+            if let Some(name) = reason.strip_prefix("SUBJECT_NAME_UNMAPPED:") {
+                let name = name.trim();
+                if !name.is_empty() {
+                    subjects.push(json!({ "name": name }));
+                }
+            } else if let Some(name) = reason.strip_prefix("GRADE_NAME_UNMAPPED:") {
+                let name = name.trim();
+                if !name.is_empty() {
+                    grades.push(json!({ "name": name }));
+                }
+            }
+        }
+    }
+    json!({ "subjects": subjects, "grades": grades })
+}
+
+fn append_catalog_names(
+    payload: &mut Value,
+    key: &str,
+    names: &[String],
+    category: Option<&str>,
+) -> CliResult<()> {
+    if payload.get(key).is_none() {
+        payload[key] = json!([]);
+    }
+    let items = payload
+        .get_mut(key)
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| CliError::validation(format!("{key} must be an array")))?;
+    for name in names {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut item = json!({ "name": trimmed });
+        if let Some(category) = category {
+            item["category"] = json!(category);
+        }
+        items.push(item);
+    }
+    Ok(())
+}
+
+fn dedupe_catalog_payload(payload: &mut Value) -> CliResult<()> {
+    dedupe_catalog_items(payload, "subjects")?;
+    dedupe_catalog_items(payload, "grades")?;
+    Ok(())
+}
+
+fn dedupe_catalog_items(payload: &mut Value, key: &str) -> CliResult<()> {
+    if payload.get(key).is_none() {
+        payload[key] = json!([]);
+    }
+    let items = payload
+        .get_mut(key)
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| CliError::validation(format!("{key} must be an array")))?;
+    let mut seen = BTreeSet::new();
+    let mut deduped = Vec::new();
+    for item in items.iter() {
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let normalized = name.to_lowercase();
+        if seen.insert(normalized) {
+            let mut normalized_item = item.clone();
+            normalized_item["name"] = json!(name);
+            deduped.push(normalized_item);
+        }
+    }
+    *items = deduped;
+    Ok(())
+}
+
+fn catalog_confirmation_detail(payload: &Value) -> Value {
+    json!({
+        "subjects": payload.get("subjects").cloned().unwrap_or_else(|| json!([])),
+        "grades": payload.get("grades").cloned().unwrap_or_else(|| json!([])),
+        "next_step": "rerun with --yes after confirming these catalog items should be created"
+    })
+}
+
+fn parse_catalog_ids(value: &str) -> CliResult<Vec<i64>> {
+    let ids = value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(|item| {
+            item.parse::<i64>()
+                .map_err(|_| CliError::validation(format!("invalid catalog id: {item}")))
+        })
+        .collect::<CliResult<Vec<_>>>()?;
+    if ids.is_empty() {
+        return Err(CliError::validation("--ids must contain at least one id"));
+    }
+    if ids.iter().any(|id| *id <= 0) {
+        return Err(CliError::validation("--ids must contain positive ids"));
+    }
+    let unique_ids = ids.iter().copied().collect::<BTreeSet<_>>();
+    if unique_ids.len() != ids.len() {
+        return Err(CliError::validation("--ids must not contain duplicate ids"));
+    }
+    Ok(ids)
 }
 
 fn serialize_value<T: serde::Serialize>(value: T) -> CliResult<Value> {

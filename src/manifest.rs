@@ -158,11 +158,11 @@ fn validate_capability(
             ));
         }
     }
-    if !["GET", "POST"].contains(&capability.method.as_str()) {
+    if !["GET", "POST", "PUT"].contains(&capability.method.as_str()) {
         issues.push(manifest_issue(
             id.clone(),
             "method",
-            "method must be GET or POST",
+            "method must be GET, POST, or PUT",
         ));
     }
     if !capability.path.starts_with("/api/v1/agent/") {

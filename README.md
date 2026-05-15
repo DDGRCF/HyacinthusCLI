@@ -1,6 +1,6 @@
 # Hyacinthus CLI
 
-Agent-oriented CLI for Fengxinzi Tutoring Center backend operations. The CLI is designed for OpenClaw, Codex, Claude Code, and internal operators that need a stable, structured, auditable command surface.
+Agent-oriented CLI for 风信子家教中心 backend operations. The CLI is designed for OpenClaw, Codex, Claude Code, and internal operators that need a stable, structured, auditable command surface.
 
 ## Principles
 
@@ -68,6 +68,9 @@ hyacinthus skills export --dir ./.tmp/agent-skills
 hyacinthus skills check --dir ./.tmp/agent-skills
 hyacinthus requirements options
 hyacinthus requirements parse --file input.txt --instance-id 1
+hyacinthus requirements catalog create-missing --file parsed.json --dry-run
+hyacinthus requirements catalog create-missing --file parsed.json --yes
+hyacinthus requirements catalog reorder --target subjects --ids 3,1,2 --yes
 hyacinthus requirements import --file confirmed.json --instance-id 1 --idempotency-key cli-demo --yes
 ```
 
