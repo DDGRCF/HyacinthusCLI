@@ -1439,8 +1439,7 @@ fn build_import_payload(
         payload["instance_id"] = json!(required_instance_id(instance_id)?);
     }
     if payload.get("idempotency_key").is_none() {
-        payload["idempotency_key"] =
-            json!(args.idempotency_key.clone().unwrap_or_else(String::new));
+        payload["idempotency_key"] = json!(args.idempotency_key.clone().unwrap_or_default());
     }
     let row_count = payload
         .get("confirmed_rows")

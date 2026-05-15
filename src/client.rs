@@ -150,7 +150,7 @@ impl ApiClient {
                 Some(value),
             ));
         }
-        Ok(value.get("data").cloned().unwrap_or_else(|| json!(null)))
+        Ok(value.get("data").cloned().unwrap_or(Value::Null))
     }
 }
 
@@ -236,7 +236,7 @@ fn public_request<T: for<'de> Deserialize<'de>>(
             Some(value),
         ));
     }
-    let data = value.get("data").cloned().unwrap_or_else(|| json!(null));
+    let data = value.get("data").cloned().unwrap_or(Value::Null);
     serde_json::from_value(data)
         .map_err(|err| CliError::api(format!("invalid auth session response: {err}"), None, None))
 }
