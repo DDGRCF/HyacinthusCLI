@@ -4,12 +4,51 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, for example v0.1.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      package_version: ${{ steps.version.outputs.package_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Validate tag and Cargo version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          package_version="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')"
+          if [[ ! "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must look like v0.1.0, got ${release_tag}" >&2
+            exit 1
+          fi
+          if [[ "${release_tag#v}" != "${package_version}" ]]; then
+            echo "tag ${release_tag} does not match Cargo.toml version ${package_version}" >&2
+            exit 1
+          fi
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
+      - name: Check
+        run: scripts/check.sh
+
   build:
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
@@ -27,6 +66,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.release_tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -54,16 +95,42 @@ jobs:
             dist/*.tar.gz.sha256
 
   publish:
-    needs: build
+    needs:
+      - validate
+      - build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Generate aggregate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz | sort -k2 > SHA256SUMS
+      - name: Render release notes
+        shell: bash
+        run: |
+          cat > RELEASE_NOTES.md <<'EOF'
+          Hyacinthus CLI release.
+
+          Install through the private npm wrapper:
+
+          ```bash
+          GITHUB_TOKEN=github_pat_xxx npx @ddgrcf/hyacinthus-cli install --version ${{ needs.validate.outputs.release_tag }}
+          ```
+
+          Or download the matching archive from this release and verify it with `SHA256SUMS`.
+          EOF
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.validate.outputs.release_tag }}
+          name: Hyacinthus CLI ${{ needs.validate.outputs.release_tag }}
+          body_path: RELEASE_NOTES.md
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
+            dist/SHA256SUMS
