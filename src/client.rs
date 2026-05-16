@@ -1,4 +1,4 @@
-// 改动说明：Agent 授权会话客户端升级为实例级授权模型并携带实例头。
+// 改动说明：HTTP 客户端补充授权、请求头和响应解析职责注释。
 use std::time::Duration;
 
 use reqwest::blocking::Client;
@@ -10,12 +10,14 @@ use crate::config::RuntimeContext;
 use crate::output::{CliError, CliResult};
 
 #[derive(Debug, Clone)]
+/// Authenticated backend client that injects Agent identity headers.
 pub struct ApiClient {
     client: Client,
     context: RuntimeContext,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+/// Public authorization-session payload returned when a user must approve access.
 pub struct AuthSessionCreated {
     pub session_id: String,
     pub client_instance_id: String,
@@ -32,6 +34,7 @@ pub struct AuthSessionCreated {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+/// Authorization-session status returned while polling or after approval.
 pub struct AuthSessionStatus {
     pub session_id: String,
     pub client_instance_id: String,
@@ -57,6 +60,7 @@ pub struct AuthSessionStatus {
 }
 
 impl ApiClient {
+    /// Build a backend client with the runtime profile and a bounded request timeout.
     pub fn new(context: RuntimeContext) -> CliResult<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(120))
@@ -65,22 +69,27 @@ impl ApiClient {
         Ok(Self { client, context })
     }
 
+    /// Run an authenticated GET request against an `/api/v1` backend path.
     pub fn get(&self, path: &str) -> CliResult<Value> {
         self.request("GET", path, None)
     }
 
+    /// Run an authenticated POST request with a JSON body.
     pub fn post(&self, path: &str, body: Value) -> CliResult<Value> {
         self.request("POST", path, Some(body))
     }
 
+    /// Run an authenticated PUT request with a JSON body.
     pub fn put(&self, path: &str, body: Value) -> CliResult<Value> {
         self.request("PUT", path, Some(body))
     }
 
+    /// Run an authenticated request for the guarded raw API command.
     pub fn raw(&self, method: &str, path: &str, body: Option<Value>) -> CliResult<Value> {
         self.request(method, path, body)
     }
 
+    /// Send one authenticated request and unwrap the backend `{ code, data }` envelope.
     fn request(&self, method: &str, path: &str, body: Option<Value>) -> CliResult<Value> {
         let token = self
             .context
@@ -154,6 +163,7 @@ impl ApiClient {
     }
 }
 
+/// Create a public authorization session before an Agent token exists.
 pub fn create_auth_session(
     base_url: &str,
     scopes: &[String],
@@ -170,6 +180,7 @@ pub fn create_auth_session(
     public_request(base_url, "POST", "/api/v1/agent/auth/sessions", Some(body))
 }
 
+/// Fetch the current status of an authorization session.
 pub fn get_auth_session(base_url: &str, session_id: &str) -> CliResult<AuthSessionStatus> {
     public_request(
         base_url,
@@ -185,6 +196,7 @@ fn public_request<T: for<'de> Deserialize<'de>>(
     path: &str,
     body: Option<Value>,
 ) -> CliResult<T> {
+    // Authorization session endpoints are public because no Agent token exists yet.
     let client = Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
@@ -241,6 +253,7 @@ fn public_request<T: for<'de> Deserialize<'de>>(
         .map_err(|err| CliError::api(format!("invalid auth session response: {err}"), None, None))
 }
 
+/// Extract a backend error code regardless of whether it is encoded as string or number.
 fn backend_code(value: &Value) -> Option<String> {
     value.get("code").and_then(|code| {
         code.as_str()

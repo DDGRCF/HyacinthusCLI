@@ -1,3 +1,4 @@
+// 改动说明：内置 Agent skill 导出与校验逻辑补充职责注释。
 use std::fs;
 use std::path::Path;
 
@@ -5,11 +6,15 @@ use serde::Serialize;
 
 use crate::output::{CliError, CliResult};
 
+/// Shared skill content embedded into the binary.
 const SHARED_SKILL: &str = include_str!("../skills/hyacinthus-shared/SKILL.md");
+/// Requirement workflow skill content embedded into the binary.
 const REQUIREMENTS_SKILL: &str = include_str!("../skills/hyacinthus-requirements/SKILL.md");
+/// Agent runtime authorization skill content embedded into the binary.
 const AGENT_RUNTIME_SKILL: &str = include_str!("../skills/hyacinthus-agent-runtime/SKILL.md");
 
 #[derive(Debug, Clone, Serialize)]
+/// Bundled skill metadata and optional markdown content.
 pub struct Skill {
     pub name: &'static str,
     pub description: &'static str,
@@ -20,6 +25,7 @@ pub struct Skill {
 }
 
 #[derive(Debug, Clone, Serialize)]
+/// Summary returned after exporting bundled skills to disk.
 pub struct SkillExportSummary {
     pub dir: String,
     pub version: &'static str,
@@ -28,6 +34,7 @@ pub struct SkillExportSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
+/// One exported skill file entry.
 pub struct SkillExportItem {
     pub name: &'static str,
     pub path: String,
@@ -35,6 +42,7 @@ pub struct SkillExportItem {
 }
 
 #[derive(Debug, Clone, Serialize)]
+/// Summary returned after checking an installed skill directory.
 pub struct SkillCheckSummary {
     pub dir: String,
     pub expected_version: &'static str,
@@ -43,6 +51,7 @@ pub struct SkillCheckSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
+/// Status for one skill file or the generated skills manifest.
 pub struct SkillCheckItem {
     pub name: &'static str,
     pub path: String,
@@ -50,6 +59,7 @@ pub struct SkillCheckItem {
     pub message: String,
 }
 
+/// List bundled skills without including their full markdown content.
 pub fn list() -> Vec<Skill> {
     vec![
         Skill {
@@ -76,6 +86,7 @@ pub fn list() -> Vec<Skill> {
     ]
 }
 
+/// Export all bundled skills and a version manifest to a target directory.
 pub fn export_to(dir: &Path) -> CliResult<SkillExportSummary> {
     fs::create_dir_all(dir).map_err(|err| {
         CliError::validation(format!(
@@ -129,6 +140,7 @@ pub fn export_to(dir: &Path) -> CliResult<SkillExportSummary> {
     })
 }
 
+/// Check whether a target directory contains current bundled skill files.
 pub fn check_dir(dir: &Path) -> SkillCheckSummary {
     let mut skills = Vec::new();
     for skill in full_skills() {
@@ -167,6 +179,7 @@ pub fn check_dir(dir: &Path) -> SkillCheckSummary {
     }
 }
 
+/// Return one bundled skill with full markdown content.
 pub fn show(name: &str) -> CliResult<Skill> {
     match name {
         "hyacinthus-shared" => Ok(Skill {
@@ -194,6 +207,7 @@ pub fn show(name: &str) -> CliResult<Skill> {
     }
 }
 
+/// Return all bundled skills with content included.
 fn full_skills() -> Vec<Skill> {
     vec![
         Skill {
@@ -220,6 +234,7 @@ fn full_skills() -> Vec<Skill> {
     ]
 }
 
+/// Compare one installed skill file with the embedded version.
 fn check_skill_file(path: &Path, expected: &str) -> (&'static str, String) {
     match fs::read_to_string(path) {
         Ok(content) if content == expected => ("pass", "current".to_string()),
@@ -231,6 +246,7 @@ fn check_skill_file(path: &Path, expected: &str) -> (&'static str, String) {
     }
 }
 
+/// Validate the exported skills manifest version and included skill names.
 fn check_manifest(path: &Path) -> (&'static str, String) {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
@@ -260,6 +276,7 @@ fn check_manifest(path: &Path) -> (&'static str, String) {
     ("pass", "current".to_string())
 }
 
+/// Convert paths to displayable strings for JSON output.
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }

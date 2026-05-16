@@ -1,3 +1,4 @@
+// 改动说明：能力 manifest 结构、兼容性检查和校验流程补充职责注释。
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
@@ -6,9 +7,11 @@ use serde_json::Value;
 use crate::output::{CliError, CliResult};
 use crate::schema_validate;
 
+/// Capability manifest bundled into the CLI binary at compile time.
 const EMBEDDED_MANIFEST: &str = include_str!("../assets/agent-cli-capabilities.yaml");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Full capability manifest used by the CLI and backend to agree on Agent operations.
 pub struct CapabilityManifest {
     pub version: String,
     pub backend_min_version: String,
@@ -16,6 +19,7 @@ pub struct CapabilityManifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// One executable Agent capability and its request/response contract.
 pub struct Capability {
     pub id: String,
     pub title: String,
@@ -39,17 +43,20 @@ pub struct Capability {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Manifest validation issue associated with either the whole manifest or one capability.
 pub struct ManifestIssue {
     pub capability_id: Option<String>,
     pub field: String,
     pub message: String,
 }
 
+/// Load the embedded YAML capability manifest.
 pub fn load_embedded() -> CliResult<CapabilityManifest> {
     serde_yaml::from_str(EMBEDDED_MANIFEST)
         .map_err(|err| CliError::internal(format!("invalid embedded manifest: {err}")))
 }
 
+/// Look up one embedded capability by ID.
 pub fn find_capability(id: &str) -> CliResult<Capability> {
     let manifest = load_embedded()?;
     manifest
@@ -59,6 +66,7 @@ pub fn find_capability(id: &str) -> CliResult<Capability> {
         .ok_or_else(|| CliError::validation(format!("unknown capability: {id}")))
 }
 
+/// Reject deprecated capabilities or capabilities requiring a newer CLI/backend version.
 pub fn ensure_supported(capability: &Capability) -> CliResult<()> {
     if capability.deprecated {
         return Err(CliError::validation(format!(
@@ -75,6 +83,7 @@ pub fn ensure_supported(capability: &Capability) -> CliResult<()> {
     Ok(())
 }
 
+/// Build a compact compatibility summary for doctor and manifest verification output.
 pub fn compatibility_summary(manifest: &CapabilityManifest) -> Value {
     let unsupported = manifest
         .capabilities
@@ -100,6 +109,7 @@ pub fn compatibility_summary(manifest: &CapabilityManifest) -> Value {
     })
 }
 
+/// Validate top-level and per-capability manifest invariants.
 pub fn validate_manifest(manifest: &CapabilityManifest) -> Vec<ManifestIssue> {
     let mut issues = Vec::new();
     if manifest.version.trim().is_empty() {
@@ -132,6 +142,7 @@ fn validate_capability(
     ids: &mut BTreeSet<String>,
     issues: &mut Vec<ManifestIssue>,
 ) {
+    // Keep manifest defects explicit so frontend, backend, and CLI contract drift is visible.
     let id = Some(capability.id.clone());
     if capability.id.trim().is_empty() {
         issues.push(manifest_issue(id.clone(), "id", "id is required"));
@@ -237,6 +248,7 @@ fn manifest_issue(
     field: impl Into<String>,
     message: impl Into<String>,
 ) -> ManifestIssue {
+    // Centralize issue construction so validation output stays stable.
     ManifestIssue {
         capability_id,
         field: field.into(),
@@ -244,6 +256,7 @@ fn manifest_issue(
     }
 }
 
+/// Compare dotted numeric versions and treat unparsable versions as not newer.
 fn version_is_newer(candidate: &str, current: &str) -> bool {
     match (parse_version(candidate), parse_version(current)) {
         (Some(candidate), Some(current)) => candidate > current,
@@ -251,6 +264,7 @@ fn version_is_newer(candidate: &str, current: &str) -> bool {
     }
 }
 
+/// Parse dotted numeric semantic-version-like strings.
 fn parse_version(value: &str) -> Option<Vec<u64>> {
     value
         .split('.')

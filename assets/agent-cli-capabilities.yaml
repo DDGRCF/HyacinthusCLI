@@ -63,7 +63,7 @@ capabilities:
           description: 是否强制使用 AI 解析。
         enable_ai_fallback:
           type: boolean
-          default: true
+          default: false
           description: 是否允许 AI fallback。
         skip_geocode:
           type: boolean

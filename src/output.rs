@@ -1,3 +1,4 @@
+// 改动说明：统一输出信封、错误类型和表格格式化补充职责注释。
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -6,14 +7,21 @@ use crate::content_safety;
 use crate::json_query;
 use crate::notice;
 
+/// Exit code for backend API failures.
 pub const EXIT_API: i32 = 1;
+/// Exit code for local validation failures.
 pub const EXIT_VALIDATION: i32 = 2;
+/// Exit code for authentication and authorization failures.
 pub const EXIT_AUTH: i32 = 3;
+/// Exit code for network failures.
 pub const EXIT_NETWORK: i32 = 4;
+/// Exit code for unexpected internal CLI failures.
 pub const EXIT_INTERNAL: i32 = 5;
+/// Exit code for write operations that require explicit `--yes`.
 pub const EXIT_CONFIRMATION_REQUIRED: i32 = 10;
 
 #[derive(Debug, Clone)]
+/// Structured CLI error rendered into the standard JSON envelope.
 pub struct CliError {
     pub exit_code: i32,
     pub error_type: &'static str,
@@ -26,6 +34,7 @@ pub struct CliError {
 }
 
 impl CliError {
+    /// Create a local validation error.
     pub fn validation(message: impl Into<String>) -> Self {
         Self {
             exit_code: EXIT_VALIDATION,
@@ -39,6 +48,7 @@ impl CliError {
         }
     }
 
+    /// Create a local validation error with structured detail.
     pub fn validation_with_detail(message: impl Into<String>, detail: Value) -> Self {
         Self {
             exit_code: EXIT_VALIDATION,
@@ -52,6 +62,7 @@ impl CliError {
         }
     }
 
+    /// Create an authentication error with token setup guidance.
     pub fn auth(message: impl Into<String>) -> Self {
         Self {
             exit_code: EXIT_AUTH,
@@ -67,6 +78,7 @@ impl CliError {
         }
     }
 
+    /// Create a retryable network error.
     pub fn network(message: impl Into<String>) -> Self {
         Self {
             exit_code: EXIT_NETWORK,
@@ -80,6 +92,7 @@ impl CliError {
         }
     }
 
+    /// Create a backend API error, preserving backend code and detail when available.
     pub fn api(message: impl Into<String>, code: Option<String>, detail: Option<Value>) -> Self {
         Self {
             exit_code: EXIT_API,
@@ -93,6 +106,7 @@ impl CliError {
         }
     }
 
+    /// Create a missing-scope error for local scope checks.
     pub fn missing_scope(missing: Vec<String>, required: Vec<String>) -> Self {
         let message = format!("missing required scope: {}", missing.join(", "));
         Self {
@@ -113,6 +127,7 @@ impl CliError {
         }
     }
 
+    /// Create an auth-required handoff error with URL, QR, and session metadata.
     pub fn auth_required(message: impl Into<String>, detail: Value) -> Self {
         Self {
             exit_code: EXIT_AUTH,
@@ -151,6 +166,7 @@ impl CliError {
         }
     }
 
+    /// Create an unexpected internal CLI error.
     pub fn internal(message: impl Into<String>) -> Self {
         Self {
             exit_code: EXIT_INTERNAL,
@@ -164,6 +180,7 @@ impl CliError {
         }
     }
 
+    /// Require explicit confirmation for a risky operation.
     pub fn confirmation_required(action: impl Into<String>, level: impl Into<String>) -> Self {
         let action = action.into();
         let level = level.into();
@@ -179,6 +196,7 @@ impl CliError {
         }
     }
 
+    /// Require explicit confirmation and include structured pending changes.
     pub fn confirmation_required_with_detail(
         action: impl Into<String>,
         level: impl Into<String>,
@@ -199,8 +217,10 @@ impl CliError {
     }
 }
 
+/// Standard result type for CLI command execution.
 pub type CliResult<T> = Result<T, CliError>;
 
+/// Print a successful CLI envelope and return exit code 0.
 pub fn print_success<T: Serialize>(
     data: T,
     meta: Value,
@@ -222,6 +242,7 @@ pub fn print_success<T: Serialize>(
     0
 }
 
+/// Print a failed CLI envelope and return the mapped exit code.
 pub fn print_error(err: &CliError, meta: Value, format: OutputFormat, include_notice: bool) -> i32 {
     let mut envelope = json!({
         "ok": false,
@@ -242,6 +263,7 @@ pub fn print_error(err: &CliError, meta: Value, format: OutputFormat, include_no
     err.exit_code
 }
 
+/// Print a JSON value in the selected output format.
 pub fn print_value(value: &Value, format: OutputFormat) {
     match format {
         OutputFormat::Json => {
@@ -254,6 +276,7 @@ pub fn print_value(value: &Value, format: OutputFormat) {
     }
 }
 
+/// Print one compact JSON line.
 fn print_json_line(value: &Value) {
     match serde_json::to_string(value) {
         Ok(text) => println!("{text}"),
@@ -261,6 +284,7 @@ fn print_json_line(value: &Value) {
     }
 }
 
+/// Print pretty JSON for humans.
 fn print_pretty(value: &Value) {
     match serde_json::to_string_pretty(value) {
         Ok(text) => println!("{text}"),
@@ -268,6 +292,7 @@ fn print_pretty(value: &Value) {
     }
 }
 
+/// Print tabular records as newline-delimited JSON when multiple records exist.
 fn print_ndjson(value: &Value) {
     let records = tabular_records(value);
     if records.len() <= 1 {
@@ -279,6 +304,7 @@ fn print_ndjson(value: &Value) {
     }
 }
 
+/// Print scalar fields from tabular records as a tab-separated table.
 fn print_table(value: &Value) {
     let records = tabular_records(value);
     if records.is_empty() {
@@ -300,6 +326,7 @@ fn print_table(value: &Value) {
     }
 }
 
+/// Print scalar fields from tabular records as CSV.
 fn print_csv(value: &Value) {
     let records = tabular_records(value);
     if records.is_empty() {
@@ -328,6 +355,7 @@ fn print_csv(value: &Value) {
     }
 }
 
+/// Extract the best-effort record list from standard CLI envelopes or raw arrays.
 fn tabular_records(value: &Value) -> Vec<Value> {
     if let Some(data) = value.get("data") {
         if let Some(array) = data.as_array() {
@@ -351,6 +379,7 @@ fn tabular_records(value: &Value) -> Vec<Value> {
     Vec::new()
 }
 
+/// Select scalar columns in first-seen order with a bounded column count.
 fn tabular_columns(records: &[Value]) -> Vec<String> {
     let mut columns = Vec::new();
     for record in records {
@@ -369,6 +398,7 @@ fn tabular_columns(records: &[Value]) -> Vec<String> {
     columns
 }
 
+/// Return whether a JSON value can be represented directly in table or CSV cells.
 fn is_scalar(value: &Value) -> bool {
     matches!(
         value,
@@ -376,6 +406,7 @@ fn is_scalar(value: &Value) -> bool {
     )
 }
 
+/// Convert scalar JSON values to terminal-safe cell text.
 fn scalar_to_text(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
@@ -389,6 +420,7 @@ fn scalar_to_text(value: &Value) -> String {
     }
 }
 
+/// Sanitize output and attach a warning when risky content is detected.
 fn attach_content_safety_alert(envelope: &mut Value) {
     let report = content_safety::sanitize(envelope);
     if let Some(alert) = report.alert() {
@@ -396,12 +428,14 @@ fn attach_content_safety_alert(envelope: &mut Value) {
     }
 }
 
+/// Attach optional CLI update notices to the output envelope.
 fn attach_notice(envelope: &mut Value, include_notice: bool) {
     if let Some(notice) = notice::build(include_notice) {
         envelope["_notice"] = notice;
     }
 }
 
+/// Escape one CSV cell according to basic RFC 4180 rules.
 fn csv_escape(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
         format!("\"{}\"", value.replace('"', "\"\""))

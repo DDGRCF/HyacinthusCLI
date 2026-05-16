@@ -1,3 +1,4 @@
+// 改动说明：CLI 入口补充启动流程注释。
 #![allow(clippy::result_large_err)]
 
 mod cli;
@@ -17,6 +18,7 @@ mod skills;
 
 use clap::Parser;
 
+/// Parse command-line arguments, execute the command, and exit with its mapped code.
 fn main() {
     let cli = cli::Cli::parse();
     let code = commands::run(cli);

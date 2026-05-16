@@ -1,3 +1,4 @@
+// 改动说明：CLI 参数模型补充职责注释，并让需求解析默认关闭 AI fallback。
 use std::fmt;
 use std::str::FromStr;
 
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
     version,
     about = "Agent-oriented CLI for 风信子家教中心"
 )]
+/// Top-level command-line options shared by all Hyacinthus CLI commands.
 pub struct Cli {
     #[arg(long, global = true)]
     pub profile: Option<String>,
@@ -32,6 +34,7 @@ pub struct Cli {
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Root command groups exposed by the CLI.
 pub enum Command {
     Admin(AdminCommand),
     Claw(ClawCommand),
@@ -47,52 +50,61 @@ pub enum Command {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Administrative command group wrapper.
 pub struct AdminCommand {
     #[command(subcommand)]
     pub command: AdminSubcommand,
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Administrative operations that are safe for Agent status inspection.
 pub enum AdminSubcommand {
     Status,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Claw operations command group wrapper.
 pub struct ClawCommand {
     #[command(subcommand)]
     pub command: ClawSubcommand,
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Claw operations available through the Agent CLI.
 pub enum ClawSubcommand {
     Status,
     Skills(ClawSkillsCommand),
 }
 
 #[derive(Clone, Debug, Args)]
+/// Claw skill command group wrapper.
 pub struct ClawSkillsCommand {
     #[command(subcommand)]
     pub command: ClawSkillsSubcommand,
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Claw skill subcommands.
 pub enum ClawSkillsSubcommand {
     List(ClawSkillsListArgs),
 }
 
 #[derive(Clone, Debug, Args)]
+/// Filters for listing runtime skills installed in Claw.
 pub struct ClawSkillsListArgs {
     #[arg(long)]
     pub source: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Configuration command group wrapper.
 pub struct ConfigCommand {
     #[command(subcommand)]
     pub command: ConfigSubcommand,
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Profile and token configuration operations.
 pub enum ConfigSubcommand {
     SetProfile(SetProfileArgs),
     Use(ProfileNameArgs),
@@ -103,6 +115,7 @@ pub enum ConfigSubcommand {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for creating or updating a named CLI profile.
 pub struct SetProfileArgs {
     pub name: String,
     #[arg(long)]
@@ -126,17 +139,20 @@ pub struct SetProfileArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments that identify a profile by name.
 pub struct ProfileNameArgs {
     pub name: String,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for showing a specific profile or the active profile.
 pub struct ProfileShowArgs {
     #[arg(long)]
     pub profile: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for storing an Agent token in a profile.
 pub struct SetTokenArgs {
     #[arg(long)]
     pub profile: Option<String>,
@@ -147,12 +163,14 @@ pub struct SetTokenArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Authorization command group wrapper.
 pub struct AuthCommand {
     #[command(subcommand)]
     pub command: AuthSubcommand,
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Authorization lifecycle operations for Agent-scoped credentials.
 pub enum AuthSubcommand {
     Status,
     Login(AuthLoginArgs),
@@ -164,6 +182,7 @@ pub enum AuthSubcommand {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for starting an authorization session.
 pub struct AuthLoginArgs {
     #[arg(long)]
     pub scope: Option<String>,
@@ -174,6 +193,7 @@ pub struct AuthLoginArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for waiting on an existing authorization session.
 pub struct AuthWaitArgs {
     #[arg(long)]
     pub session_id: String,
@@ -182,18 +202,21 @@ pub struct AuthWaitArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for checking whether local credentials cover required scopes.
 pub struct AuthCheckArgs {
     #[arg(long)]
     pub scope: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for listing available scopes from the capability manifest.
 pub struct AuthScopesArgs {
     #[arg(long)]
     pub domain: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for environment and manifest diagnostics.
 pub struct DoctorArgs {
     #[arg(long)]
     pub offline: bool,
@@ -202,12 +225,14 @@ pub struct DoctorArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Capability command group wrapper.
 pub struct CapabilityCommand {
     #[command(subcommand)]
     pub command: CapabilitySubcommand,
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Capability manifest operations used for schema discovery and execution.
 pub enum CapabilitySubcommand {
     List(CapabilityListArgs),
     Schema(CapabilityIdArgs),
@@ -217,12 +242,14 @@ pub enum CapabilitySubcommand {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for listing embedded or backend capabilities.
 pub struct CapabilityListArgs {
     #[arg(long)]
     pub remote: bool,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments that identify a capability by ID.
 pub struct CapabilityIdArgs {
     pub id: String,
     #[arg(long)]
@@ -230,6 +257,7 @@ pub struct CapabilityIdArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for validating capability manifest consistency.
 pub struct CapabilityVerifyArgs {
     #[arg(long)]
     pub remote: bool,
@@ -238,6 +266,7 @@ pub struct CapabilityVerifyArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for comparing embedded and backend capability manifests.
 pub struct CapabilityDiffArgs {
     #[arg(long)]
     pub remote: bool,
@@ -246,6 +275,7 @@ pub struct CapabilityDiffArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for executing a manifest capability through the generic runner.
 pub struct CapabilityRunArgs {
     pub id: String,
     #[arg(long)]
@@ -265,6 +295,7 @@ pub struct CapabilityRunArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for the guarded raw API escape hatch.
 pub struct ApiArgs {
     pub method: String,
     pub path: String,
@@ -283,6 +314,7 @@ pub struct ApiArgs {
 }
 
 #[derive(Clone, Debug, Args, Default)]
+/// Shared pagination controls for endpoints that expose continuation tokens.
 pub struct PaginationArgs {
     #[arg(long)]
     pub page_all: bool,
@@ -295,17 +327,20 @@ pub struct PaginationArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for printing a capability schema by path or ID.
 pub struct SchemaArgs {
     pub path: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Requirements command group wrapper.
 pub struct RequirementsCommand {
     #[command(subcommand)]
     pub command: RequirementsSubcommand,
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Requirements workflows supported by Agent automation.
 pub enum RequirementsSubcommand {
     Options,
     Parse(RequirementsParseArgs),
@@ -314,18 +349,21 @@ pub enum RequirementsSubcommand {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Requirements catalog command group wrapper.
 pub struct RequirementsCatalogCommand {
     #[command(subcommand)]
     pub command: RequirementsCatalogSubcommand,
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Catalog maintenance operations for subjects and grades.
 pub enum RequirementsCatalogSubcommand {
     CreateMissing(RequirementsCatalogCreateMissingArgs),
     Reorder(RequirementsCatalogReorderArgs),
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for parsing raw requirement text into confirmable rows.
 pub struct RequirementsParseArgs {
     #[arg(long)]
     pub instance_id: Option<i64>,
@@ -349,7 +387,7 @@ pub struct RequirementsParseArgs {
     pub force_ai: bool,
     #[arg(long = "no-force-ai", default_value_t = false)]
     pub no_force_ai: bool,
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = false)]
     pub enable_ai_fallback: bool,
     #[arg(long = "no-enable-ai-fallback", default_value_t = false)]
     pub no_enable_ai_fallback: bool,
@@ -362,6 +400,7 @@ pub struct RequirementsParseArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for importing already confirmed requirement rows.
 pub struct RequirementsImportArgs {
     #[arg(long)]
     pub instance_id: Option<i64>,
@@ -380,6 +419,7 @@ pub struct RequirementsImportArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for creating missing subject or grade catalog entries.
 pub struct RequirementsCatalogCreateMissingArgs {
     #[arg(long)]
     pub file: Option<String>,
@@ -402,6 +442,7 @@ pub struct RequirementsCatalogCreateMissingArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for reordering subject or grade catalog entries.
 pub struct RequirementsCatalogReorderArgs {
     #[arg(long, value_enum)]
     pub target: CatalogTarget,
@@ -417,6 +458,7 @@ pub struct RequirementsCatalogReorderArgs {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+/// Catalog type selected by catalog reorder operations.
 pub enum CatalogTarget {
     Subjects,
     Grades,
@@ -433,12 +475,14 @@ impl fmt::Display for CatalogTarget {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Bundled skill command group wrapper.
 pub struct SkillsCommand {
     #[command(subcommand)]
     pub command: SkillsSubcommand,
 }
 
 #[derive(Clone, Debug, Subcommand)]
+/// Bundled Agent skill discovery and export operations.
 pub enum SkillsSubcommand {
     List,
     Show(SkillNameArgs),
@@ -447,29 +491,34 @@ pub enum SkillsSubcommand {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments that identify a bundled skill by name.
 pub struct SkillNameArgs {
     pub name: String,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for exporting bundled skills to a workspace directory.
 pub struct SkillsExportArgs {
     #[arg(long)]
     pub dir: String,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for checking a workspace skill installation.
 pub struct SkillsCheckArgs {
     #[arg(long)]
     pub dir: String,
 }
 
 #[derive(Clone, Debug, Args)]
+/// Arguments for generating shell completion scripts.
 pub struct CompletionArgs {
     pub shell: String,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+/// Output encodings supported by the CLI envelope printer.
 pub enum OutputFormat {
     Json,
     Pretty,

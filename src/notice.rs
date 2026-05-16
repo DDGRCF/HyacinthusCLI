@@ -1,7 +1,9 @@
+// 改动说明：CLI 版本与技能刷新提示补充职责注释。
 use std::env;
 
 use serde_json::{json, Value};
 
+/// Build optional update notices controlled by environment variables.
 pub fn build(include_notice: bool) -> Option<Value> {
     if !include_notice {
         return None;
@@ -38,6 +40,7 @@ pub fn build(include_notice: bool) -> Option<Value> {
     }
 }
 
+/// Return whether a candidate dotted version is newer than the current version.
 fn is_newer(candidate: &str, current: &str) -> bool {
     match (parse_version(candidate), parse_version(current)) {
         (Some(candidate), Some(current)) => candidate > current,
@@ -45,6 +48,7 @@ fn is_newer(candidate: &str, current: &str) -> bool {
     }
 }
 
+/// Parse a dotted numeric version into comparable components.
 fn parse_version(value: &str) -> Option<Vec<u64>> {
     value
         .split('.')

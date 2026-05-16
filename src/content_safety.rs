@@ -1,11 +1,14 @@
+// 改动说明：输出内容安全清理补充职责注释。
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Default)]
+/// Summary of safety rules triggered while sanitizing CLI output.
 pub struct SafetyReport {
     pub rules: Vec<&'static str>,
 }
 
 impl SafetyReport {
+    /// Convert triggered rules into an optional warning object for the output envelope.
     pub fn alert(&self) -> Option<Value> {
         if self.rules.is_empty() {
             return None;
@@ -16,6 +19,7 @@ impl SafetyReport {
         }))
     }
 
+    /// Record a safety rule once even if multiple values trigger it.
     fn push_rule(&mut self, rule: &'static str) {
         if !self.rules.contains(&rule) {
             self.rules.push(rule);
@@ -23,12 +27,14 @@ impl SafetyReport {
     }
 }
 
+/// Sanitize a JSON value in place and return any triggered safety warnings.
 pub fn sanitize(value: &mut Value) -> SafetyReport {
     let mut report = SafetyReport::default();
     sanitize_value(value, &mut report);
     report
 }
 
+/// Remove terminal-hostile control characters while keeping normal whitespace.
 pub fn sanitize_text(value: &str) -> String {
     value
         .chars()
@@ -36,6 +42,7 @@ pub fn sanitize_text(value: &str) -> String {
         .collect()
 }
 
+/// Recursively sanitize strings inside arrays and objects.
 fn sanitize_value(value: &mut Value, report: &mut SafetyReport) {
     match value {
         Value::String(text) => {
@@ -62,6 +69,7 @@ fn sanitize_value(value: &mut Value, report: &mut SafetyReport) {
     }
 }
 
+/// Detect obvious prompt-injection phrases so the envelope can warn operators.
 fn contains_prompt_injection(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     [
@@ -76,6 +84,7 @@ fn contains_prompt_injection(value: &str) -> bool {
     .any(|pattern| lower.contains(pattern))
 }
 
+/// Identify control characters that should not be written to terminal output.
 fn is_forbidden_control(value: char) -> bool {
     value.is_control() && value != '\n' && value != '\r' && value != '\t'
 }

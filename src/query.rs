@@ -1,7 +1,9 @@
+// 改动说明：JSON 查询参数编码补充职责注释。
 use serde_json::Value;
 
 use crate::output::{CliError, CliResult};
 
+/// Append scalar or array JSON params to a URL path as encoded query parameters.
 pub fn append_json_params(path: &str, params: Option<&Value>) -> CliResult<String> {
     let Some(params) = params else {
         return Ok(path.to_string());
@@ -40,6 +42,7 @@ pub fn append_json_params(path: &str, params: Option<&Value>) -> CliResult<Strin
     Ok(format!("{path}{separator}{}", pairs.join("&")))
 }
 
+/// Convert one scalar JSON query value into text.
 fn query_value(value: &Value) -> CliResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
@@ -51,6 +54,7 @@ fn query_value(value: &Value) -> CliResult<String> {
     }
 }
 
+/// Percent-encode query keys and values using unreserved URL characters.
 fn encode(value: &str) -> String {
     value
         .bytes()

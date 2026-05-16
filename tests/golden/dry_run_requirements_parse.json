@@ -3,7 +3,7 @@
     "dry_run": true,
     "request": {
       "body": {
-        "enable_ai_fallback": true,
+        "enable_ai_fallback": false,
         "force_ai": false,
         "instance_id": 1,
         "preset_city": null,

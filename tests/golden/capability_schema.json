@@ -22,7 +22,7 @@
     "request_schema": {
       "properties": {
         "enable_ai_fallback": {
-          "default": true,
+          "default": false,
           "description": "是否允许 AI fallback。",
           "type": "boolean"
         },

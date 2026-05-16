@@ -1,3 +1,4 @@
+// 改动说明：配置解析、实例身份推导和认证上下文补充职责注释。
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -11,6 +12,7 @@ use uuid::Uuid;
 use crate::cli::OutputFormat;
 use crate::output::{CliError, CliResult};
 
+/// Agent client types accepted by backend authorization and profile identity.
 pub const SUPPORTED_CLIENT_TYPES: &[&str] = &[
     "hermes",
     "codex",
@@ -19,15 +21,18 @@ pub const SUPPORTED_CLIENT_TYPES: &[&str] = &[
     "nullclaw",
     "hyacinthus-cli",
 ];
+/// Production backend URL used when flags, env, and profile config do not override it.
 pub const DEFAULT_BASE_URL: &str = "https://www.fxzjjzx.cn";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// On-disk CLI configuration file containing the active profile and all profiles.
 pub struct ConfigFile {
     pub active_profile: Option<String>,
     pub profiles: BTreeMap<String, Profile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// A named CLI profile with backend, Agent identity, token, and local scope hints.
 pub struct Profile {
     pub name: String,
     pub base_url: String,
@@ -42,6 +47,7 @@ pub struct Profile {
 }
 
 #[derive(Debug, Clone)]
+/// Fully resolved runtime context used for authenticated backend requests.
 pub struct RuntimeContext {
     pub profile_name: String,
     pub base_url: String,
@@ -56,12 +62,14 @@ pub struct RuntimeContext {
 }
 
 #[derive(Debug, Clone)]
+/// Minimal context used when only local scope validation is needed.
 pub struct ScopeContext {
     pub profile_name: String,
     pub scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
+/// Auth status context that reports configured values without requiring a token.
 pub struct AuthStatusContext {
     pub profile_name: String,
     pub base_url: Option<String>,
@@ -76,6 +84,7 @@ pub struct AuthStatusContext {
     pub raw_api_enabled: bool,
 }
 
+/// Resolve the config file path from `HYACINTHUS_CONFIG_DIR` or `$HOME/.config`.
 pub fn config_path() -> CliResult<PathBuf> {
     if let Ok(dir) = env::var("HYACINTHUS_CONFIG_DIR") {
         return Ok(PathBuf::from(dir).join("config.json"));
@@ -87,6 +96,7 @@ pub fn config_path() -> CliResult<PathBuf> {
         .join("config.json"))
 }
 
+/// Load CLI configuration, returning an empty config when no file exists.
 pub fn load_config() -> CliResult<ConfigFile> {
     let path = config_path()?;
     if !path.exists() {
@@ -100,6 +110,7 @@ pub fn load_config() -> CliResult<ConfigFile> {
     })
 }
 
+/// Persist CLI configuration as pretty JSON, creating the parent directory if needed.
 pub fn save_config(config: &ConfigFile) -> CliResult<()> {
     let path = config_path()?;
     if let Some(parent) = path.parent() {
@@ -126,6 +137,7 @@ pub fn save_agent_credentials(
     token: String,
     scopes: Vec<String>,
 ) -> CliResult<()> {
+    // Auth wait uses this path to persist the token under the exact Agent instance identity.
     let mut config = load_config()?;
     let profile = config
         .profiles
@@ -154,6 +166,7 @@ pub fn save_agent_credentials(
     save_config(&config)
 }
 
+/// Normalize and validate a backend base URL.
 pub fn normalize_base_url(raw: &str) -> CliResult<String> {
     let trimmed = raw.trim().trim_end_matches('/');
     if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
@@ -164,6 +177,7 @@ pub fn normalize_base_url(raw: &str) -> CliResult<String> {
     Ok(trimmed.to_string())
 }
 
+/// Resolve base URL precedence: flag, env, profile, then production default.
 fn resolve_base_url(profile: Option<&Profile>, base_url_flag: Option<&str>) -> CliResult<String> {
     let value = base_url_flag
         .map(ToOwned::to_owned)
@@ -177,6 +191,7 @@ fn resolve_client_identity(
     profile: Option<&Profile>,
     profile_name: &str,
 ) -> CliResult<(String, String, String, bool)> {
+    // Preserve instance-specific authorization by deriving identity from profile/env, not HOME alone.
     let inferred_type = infer_client_type(profile_name);
     let client_type = env::var("HYACINTHUS_CLIENT_TYPE")
         .ok()
@@ -217,6 +232,7 @@ pub fn resolve_context(
     instance_id_flag: Option<i64>,
     request_id_flag: Option<&str>,
 ) -> CliResult<RuntimeContext> {
+    // This is the single source of truth for request identity, instance ID, token, and scopes.
     let mut config = load_config()?;
     let profile_name = resolve_profile_name(&config, profile_flag);
     let profile = config.profiles.get(&profile_name).cloned();
@@ -289,6 +305,7 @@ pub fn resolve_context(
     })
 }
 
+/// Resolve only profile and scope hints for local authorization checks.
 pub fn resolve_scope_context(profile_flag: Option<&str>) -> CliResult<ScopeContext> {
     let config = load_config()?;
     let profile_name = resolve_profile_name(&config, profile_flag);
@@ -317,6 +334,7 @@ pub fn resolve_auth_status_context(
     instance_id_flag: Option<i64>,
     request_id_flag: Option<&str>,
 ) -> CliResult<AuthStatusContext> {
+    // Status must be inspectable before a token exists, so values stay optional here.
     let config = load_config()?;
     let profile_name = resolve_profile_name(&config, profile_flag);
     let profile = config.profiles.get(&profile_name);
@@ -391,6 +409,7 @@ pub fn resolve_auth_status_context(
     })
 }
 
+/// Parse comma- or whitespace-separated scope lists.
 pub fn parse_scope_list(value: &str) -> Vec<String> {
     value
         .split(|character: char| character == ',' || character.is_whitespace())
@@ -400,6 +419,7 @@ pub fn parse_scope_list(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// Normalize and validate an Agent client type.
 pub fn normalize_client_type(value: &str) -> CliResult<String> {
     let normalized = value.trim().to_ascii_lowercase();
     if SUPPORTED_CLIENT_TYPES.contains(&normalized.as_str()) {
@@ -411,6 +431,7 @@ pub fn normalize_client_type(value: &str) -> CliResult<String> {
     )))
 }
 
+/// Infer a client type from a profile name when no explicit type is configured.
 pub fn infer_client_type(profile_name: &str) -> String {
     let normalized = profile_name.to_ascii_lowercase();
     for client_type in ["hermes", "codex", "claude", "picoclaw", "nullclaw"] {
@@ -428,6 +449,7 @@ pub fn complete_profile_identity(
     client_type: Option<String>,
     existing: Option<&Profile>,
 ) -> CliResult<(String, String, String)> {
+    // Used by config set-profile so a profile always has a stable client identity.
     let inferred_type = client_type
         .or_else(|| existing.and_then(|profile| profile.client_type.clone()))
         .unwrap_or_else(|| infer_client_type(profile_name));
@@ -445,6 +467,7 @@ pub fn complete_profile_identity(
     Ok((instance_id, display_name, normalized_type))
 }
 
+/// Resolve profile-name precedence, including Agent HOME-derived instance profiles.
 fn resolve_profile_name(config: &ConfigFile, profile_flag: Option<&str>) -> String {
     if let Some(profile) = profile_flag {
         return profile.to_string();
@@ -464,6 +487,7 @@ fn resolve_profile_name(config: &ConfigFile, profile_flag: Option<&str>) -> Stri
     "local".to_string()
 }
 
+/// Detect Agent-specific HOME variables that imply a separate local authorization profile.
 fn detect_agent_home_env() -> Option<(String, String)> {
     for (key, client_type) in [
         ("HERMES_HOME", "hermes"),
@@ -482,6 +506,7 @@ fn detect_agent_home_env() -> Option<(String, String)> {
     None
 }
 
+/// Convert an Agent HOME path into a stable profile name.
 fn profile_name_from_home(client_type: &str, path: &str) -> String {
     let path_buf = PathBuf::from(path);
     let basename = path_buf
@@ -492,6 +517,7 @@ fn profile_name_from_home(client_type: &str, path: &str) -> String {
     format!("{client_type}-{}", sanitize_profile_part(basename))
 }
 
+/// Sanitize user or path-derived text for safe profile-name segments.
 fn sanitize_profile_part(value: &str) -> String {
     let sanitized: String = value
         .chars()
@@ -511,6 +537,7 @@ fn sanitize_profile_part(value: &str) -> String {
     }
 }
 
+/// Generate a new Agent client-instance ID scoped to profile and client type.
 fn generate_client_instance_id(profile_name: &str, client_type: &str) -> String {
     let suffix = Uuid::new_v4().simple().to_string();
     format!(
@@ -520,10 +547,12 @@ fn generate_client_instance_id(profile_name: &str, client_type: &str) -> String 
     )
 }
 
+/// Build a readable display name shown during user authorization.
 fn default_client_display_name(profile_name: &str, client_type: &str) -> String {
     format!("{} ({})", title_case_client_type(client_type), profile_name)
 }
 
+/// Render client type names for user-facing display.
 fn title_case_client_type(client_type: &str) -> String {
     match client_type {
         "hermes" => "Hermes".to_string(),
@@ -545,6 +574,7 @@ fn upsert_profile_identity(
     client_type: &str,
     existing: Option<&Profile>,
 ) {
+    // Keep generated profile identity durable so future auth checks use the same instance.
     let profile = config
         .profiles
         .entry(profile_name.to_string())
@@ -576,6 +606,7 @@ pub fn resolve_output_format(
     profile_flag: Option<&str>,
     format_flag: Option<OutputFormat>,
 ) -> CliResult<OutputFormat> {
+    // Output format follows explicit flag, env, active profile, then JSON default.
     if let Some(format) = format_flag {
         return Ok(format);
     }
@@ -595,6 +626,7 @@ pub fn resolve_output_format(
     Ok(OutputFormat::Json)
 }
 
+/// Read all stdin into a UTF-8 string for JSON, token, or text input.
 pub fn read_stdin_string() -> CliResult<String> {
     let mut buf = String::new();
     io::stdin()
@@ -603,6 +635,7 @@ pub fn read_stdin_string() -> CliResult<String> {
     Ok(buf)
 }
 
+/// Read a non-empty token from stdin, trimming surrounding whitespace.
 pub fn read_token_from_stdin() -> CliResult<String> {
     let token = read_stdin_string()?.trim().to_string();
     if token.is_empty() {

@@ -1,21 +1,26 @@
+// 改动说明：轻量 JSON Schema 校验器补充职责注释。
 use serde_json::Value;
 
+/// JSON Schema primitive types supported by the CLI validator.
 const SUPPORTED_TYPES: &[&str] = &[
     "array", "boolean", "integer", "null", "number", "object", "string",
 ];
 
+/// Validate a JSON value against the supported subset of JSON Schema.
 pub fn validate(schema: &Value, value: &Value) -> Vec<String> {
     let mut errors = Vec::new();
     validate_at("$", schema, value, &mut errors);
     errors
 }
 
+/// Validate that a schema definition only uses features supported by this CLI.
 pub fn validate_schema_definition(schema: &Value) -> Vec<String> {
     let mut errors = Vec::new();
     validate_schema_at("$", schema, &mut errors);
     errors
 }
 
+/// Validate one value location and collect all local errors.
 fn validate_at(path: &str, schema: &Value, value: &Value, errors: &mut Vec<String>) {
     if type_allows_null(schema) && value.is_null() {
         return;
@@ -49,6 +54,7 @@ fn validate_at(path: &str, schema: &Value, value: &Value, errors: &mut Vec<Strin
     }
 }
 
+/// Validate one schema location recursively.
 fn validate_schema_at(path: &str, schema: &Value, errors: &mut Vec<String>) {
     let Some(object) = schema.as_object() else {
         errors.push(format!("{path} schema must be an object"));
@@ -82,6 +88,7 @@ fn validate_schema_at(path: &str, schema: &Value, errors: &mut Vec<String>) {
     }
 }
 
+/// Extract schema type names from either string or array form.
 fn schema_type_names(value: &Value) -> Vec<&str> {
     match value {
         Value::String(name) => vec![name.as_str()],
@@ -90,10 +97,12 @@ fn schema_type_names(value: &Value) -> Vec<&str> {
     }
 }
 
+/// Return whether a schema type is implemented by this lightweight validator.
 fn is_supported_type(name: &str) -> bool {
     SUPPORTED_TYPES.contains(&name)
 }
 
+/// Validate required fields and known child properties for an object value.
 fn validate_object(path: &str, schema: &Value, value: &Value, errors: &mut Vec<String>) {
     let Some(object) = value.as_object() else {
         return;
@@ -117,6 +126,7 @@ fn validate_object(path: &str, schema: &Value, value: &Value, errors: &mut Vec<S
     }
 }
 
+/// Validate minItems and item schemas for an array value.
 fn validate_array(path: &str, schema: &Value, value: &Value, errors: &mut Vec<String>) {
     let Some(items) = value.as_array() else {
         return;
@@ -134,6 +144,7 @@ fn validate_array(path: &str, schema: &Value, value: &Value, errors: &mut Vec<St
     }
 }
 
+/// Validate the JSON value type against string or array schema type declarations.
 fn validate_type(path: &str, expected: &Value, value: &Value, errors: &mut Vec<String>) {
     let allowed = match expected {
         Value::String(name) => vec![name.as_str()],
@@ -146,6 +157,7 @@ fn validate_type(path: &str, expected: &Value, value: &Value, errors: &mut Vec<S
     errors.push(format!("{path} must be {}", allowed.join(" or ")));
 }
 
+/// Return whether a schema allows null values.
 fn type_allows_null(schema: &Value) -> bool {
     match schema.get("type") {
         Some(Value::String(name)) => name == "null",
@@ -154,6 +166,7 @@ fn type_allows_null(schema: &Value) -> bool {
     }
 }
 
+/// Return whether a JSON value matches one supported schema type name.
 fn type_matches(name: &str, value: &Value) -> bool {
     match name {
         "array" => value.is_array(),

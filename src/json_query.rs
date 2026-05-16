@@ -1,19 +1,23 @@
+// 改动说明：轻量 JSON 路径查询器补充职责注释。
 use serde_json::Value;
 
 use crate::output::{CliError, CliResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Supported query segment shape for the CLI's limited jq-like syntax.
 enum SegmentKind {
     Field,
     ArrayItems,
 }
 
 #[derive(Debug, Clone)]
+/// One parsed path segment with an optional array expansion.
 struct Segment {
     name: String,
     kind: SegmentKind,
 }
 
+/// Apply a restricted dot-path expression such as `.data.rows[]` to a JSON value.
 pub fn apply(value: &Value, expression: &str) -> CliResult<Value> {
     let expression = expression.trim();
     if expression.is_empty() || expression == "." {
@@ -47,6 +51,7 @@ pub fn apply(value: &Value, expression: &str) -> CliResult<Value> {
     }
 }
 
+/// Parse the supported dot-path and `[]` expansion syntax.
 fn parse_segments(expression: &str) -> CliResult<Vec<Segment>> {
     if !expression.starts_with('.') {
         return Err(CliError::validation("jq expression must start with `.`"));

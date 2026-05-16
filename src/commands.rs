@@ -1,3 +1,4 @@
+// 改动说明：命令调度与关键执行流程补充职责注释，便于排查 Agent 调用链路。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -26,6 +27,7 @@ use crate::schema_validate;
 use crate::security;
 use crate::skills;
 
+/// Execute the parsed CLI command and print the standard success or error envelope.
 pub fn run(cli: Cli) -> i32 {
     if let Command::Completion(args) = &cli.command {
         if let Err(err) = completion_command(&args.shell) {
@@ -62,6 +64,7 @@ pub fn run(cli: Cli) -> i32 {
     }
 }
 
+/// Route the root command to the domain-specific handler.
 fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
     match &cli.command {
         Command::Admin(command) => admin_command(cli, &command.command),
@@ -90,6 +93,7 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
     }
 }
 
+/// Handle administrative status commands backed by manifest capabilities.
 fn admin_command(cli: &Cli, command: &AdminSubcommand) -> CliResult<(Value, Value)> {
     match command {
         AdminSubcommand::Status => {
@@ -112,6 +116,7 @@ fn admin_command(cli: &Cli, command: &AdminSubcommand) -> CliResult<(Value, Valu
     }
 }
 
+/// Handle Claw runtime commands and nested skill operations.
 fn claw_command(cli: &Cli, command: &ClawSubcommand) -> CliResult<(Value, Value)> {
     match command {
         ClawSubcommand::Status => {
@@ -137,6 +142,7 @@ fn claw_command(cli: &Cli, command: &ClawSubcommand) -> CliResult<(Value, Value)
     }
 }
 
+/// List skills visible to the current Claw instance.
 fn claw_skills_list(cli: &Cli, source: Option<&str>) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
@@ -157,6 +163,7 @@ fn claw_skills_list(cli: &Cli, source: Option<&str>) -> CliResult<(Value, Value)
     ))
 }
 
+/// Handle bundled skill list, show, export, and installation checks.
 fn skills_command(command: &crate::cli::SkillsSubcommand) -> CliResult<(Value, Value)> {
     match command {
         crate::cli::SkillsSubcommand::List => Ok((
@@ -178,6 +185,7 @@ fn skills_command(command: &crate::cli::SkillsSubcommand) -> CliResult<(Value, V
     }
 }
 
+/// Handle local profile, token, and default-output configuration commands.
 fn config_command(cli: &Cli, command: &ConfigSubcommand) -> CliResult<(Value, Value)> {
     let mut config = config::load_config()?;
     match command {
@@ -316,6 +324,7 @@ fn config_command(cli: &Cli, command: &ConfigSubcommand) -> CliResult<(Value, Va
     }
 }
 
+/// Handle Agent authorization status, login, grant, scope check, and logout commands.
 fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)> {
     match command {
         AuthSubcommand::Status => {
@@ -415,6 +424,7 @@ fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)
     }
 }
 
+/// Start an authorization session and optionally wait until approval saves the token.
 fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
@@ -479,6 +489,7 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
     ))
 }
 
+/// Wait for an existing authorization session and persist the approved token.
 fn auth_wait(cli: &Cli, args: &AuthWaitArgs) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
@@ -668,6 +679,7 @@ fn auth_session_error(
     )
 }
 
+/// Verify that locally configured scopes cover a requested scope expression.
 fn auth_scope_check(cli: &Cli, scope: &str) -> CliResult<(Value, Value)> {
     let required = config::parse_scope_list(scope);
     if required.is_empty() {
@@ -694,6 +706,7 @@ fn auth_scope_check(cli: &Cli, scope: &str) -> CliResult<(Value, Value)> {
     ))
 }
 
+/// Keep raw API access inside the supported backend API namespace.
 fn ensure_raw_api_path(path: &str) -> CliResult<()> {
     if path.starts_with("/api/v1/") {
         return Ok(());
@@ -703,6 +716,7 @@ fn ensure_raw_api_path(path: &str) -> CliResult<()> {
     ))
 }
 
+/// Execute the guarded raw API command when explicitly enabled.
 fn api_command(cli: &Cli, args: &crate::cli::ApiArgs) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
@@ -760,6 +774,7 @@ fn api_command(cli: &Cli, args: &crate::cli::ApiArgs) -> CliResult<(Value, Value
     Ok((data, json!({ "command": "api", "raw_api": true })))
 }
 
+/// Run local configuration, embedded manifest, and optional backend reachability checks.
 fn doctor_command(cli: &Cli, offline: bool, strict: bool) -> CliResult<(Value, Value)> {
     let mut checks = Vec::new();
     checks.push(
@@ -826,6 +841,7 @@ fn doctor_command(cli: &Cli, offline: bool, strict: bool) -> CliResult<(Value, V
     Ok((json!({ "checks": checks }), json!({ "command": "doctor" })))
 }
 
+/// Handle capability manifest discovery, validation, diff, and generic execution.
 fn capability_command(cli: &Cli, command: &CapabilitySubcommand) -> CliResult<(Value, Value)> {
     match command {
         CapabilitySubcommand::List(args) => {
@@ -876,6 +892,7 @@ fn capability_command(cli: &Cli, command: &CapabilitySubcommand) -> CliResult<(V
     }
 }
 
+/// Validate either the embedded or remote capability manifest.
 fn capability_verify(cli: &Cli, remote: bool, strict: bool) -> CliResult<(Value, Value)> {
     let (manifest, source) = if remote {
         let ctx = config::resolve_context(
@@ -918,6 +935,7 @@ fn capability_verify(cli: &Cli, remote: bool, strict: bool) -> CliResult<(Value,
     ))
 }
 
+/// Compare embedded and remote capability manifests for operational drift.
 fn capability_diff(cli: &Cli, remote: bool, strict: bool) -> CliResult<(Value, Value)> {
     if !remote {
         return Err(CliError::validation(
@@ -953,6 +971,7 @@ fn capability_diff(cli: &Cli, remote: bool, strict: bool) -> CliResult<(Value, V
     ))
 }
 
+/// Build a compact manifest drift summary keyed by capability ID.
 fn diff_manifests(
     embedded: &manifest::CapabilityManifest,
     remote: &manifest::CapabilityManifest,
@@ -1001,6 +1020,7 @@ fn diff_manifests(
     })
 }
 
+/// Return capability fields that differ between embedded and remote definitions.
 fn changed_capability_fields(
     embedded: &manifest::Capability,
     remote: &manifest::Capability,
@@ -1027,6 +1047,7 @@ fn changed_capability_fields(
     fields
 }
 
+/// Execute one manifest capability with schema validation and risk confirmation.
 fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
@@ -1107,6 +1128,7 @@ fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<
     ))
 }
 
+/// Print one capability schema or list all embedded capability IDs.
 fn schema_command(path: Option<&str>) -> CliResult<(Value, Value)> {
     if let Some(path) = path {
         let capability = manifest::find_capability(path)?;
@@ -1125,6 +1147,7 @@ fn schema_command(path: Option<&str>) -> CliResult<(Value, Value)> {
     }
 }
 
+/// Fetch backend options needed before parsing or importing requirements.
 fn requirements_options(cli: &Cli) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
@@ -1143,6 +1166,7 @@ fn requirements_options(cli: &Cli) -> CliResult<(Value, Value)> {
     ))
 }
 
+/// Parse raw requirement input into confirmable rows through the backend parser.
 fn requirements_parse(cli: &Cli, args: &RequirementsParseArgs) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
@@ -1176,6 +1200,7 @@ fn requirements_parse(cli: &Cli, args: &RequirementsParseArgs) -> CliResult<(Val
     ))
 }
 
+/// Import confirmed requirement rows with idempotency and write confirmation.
 fn requirements_import(cli: &Cli, args: &RequirementsImportArgs) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
@@ -1227,6 +1252,7 @@ fn requirements_import(cli: &Cli, args: &RequirementsImportArgs) -> CliResult<(V
     ))
 }
 
+/// Create missing subject or grade catalog records after explicit confirmation.
 fn requirements_catalog_create_missing(
     cli: &Cli,
     args: &RequirementsCatalogCreateMissingArgs,
@@ -1270,6 +1296,7 @@ fn requirements_catalog_create_missing(
     ))
 }
 
+/// Reorder subject or grade catalog records with a validated ID list.
 fn requirements_catalog_reorder(
     cli: &Cli,
     args: &RequirementsCatalogReorderArgs,
@@ -1317,6 +1344,7 @@ fn requirements_catalog_reorder(
     ))
 }
 
+/// Generate a shell completion script for the requested shell.
 fn completion_command(shell: &str) -> CliResult<()> {
     let shell = shell
         .parse::<Shell>()
@@ -1326,6 +1354,7 @@ fn completion_command(shell: &str) -> CliResult<()> {
     Ok(())
 }
 
+/// Convert parse flags, raw text, or JSON input into the backend batch-parse payload.
 fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -> CliResult<Value> {
     let source_count = [&args.file, &args.data, &args.text]
         .iter()
@@ -1373,6 +1402,7 @@ fn build_import_payload(
     instance_id: Option<i64>,
     args: &RequirementsImportArgs,
 ) -> CliResult<Value> {
+    // Accept direct import payloads, row arrays, or parse-output envelopes so Agents can pipe flows.
     let source_count = [&args.file, &args.data]
         .iter()
         .filter(|value| value.is_some())
@@ -1455,6 +1485,7 @@ fn build_import_payload(
 fn build_catalog_create_missing_payload(
     args: &RequirementsCatalogCreateMissingArgs,
 ) -> CliResult<Value> {
+    // Merge explicit CLI names with parse warnings before deduping catalog create payloads.
     let source_count = [&args.file, &args.data]
         .iter()
         .filter(|value| value.is_some())
@@ -1507,6 +1538,7 @@ fn build_catalog_create_missing_payload(
     Ok(payload)
 }
 
+/// Extract catalog creation candidates from either direct payloads or parse output.
 fn catalog_payload_from_source(raw: Value) -> CliResult<Value> {
     if raw.get("subjects").is_some() || raw.get("grades").is_some() {
         return Ok(json!({
@@ -1525,6 +1557,7 @@ fn catalog_payload_from_source(raw: Value) -> CliResult<Value> {
     ))
 }
 
+/// Convert unmapped subject and grade warnings into catalog item candidates.
 fn catalog_payload_from_parse_rows(rows: &[Value]) -> Value {
     let mut subjects = Vec::new();
     let mut grades = Vec::new();
@@ -1569,6 +1602,7 @@ fn append_catalog_names(
     names: &[String],
     category: Option<&str>,
 ) -> CliResult<()> {
+    // Preserve optional category only for names explicitly supplied on the command line.
     if payload.get(key).is_none() {
         payload[key] = json!([]);
     }
@@ -1590,12 +1624,14 @@ fn append_catalog_names(
     Ok(())
 }
 
+/// Deduplicate subject and grade arrays in a catalog payload.
 fn dedupe_catalog_payload(payload: &mut Value) -> CliResult<()> {
     dedupe_catalog_items(payload, "subjects")?;
     dedupe_catalog_items(payload, "grades")?;
     Ok(())
 }
 
+/// Deduplicate catalog items by normalized name while preserving the first full item.
 fn dedupe_catalog_items(payload: &mut Value, key: &str) -> CliResult<()> {
     if payload.get(key).is_none() {
         payload[key] = json!([]);
@@ -1627,6 +1663,7 @@ fn dedupe_catalog_items(payload: &mut Value, key: &str) -> CliResult<()> {
     Ok(())
 }
 
+/// Build a confirmation payload that shows exactly which catalog records will be created.
 fn catalog_confirmation_detail(payload: &Value) -> Value {
     json!({
         "subjects": payload.get("subjects").cloned().unwrap_or_else(|| json!([])),
@@ -1635,6 +1672,7 @@ fn catalog_confirmation_detail(payload: &Value) -> Value {
     })
 }
 
+/// Parse and validate a comma-separated catalog ordering list.
 fn parse_catalog_ids(value: &str) -> CliResult<Vec<i64>> {
     let ids = value
         .split(',')
@@ -1658,11 +1696,13 @@ fn parse_catalog_ids(value: &str) -> CliResult<Vec<i64>> {
     Ok(ids)
 }
 
+/// Convert serializable command output into a JSON value for the CLI envelope.
 fn serialize_value<T: serde::Serialize>(value: T) -> CliResult<Value> {
     serde_json::to_value(value)
         .map_err(|err| CliError::internal(format!("failed to serialize command output: {err}")))
 }
 
+/// Enforce local scope hints and return an auth handoff when approval is needed.
 fn ensure_scopes(ctx: &crate::config::RuntimeContext, required: &[String]) -> CliResult<()> {
     let Some(available) = &ctx.scopes else {
         return Ok(());
@@ -1696,6 +1736,7 @@ fn ensure_scopes(ctx: &crate::config::RuntimeContext, required: &[String]) -> Cl
     }
 }
 
+/// Return scopes not present in the available scope set, honoring wildcard access.
 fn missing_scopes(required: &[String], available: &[String]) -> Vec<String> {
     if available.iter().any(|scope| scope == "*") {
         return Vec::new();
@@ -1711,6 +1752,7 @@ fn validate_request_payload(
     capability: &crate::manifest::Capability,
     payload: &Value,
 ) -> CliResult<()> {
+    // Validate before sending so Agent errors are local and deterministic.
     let errors = schema_validate::validate(&capability.request_schema, payload);
     if errors.is_empty() {
         return Ok(());
@@ -1727,6 +1769,7 @@ fn validate_capability_run_request(
     body: &Value,
     params: Option<&Value>,
 ) -> CliResult<()> {
+    // GET capabilities validate query params; write capabilities validate request bodies.
     if capability.method == "GET" {
         return validate_request_payload(
             capability,
@@ -1740,6 +1783,7 @@ fn validate_response_payload(
     capability: &crate::manifest::Capability,
     payload: &Value,
 ) -> CliResult<()> {
+    // Treat backend/schema drift as an API error so automation can stop safely.
     let errors = schema_validate::validate(&capability.response_schema, payload);
     if errors.is_empty() {
         return Ok(());
@@ -1759,6 +1803,7 @@ fn ensure_execution_confirmed(
     yes: bool,
     capability: &crate::manifest::Capability,
 ) -> CliResult<()> {
+    // Read-only capabilities are safe by default; writes require --yes.
     if yes || capability.risk_level == "read" {
         return Ok(());
     }
@@ -1768,6 +1813,7 @@ fn ensure_execution_confirmed(
     ))
 }
 
+/// Append a string to a JSON array only if it is not already present.
 fn push_unique_string(value: &mut Value, item: &str) {
     if let Some(items) = value.as_array_mut() {
         if !items.iter().any(|existing| existing.as_str() == Some(item)) {
@@ -1783,6 +1829,7 @@ fn dry_run_payload(
     pagination: Option<Value>,
     request_id: Option<&str>,
 ) -> Value {
+    // Redact secrets before showing the request that would be sent.
     security::redact_value(&mut body);
     let mut value =
         json!({ "dry_run": true, "request": { "method": method, "path": path, "body": body } });
@@ -1795,10 +1842,12 @@ fn dry_run_payload(
     value
 }
 
+/// Require an instance ID after profile, env, and explicit flag resolution.
 fn required_instance_id(instance_id: Option<i64>) -> CliResult<i64> {
     instance_id.ok_or_else(|| CliError::validation("instance_id is required"))
 }
 
+/// Read JSON from an inline string, stdin (`-`), or `@file` path.
 fn read_json_arg(input: &str) -> CliResult<Value> {
     let text = if input == "-" {
         config::read_stdin_string()?
@@ -1812,6 +1861,7 @@ fn read_json_arg(input: &str) -> CliResult<Value> {
         .map_err(|err| CliError::validation(format!("invalid JSON input: {err}")))
 }
 
+/// Read plain text from stdin (`-`) or a file path.
 fn read_text_arg(input: &str) -> CliResult<String> {
     if input == "-" {
         config::read_stdin_string()
@@ -1821,6 +1871,7 @@ fn read_text_arg(input: &str) -> CliResult<String> {
     }
 }
 
+/// Write full JSON command output to a file when `--output` is provided.
 fn write_output_if_needed(data: &Value, output: Option<&str>) -> CliResult<()> {
     if let Some(path) = output {
         let text = serde_json::to_string_pretty(data)

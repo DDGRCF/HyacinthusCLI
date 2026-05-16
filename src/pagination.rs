@@ -1,3 +1,4 @@
+// 改动说明：分页聚合与 dry-run 分页描述补充职责注释。
 use std::thread;
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use crate::output::{CliError, CliResult};
 use crate::query;
 
 #[derive(Debug, Clone, Serialize)]
+/// Aggregated result produced when `--page-all` follows continuation tokens.
 pub struct PageCollection {
     pub pages: Vec<Value>,
     pub page_count: usize,
@@ -23,6 +25,7 @@ pub fn get_all(
     params: Option<Value>,
     args: &PaginationArgs,
 ) -> CliResult<Value> {
+    // Without --page-all, preserve the normal single-request GET behavior.
     if !args.page_all {
         let path = query::append_json_params(path, params.as_ref())?;
         return client.get(&path);
@@ -68,6 +71,7 @@ pub fn get_all(
     .map_err(|err| CliError::internal(format!("failed to serialize paginated output: {err}")))
 }
 
+/// Describe the paginated request that would be sent during a dry run.
 pub fn dry_run(path: &str, params: Option<Value>, args: &PaginationArgs) -> CliResult<Value> {
     let request_params = page_params(params, args.page_size, None)?;
     let request_path = query::append_json_params(path, Some(&request_params))?;
@@ -84,6 +88,7 @@ fn page_params(
     page_size: Option<u64>,
     page_token: Option<&str>,
 ) -> CliResult<Value> {
+    // Pagination params are merged into existing query params so filters are retained.
     let mut value = params.unwrap_or_else(|| json!({}));
     let object = value
         .as_object_mut()
@@ -97,6 +102,7 @@ fn page_params(
     Ok(value)
 }
 
+/// Extract and validate the backend continuation token from one page response.
 fn extract_next_page_token(page: &Value) -> CliResult<Option<String>> {
     match page.get("next_page_token") {
         Some(Value::String(value)) if !value.is_empty() => Ok(Some(value.clone())),
