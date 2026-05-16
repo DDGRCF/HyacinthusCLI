@@ -15,7 +15,7 @@ Agent-oriented CLI for 风信子家教中心 backend operations. The CLI is desi
 ```bash
 cargo build
 
-./target/debug/hyacinthus config set-profile local --base-url http://localhost:8000 --default-instance-id 1
+./target/debug/hyacinthus auth status
 ./target/debug/hyacinthus config set-token --profile local --token "$HYACINTHUS_AGENT_TOKEN"
 ./target/debug/hyacinthus doctor --offline
 ./target/debug/hyacinthus capability list
@@ -42,7 +42,7 @@ The wrapper package lives in `npm/hyacinthus-cli` and can be published privately
 ## Core Commands
 
 ```bash
-hyacinthus config set-profile local --base-url http://localhost:8000 --default-instance-id 1
+hyacinthus auth status
 hyacinthus admin status
 hyacinthus claw status
 hyacinthus claw skills list
@@ -75,6 +75,8 @@ hyacinthus requirements import --file confirmed.json --instance-id 1 --idempoten
 ```
 
 ## Environment Variables
+
+The CLI defaults to the production API at `https://www.fxzjjzx.cn`. Set `HYACINTHUS_BASE_URL` or run `hyacinthus config set-profile ... --base-url ...` only for development or staging environments.
 
 ```text
 HYACINTHUS_CONFIG_DIR

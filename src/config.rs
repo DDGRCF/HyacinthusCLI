@@ -19,6 +19,7 @@ pub const SUPPORTED_CLIENT_TYPES: &[&str] = &[
     "nullclaw",
     "hyacinthus-cli",
 ];
+pub const DEFAULT_BASE_URL: &str = "https://www.fxzjjzx.cn";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigFile {
@@ -163,6 +164,15 @@ pub fn normalize_base_url(raw: &str) -> CliResult<String> {
     Ok(trimmed.to_string())
 }
 
+fn resolve_base_url(profile: Option<&Profile>, base_url_flag: Option<&str>) -> CliResult<String> {
+    let value = base_url_flag
+        .map(ToOwned::to_owned)
+        .or_else(|| env::var("HYACINTHUS_BASE_URL").ok())
+        .or_else(|| profile.map(|profile| profile.base_url.clone()))
+        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+    normalize_base_url(&value)
+}
+
 fn resolve_client_identity(
     profile: Option<&Profile>,
     profile_name: &str,
@@ -212,12 +222,7 @@ pub fn resolve_context(
     let profile = config.profiles.get(&profile_name).cloned();
     let (client_instance_id, client_display_name, client_type, identity_changed) =
         resolve_client_identity(profile.as_ref(), &profile_name)?;
-    let base_url = base_url_flag
-        .map(ToOwned::to_owned)
-        .or_else(|| env::var("HYACINTHUS_BASE_URL").ok())
-        .or_else(|| profile.as_ref().map(|profile| profile.base_url.clone()))
-        .ok_or_else(|| CliError::validation("base_url is not configured"))?;
-    let normalized_base_url = normalize_base_url(&base_url)?;
+    let normalized_base_url = resolve_base_url(profile.as_ref(), base_url_flag)?;
     if identity_changed {
         upsert_profile_identity(
             &mut config,
@@ -332,12 +337,7 @@ pub fn resolve_auth_status_context(
         .map(|value| normalize_client_type(&value))
         .transpose()?
         .filter(|value| !value.is_empty());
-    let base_url = base_url_flag
-        .map(ToOwned::to_owned)
-        .or_else(|| env::var("HYACINTHUS_BASE_URL").ok())
-        .or_else(|| profile.map(|profile| profile.base_url.clone()))
-        .map(|value| normalize_base_url(&value))
-        .transpose()?;
+    let base_url = Some(resolve_base_url(profile, base_url_flag)?);
     let instance_id = instance_id_flag
         .or_else(|| {
             env::var("HYACINTHUS_INSTANCE_ID")

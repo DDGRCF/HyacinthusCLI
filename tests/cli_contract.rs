@@ -874,8 +874,8 @@ fn auth_status_does_not_require_base_url() {
 
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["profile"], "local");
-    assert_eq!(value["data"]["base_url"], serde_json::Value::Null);
-    assert_eq!(value["data"]["base_url_configured"], false);
+    assert_eq!(value["data"]["base_url"], "https://www.fxzjjzx.cn");
+    assert_eq!(value["data"]["base_url_configured"], true);
     assert_eq!(value["data"]["token_present"], false);
 }
 

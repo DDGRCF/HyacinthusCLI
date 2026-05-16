@@ -25,8 +25,13 @@ If `doctor` reports failed checks, do not continue with business commands. Repor
 ## Configuration
 
 ```bash
-hyacinthus config set-profile local --base-url http://localhost:8000 --default-instance-id 1
 hyacinthus auth status
+```
+
+Production installs default to `https://www.fxzjjzx.cn`; do not ask the user to enter a Hyacinthus server URL unless they explicitly want a non-production environment. For development or staging only, configure a profile with:
+
+```bash
+hyacinthus config set-profile dev --base-url http://localhost:8000 --default-instance-id 1
 ```
 
 Do not ask the user to paste raw tokens. If `auth status` reports `token_present: false`, use the authorization link/QR flow from the Agent-specific skill.
