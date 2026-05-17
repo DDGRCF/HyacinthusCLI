@@ -433,7 +433,7 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 8);
+    assert_eq!(value["data"]["capability_count"], 10);
     assert_eq!(value["meta"]["source"], "embedded");
 }
 
@@ -705,6 +705,134 @@ fn requirements_options_uses_agent_options_endpoint() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(value["data"]["subjects"][0]["name"], "数学");
     assert_eq!(value["meta"]["capability"], "requirements.options");
+}
+
+#[test]
+fn user_me_uses_agent_user_endpoint() {
+    let base_url = mock_once(
+        r#"{"code":0,"message":"success","data":{"id":1,"display_name":"CLI用户","avatar_url":null,"status":"active","identities":[{"id":1,"identity_type":"email","identifier":"cli@example.com","is_primary":true,"is_verified":true}],"profile":{"ext":{"contact_wechat":"fxz-cli"}}}}"#,
+    );
+    let output = cli()
+        .args(["--base-url", &base_url, "user", "me"])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "users:read")
+        .output()
+        .expect("user me");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"]["display_name"], "CLI用户");
+    assert_eq!(value["meta"]["capability"], "users.me_read");
+}
+
+#[test]
+fn user_update_dry_run_merges_profile_flags() {
+    let value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "user",
+        "update",
+        "--display-name",
+        "CLI资料用户",
+        "--email",
+        "cli@example.com",
+        "--phone",
+        "13800018888",
+        "--contact-wechat",
+        "fxz-cli",
+        "--province",
+        "Guangdong",
+        "--city",
+        "Shenzhen",
+        "--lng",
+        "113.934",
+        "--lat",
+        "22.535",
+        "--dry-run",
+    ]);
+
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["data"]["request"]["method"], "PUT");
+    assert_eq!(value["data"]["request"]["path"], "/api/v1/agent/users/me");
+    assert_eq!(
+        value["data"]["request"]["body"]["display_name"],
+        "CLI资料用户"
+    );
+    assert_eq!(value["data"]["request"]["body"]["email"], "cli@example.com");
+    assert_eq!(value["data"]["request"]["body"]["phone"], "13800018888");
+    assert_eq!(
+        value["data"]["request"]["body"]["profile"]["ext"]["contact_wechat"],
+        "fxz-cli"
+    );
+    assert_eq!(
+        value["data"]["request"]["body"]["profile"]["default_location"]["lng"],
+        113.934
+    );
+}
+
+#[test]
+fn user_update_requires_write_scope_precheck() {
+    let base_url = mock_public_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-users-write","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"USER-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=USER-1234","qr_code_text":"http://auth/verify?user_code=USER-1234","required_scopes":["users:read","users:write"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+    ]);
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "user",
+            "update",
+            "--display-name",
+            "blocked",
+            "--dry-run",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "users:read")
+        .output()
+        .expect("user update missing scope");
+    assert_eq!(output.status.code(), Some(3));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+
+    assert_eq!(value["error"]["type"], "auth_required");
+    assert_eq!(value["error"]["detail"]["missing_scopes"][0], "users:write");
+    assert_eq!(value["error"]["detail"]["session_id"], "sess-users-write");
+}
+
+#[test]
+fn user_update_rejects_password_argv_flag() {
+    let output = cli()
+        .args([
+            "--base-url",
+            "http://localhost:8000",
+            "user",
+            "update",
+            "--password",
+            "secret",
+            "--dry-run",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .output()
+        .expect("user update password argv");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument '--password'"));
 }
 
 #[test]

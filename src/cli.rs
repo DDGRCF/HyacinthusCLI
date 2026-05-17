@@ -1,4 +1,4 @@
-// 改动说明：CLI 参数模型补充职责注释，并让需求解析默认关闭 AI fallback。
+// 改动说明：CLI 参数模型收口需求解析参数，移除旧预设 JSON 和反向布尔开关。
 use std::fmt;
 use std::str::FromStr;
 
@@ -44,6 +44,7 @@ pub enum Command {
     Capability(CapabilityCommand),
     Api(ApiArgs),
     Schema(SchemaArgs),
+    User(UserCommand),
     Requirements(RequirementsCommand),
     Skills(SkillsCommand),
     Completion(CompletionArgs),
@@ -333,6 +334,75 @@ pub struct SchemaArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+/// Current-user profile command group wrapper.
+pub struct UserCommand {
+    #[command(subcommand)]
+    pub command: UserSubcommand,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+/// Current-user profile operations supported by Agent automation.
+pub enum UserSubcommand {
+    Me,
+    Update(UserUpdateArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for updating the current authorized user's profile.
+pub struct UserUpdateArgs {
+    #[arg(long)]
+    pub data: Option<String>,
+    #[arg(long)]
+    pub display_name: Option<String>,
+    #[arg(long)]
+    pub email: Option<String>,
+    #[arg(long)]
+    pub phone: Option<String>,
+    #[arg(long)]
+    pub gender: Option<String>,
+    #[arg(long)]
+    pub birth_date: Option<String>,
+    #[arg(long)]
+    pub bio: Option<String>,
+    #[arg(long)]
+    pub default_address: Option<String>,
+    #[arg(long)]
+    pub lng: Option<f64>,
+    #[arg(long)]
+    pub lat: Option<f64>,
+    #[arg(long)]
+    pub contact_wechat: Option<String>,
+    #[arg(long)]
+    pub want_to_teach: Option<bool>,
+    #[arg(long)]
+    pub want_to_learn: Option<bool>,
+    #[arg(long)]
+    pub current_role: Option<String>,
+    #[arg(long)]
+    pub province: Option<String>,
+    #[arg(long)]
+    pub city: Option<String>,
+    #[arg(long)]
+    pub district: Option<String>,
+    #[arg(long)]
+    pub postal_code: Option<String>,
+    #[arg(long)]
+    pub emergency_contact_name: Option<String>,
+    #[arg(long)]
+    pub emergency_contact_phone: Option<String>,
+    #[arg(long)]
+    pub emergency_contact_relation: Option<String>,
+    #[arg(long)]
+    pub education_items_json: Option<String>,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
 /// Requirements command group wrapper.
 pub struct RequirementsCommand {
     #[command(subcommand)]
@@ -345,6 +415,7 @@ pub enum RequirementsSubcommand {
     Options,
     Parse(RequirementsParseArgs),
     Import(RequirementsImportArgs),
+    ImportRaw(RequirementsImportRawArgs),
     Catalog(RequirementsCatalogCommand),
 }
 
@@ -379,18 +450,10 @@ pub struct RequirementsParseArgs {
     pub preset_contact_phone: Option<String>,
     #[arg(long)]
     pub preset_contact_wechat: Option<String>,
-    #[arg(long)]
-    pub subject_group_aliases_json: Option<String>,
-    #[arg(long)]
-    pub priority_rules_json: Option<String>,
     #[arg(long, default_value_t = false)]
     pub force_ai: bool,
-    #[arg(long = "no-force-ai", default_value_t = false)]
-    pub no_force_ai: bool,
     #[arg(long, default_value_t = false)]
     pub enable_ai_fallback: bool,
-    #[arg(long = "no-enable-ai-fallback", default_value_t = false)]
-    pub no_enable_ai_fallback: bool,
     #[arg(long)]
     pub skip_geocode: bool,
     #[arg(long)]
@@ -408,6 +471,39 @@ pub struct RequirementsImportArgs {
     pub file: Option<String>,
     #[arg(long)]
     pub data: Option<String>,
+    #[arg(long)]
+    pub idempotency_key: Option<String>,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for parsing raw requirement text and importing auto-confirmed rows.
+pub struct RequirementsImportRawArgs {
+    #[arg(long)]
+    pub instance_id: Option<i64>,
+    #[arg(long)]
+    pub file: Option<String>,
+    #[arg(long)]
+    pub data: Option<String>,
+    #[arg(long)]
+    pub text: Option<String>,
+    #[arg(long)]
+    pub preset_city: Option<String>,
+    #[arg(long)]
+    pub preset_contact_phone: Option<String>,
+    #[arg(long)]
+    pub preset_contact_wechat: Option<String>,
+    #[arg(long, default_value_t = false)]
+    pub force_ai: bool,
+    #[arg(long, default_value_t = false)]
+    pub enable_ai_fallback: bool,
+    #[arg(long)]
+    pub skip_geocode: bool,
     #[arg(long)]
     pub idempotency_key: Option<String>,
     #[arg(long)]

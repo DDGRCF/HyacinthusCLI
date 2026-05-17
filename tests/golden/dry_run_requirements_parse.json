@@ -9,10 +9,8 @@
         "preset_city": null,
         "preset_contact_phone": null,
         "preset_contact_wechat": null,
-        "priority_rules_json": null,
         "raw_text": "高一数学，瓯海区，周末上课",
-        "skip_geocode": false,
-        "subject_group_aliases_json": null
+        "skip_geocode": false
       },
       "method": "POST",
       "path": "/api/v1/agent/requirements/batch-parse"

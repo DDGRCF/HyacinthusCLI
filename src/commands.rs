@@ -1,4 +1,4 @@
-// 改动说明：命令调度与关键执行流程补充职责注释，便于排查 Agent 调用链路。
+// 改动说明：命令调度收口需求解析参数并新增原文一键解析导入流程。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -7,15 +7,15 @@ use std::time::Duration;
 
 use clap::CommandFactory;
 use clap_complete::{generate, Shell};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::cli::{
     AdminSubcommand, AuthLoginArgs, AuthSubcommand, AuthWaitArgs, CapabilitySubcommand,
     ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand,
     RequirementsCatalogCreateMissingArgs, RequirementsCatalogReorderArgs,
-    RequirementsCatalogSubcommand, RequirementsImportArgs, RequirementsParseArgs,
-    RequirementsSubcommand,
+    RequirementsCatalogSubcommand, RequirementsImportArgs, RequirementsImportRawArgs,
+    RequirementsParseArgs, RequirementsSubcommand, UserSubcommand, UserUpdateArgs,
 };
 use crate::client::{self, ApiClient};
 use crate::config::{self, Profile, RuntimeContext};
@@ -75,10 +75,12 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
         Command::Capability(command) => capability_command(cli, &command.command),
         Command::Api(args) => api_command(cli, args),
         Command::Schema(args) => schema_command(args.path.as_deref()),
+        Command::User(command) => user_command(cli, &command.command),
         Command::Requirements(command) => match &command.command {
             RequirementsSubcommand::Options => requirements_options(cli),
             RequirementsSubcommand::Parse(args) => requirements_parse(cli, args),
             RequirementsSubcommand::Import(args) => requirements_import(cli, args),
+            RequirementsSubcommand::ImportRaw(args) => requirements_import_raw(cli, args),
             RequirementsSubcommand::Catalog(command) => match &command.command {
                 RequirementsCatalogSubcommand::CreateMissing(args) => {
                     requirements_catalog_create_missing(cli, args)
@@ -1147,6 +1149,68 @@ fn schema_command(path: Option<&str>) -> CliResult<(Value, Value)> {
     }
 }
 
+/// Handle current-user profile read and update commands.
+fn user_command(cli: &Cli, command: &UserSubcommand) -> CliResult<(Value, Value)> {
+    match command {
+        UserSubcommand::Me => user_me(cli),
+        UserSubcommand::Update(args) => user_update(cli, args),
+    }
+}
+
+/// Fetch the current Agent-authorized user's profile.
+fn user_me(cli: &Cli) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        cli.instance_id,
+        cli.request_id.as_deref(),
+    )?;
+    let capability = manifest::find_capability("users.me_read")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    let data = ApiClient::new(ctx)?.get(&capability.path)?;
+    validate_response_payload(&capability, &data)?;
+    Ok((
+        data,
+        json!({ "command": "user me", "capability": "users.me_read" }),
+    ))
+}
+
+/// Update the current Agent-authorized user's profile.
+fn user_update(cli: &Cli, args: &UserUpdateArgs) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        cli.instance_id,
+        cli.request_id.as_deref(),
+    )?;
+    let payload = build_user_update_payload(args)?;
+    let capability = manifest::find_capability("users.me_update")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    validate_request_payload(&capability, &payload)?;
+    if args.dry_run {
+        return Ok((
+            dry_run_payload(
+                "PUT",
+                "/api/v1/agent/users/me",
+                payload,
+                None,
+                ctx.request_id.as_deref(),
+            ),
+            json!({ "command": "user update", "capability": "users.me_update" }),
+        ));
+    }
+    ensure_execution_confirmed(args.yes, &capability)?;
+    let data = ApiClient::new(ctx)?.put("/api/v1/agent/users/me", payload)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "user update", "capability": "users.me_update" }),
+    ))
+}
+
 /// Fetch backend options needed before parsing or importing requirements.
 fn requirements_options(cli: &Cli) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
@@ -1248,6 +1312,90 @@ fn requirements_import(cli: &Cli, args: &RequirementsImportArgs) -> CliResult<(V
             "command": "requirements import",
             "capability": "requirements.batch_import",
             "idempotency_key": idempotency_key
+        }),
+    ))
+}
+
+/// Parse raw requirements and import only rows that do not require confirmation.
+fn requirements_import_raw(
+    cli: &Cli,
+    args: &RequirementsImportRawArgs,
+) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        args.instance_id.or(cli.instance_id),
+        cli.request_id.as_deref(),
+    )?;
+    let parse_payload = build_import_raw_parse_payload(ctx.instance_id, args)?;
+    let parse_capability = manifest::find_capability("requirements.batch_parse")?;
+    manifest::ensure_supported(&parse_capability)?;
+    ensure_scopes(&ctx, &parse_capability.required_scopes)?;
+    validate_request_payload(&parse_capability, &parse_payload)?;
+
+    let client = ApiClient::new(ctx.clone())?;
+    let parse_data = client.post("/api/v1/agent/requirements/batch-parse", parse_payload)?;
+    validate_response_payload(&parse_capability, &parse_data)?;
+
+    let (confirmed_rows, skipped_rows) = split_import_raw_rows(&parse_data)?;
+    let parse_summary = parse_data
+        .get("summary")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let idempotency_key = args
+        .idempotency_key
+        .clone()
+        .unwrap_or_else(|| format!("cli-import-raw-{}", Uuid::new_v4()));
+    let mut result = json!({
+        "parse_summary": parse_summary,
+        "import_summary": null,
+        "auto_commit_rows": confirmed_rows.len(),
+        "skipped_rows": skipped_rows,
+        "skipped": skipped_rows.len(),
+        "idempotency_key": idempotency_key,
+        "dry_run": args.dry_run
+    });
+
+    if confirmed_rows.is_empty() {
+        write_output_if_needed(&result, args.output.as_deref())?;
+        return Ok((
+            result,
+            json!({
+                "command": "requirements import-raw",
+                "capabilities": ["requirements.batch_parse"]
+            }),
+        ));
+    }
+
+    let import_capability = manifest::find_capability("requirements.batch_import")?;
+    manifest::ensure_supported(&import_capability)?;
+    ensure_scopes(&ctx, &import_capability.required_scopes)?;
+    let import_payload = json!({
+        "instance_id": required_instance_id(ctx.instance_id)?,
+        "idempotency_key": idempotency_key,
+        "confirmed_rows": confirmed_rows
+    });
+    validate_request_payload(&import_capability, &import_payload)?;
+    if args.dry_run {
+        result["import_summary"] = dry_run_payload(
+            "POST",
+            "/api/v1/agent/requirements/batch-import",
+            import_payload,
+            None,
+            ctx.request_id.as_deref(),
+        );
+    } else {
+        ensure_execution_confirmed(args.yes, &import_capability)?;
+        let import_data = client.post("/api/v1/agent/requirements/batch-import", import_payload)?;
+        validate_response_payload(&import_capability, &import_data)?;
+        result["import_summary"] = import_data;
+    }
+    write_output_if_needed(&result, args.output.as_deref())?;
+    Ok((
+        result,
+        json!({
+            "command": "requirements import-raw",
+            "capabilities": ["requirements.batch_parse", "requirements.batch_import"]
         }),
     ))
 }
@@ -1354,6 +1502,179 @@ fn completion_command(shell: &str) -> CliResult<()> {
     Ok(())
 }
 
+/// Convert user update flags or JSON input into the backend profile update payload.
+fn build_user_update_payload(args: &UserUpdateArgs) -> CliResult<Value> {
+    let mut payload = if let Some(data) = &args.data {
+        read_json_arg(data)?
+    } else {
+        json!({})
+    };
+    ensure_json_object(&payload, "user update payload")?;
+
+    set_optional_string(&mut payload, &["display_name"], &args.display_name)?;
+    set_optional_string(&mut payload, &["email"], &args.email)?;
+    set_optional_string(&mut payload, &["phone"], &args.phone)?;
+    set_optional_string(&mut payload, &["profile", "gender"], &args.gender)?;
+    set_optional_string(&mut payload, &["profile", "birth_date"], &args.birth_date)?;
+    set_optional_string(&mut payload, &["profile", "bio"], &args.bio)?;
+    set_optional_string(
+        &mut payload,
+        &["profile", "default_address"],
+        &args.default_address,
+    )?;
+    set_optional_string(
+        &mut payload,
+        &["profile", "ext", "contact_wechat"],
+        &args.contact_wechat,
+    )?;
+    set_optional_bool(
+        &mut payload,
+        &["profile", "ext", "want_to_teach"],
+        args.want_to_teach,
+    )?;
+    set_optional_bool(
+        &mut payload,
+        &["profile", "ext", "want_to_learn"],
+        args.want_to_learn,
+    )?;
+    set_optional_string(
+        &mut payload,
+        &["profile", "ext", "current_role"],
+        &args.current_role,
+    )?;
+    set_optional_string(
+        &mut payload,
+        &["profile", "ext", "province"],
+        &args.province,
+    )?;
+    set_optional_string(&mut payload, &["profile", "ext", "city"], &args.city)?;
+    set_optional_string(
+        &mut payload,
+        &["profile", "ext", "district"],
+        &args.district,
+    )?;
+    set_optional_string(
+        &mut payload,
+        &["profile", "ext", "postal_code"],
+        &args.postal_code,
+    )?;
+    set_optional_string(
+        &mut payload,
+        &["profile", "emergency_contact", "name"],
+        &args.emergency_contact_name,
+    )?;
+    set_optional_string(
+        &mut payload,
+        &["profile", "emergency_contact", "phone"],
+        &args.emergency_contact_phone,
+    )?;
+    set_optional_string(
+        &mut payload,
+        &["profile", "emergency_contact", "relation"],
+        &args.emergency_contact_relation,
+    )?;
+    set_optional_location(&mut payload, args.lng, args.lat)?;
+    set_optional_education_items(&mut payload, args.education_items_json.as_deref())?;
+
+    let object = payload
+        .as_object()
+        .ok_or_else(|| CliError::validation("user update payload must be an object"))?;
+    if object.is_empty() {
+        return Err(CliError::validation(
+            "no user update fields provided; pass --data or at least one update flag",
+        ));
+    }
+    Ok(payload)
+}
+
+/// Ensure a JSON value is an object before mutating it as a payload.
+fn ensure_json_object(value: &Value, label: &str) -> CliResult<()> {
+    if value.is_object() {
+        return Ok(());
+    }
+    Err(CliError::validation(format!("{label} must be an object")))
+}
+
+/// Insert a string value at a nested payload path when the flag is present.
+fn set_optional_string(root: &mut Value, path: &[&str], value: &Option<String>) -> CliResult<()> {
+    if let Some(value) = value {
+        set_path_value(root, path, json!(value))?;
+    }
+    Ok(())
+}
+
+/// Insert a boolean value at a nested payload path when the flag is present.
+fn set_optional_bool(root: &mut Value, path: &[&str], value: Option<bool>) -> CliResult<()> {
+    if let Some(value) = value {
+        set_path_value(root, path, json!(value))?;
+    }
+    Ok(())
+}
+
+/// Insert default_location only when both coordinate values are supplied.
+fn set_optional_location(root: &mut Value, lng: Option<f64>, lat: Option<f64>) -> CliResult<()> {
+    match (lng, lat) {
+        (Some(lng), Some(lat)) => set_path_value(
+            root,
+            &["profile", "default_location"],
+            json!({ "lng": lng, "lat": lat }),
+        ),
+        (None, None) => Ok(()),
+        _ => Err(CliError::validation(
+            "--lng and --lat must be provided together",
+        )),
+    }
+}
+
+/// Insert education_items from a JSON array argument.
+fn set_optional_education_items(root: &mut Value, input: Option<&str>) -> CliResult<()> {
+    let Some(input) = input else {
+        return Ok(());
+    };
+    let value = read_json_arg(input)?;
+    if !value.is_array() {
+        return Err(CliError::validation(
+            "--education-items-json must be a JSON array",
+        ));
+    }
+    set_path_value(root, &["education_items"], value)
+}
+
+/// Insert a JSON value at a nested object path, creating missing parent objects.
+fn set_path_value(root: &mut Value, path: &[&str], value: Value) -> CliResult<()> {
+    if path.is_empty() {
+        return Err(CliError::internal("empty JSON path"));
+    }
+    let parent_path = &path[..path.len() - 1];
+    let key = path[path.len() - 1];
+    let parent = object_at_path(root, parent_path)?;
+    parent.insert(key.to_string(), value);
+    Ok(())
+}
+
+/// Return a mutable object at the nested path, creating missing objects as needed.
+fn object_at_path<'a>(root: &'a mut Value, path: &[&str]) -> CliResult<&'a mut Map<String, Value>> {
+    let mut current = root;
+    for segment in path {
+        let object = current
+            .as_object_mut()
+            .ok_or_else(|| CliError::validation(format!("{} must be an object", segment)))?;
+        let entry = object
+            .entry((*segment).to_string())
+            .or_insert_with(|| json!({}));
+        if entry.is_null() {
+            *entry = json!({});
+        }
+        if !entry.is_object() {
+            return Err(CliError::validation(format!("{segment} must be an object")));
+        }
+        current = entry;
+    }
+    current
+        .as_object_mut()
+        .ok_or_else(|| CliError::validation("payload must be an object"))
+}
+
 /// Convert parse flags, raw text, or JSON input into the backend batch-parse payload.
 fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -> CliResult<Value> {
     let source_count = [&args.file, &args.data, &args.text]
@@ -1390,10 +1711,8 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
         "preset_contact_phone": args.preset_contact_phone,
         "preset_contact_wechat": args.preset_contact_wechat,
         "preset_city": args.preset_city,
-        "subject_group_aliases_json": args.subject_group_aliases_json,
-        "priority_rules_json": args.priority_rules_json,
-        "force_ai": if args.no_force_ai { false } else { args.force_ai },
-        "enable_ai_fallback": if args.no_enable_ai_fallback { false } else { args.enable_ai_fallback },
+        "force_ai": args.force_ai,
+        "enable_ai_fallback": args.enable_ai_fallback,
         "skip_geocode": args.skip_geocode
     }))
 }
@@ -1480,6 +1799,103 @@ fn build_import_payload(
         return Err(CliError::validation("confirmed_rows is empty"));
     }
     Ok(payload)
+}
+
+/// Convert import-raw flags into the existing backend batch-parse payload.
+fn build_import_raw_parse_payload(
+    instance_id: Option<i64>,
+    args: &RequirementsImportRawArgs,
+) -> CliResult<Value> {
+    let source_count = [&args.file, &args.data, &args.text]
+        .iter()
+        .filter(|value| value.is_some())
+        .count();
+    if source_count != 1 {
+        return Err(CliError::validation(
+            "exactly one of --file, --data, or --text is required",
+        ));
+    }
+    if let Some(data) = &args.data {
+        let mut payload = read_json_arg(data)?;
+        if payload.get("instance_id").is_none() {
+            payload["instance_id"] = json!(required_instance_id(instance_id)?);
+        }
+        return Ok(payload);
+    }
+    let raw_text = if let Some(file) = &args.file {
+        read_text_arg(file)?
+    } else if let Some(text) = &args.text {
+        text.clone()
+    } else {
+        return Err(CliError::validation(
+            "exactly one of --file, --data, or --text is required",
+        ));
+    };
+    if raw_text.trim().is_empty() {
+        return Err(CliError::validation("raw_text is empty"));
+    }
+    Ok(json!({
+        "instance_id": required_instance_id(instance_id)?,
+        "raw_text": raw_text,
+        "preset_contact_phone": args.preset_contact_phone,
+        "preset_contact_wechat": args.preset_contact_wechat,
+        "preset_city": args.preset_city,
+        "force_ai": args.force_ai,
+        "enable_ai_fallback": args.enable_ai_fallback,
+        "skip_geocode": args.skip_geocode
+    }))
+}
+
+/// Split parse output into importable payloads and concise review-only rows.
+fn split_import_raw_rows(parse_data: &Value) -> CliResult<(Vec<Value>, Vec<Value>)> {
+    let rows = parse_data
+        .get("rows")
+        .and_then(Value::as_array)
+        .ok_or_else(|| CliError::validation("parse response must contain rows array"))?;
+    let mut confirmed_rows = Vec::new();
+    let mut skipped_rows = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        if row.get("can_auto_commit").and_then(Value::as_bool) == Some(true)
+            && row.get("needs_confirmation").and_then(Value::as_bool) != Some(true)
+        {
+            confirmed_rows.push(row.get("parsed").cloned().ok_or_else(|| {
+                CliError::validation("parse output row is missing parsed payload")
+            })?);
+        } else {
+            skipped_rows.push(import_raw_skip_summary(index + 1, row));
+        }
+    }
+    Ok((confirmed_rows, skipped_rows))
+}
+
+/// Build a compact skipped-row summary that is safe to show to an Agent.
+fn import_raw_skip_summary(index: usize, row: &Value) -> Value {
+    let parsed = row.get("parsed").and_then(Value::as_object);
+    let raw = row.get("raw").and_then(Value::as_object);
+    let parsed_text = |key: &str| {
+        parsed
+            .and_then(|item| item.get(key))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    };
+    let raw_text = |key: &str| {
+        raw.and_then(|item| item.get(key))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    };
+    json!({
+        "index": index,
+        "requirement_code": parsed_text("requirement_code").or_else(|| raw_text("requirement_code")),
+        "title": parsed_text("title"),
+        "address_detail": parsed_text("address_detail"),
+        "confirmation_reasons": row.get("confirmation_reasons").cloned().unwrap_or_else(|| json!([])),
+        "errors": row.get("errors").cloned().unwrap_or_else(|| json!([])),
+        "warnings": row.get("warnings").cloned().unwrap_or_else(|| json!([]))
+    })
 }
 
 fn build_catalog_create_missing_payload(

@@ -1,3 +1,4 @@
+# 改动说明：Agent 能力清单移除旧解析预设 JSON 字段并保留地理诊断字段。
 version: "2026-05-10"
 backend_min_version: "0.1.0"
 capabilities:
@@ -47,16 +48,6 @@ capabilities:
             - string
             - "null"
           description: 默认城市。
-        subject_group_aliases_json:
-          type:
-            - string
-            - "null"
-          description: 科目别名 JSON 字符串。
-        priority_rules_json:
-          type:
-            - string
-            - "null"
-          description: 优先级规则 JSON 字符串。
         force_ai:
           type: boolean
           default: false
@@ -98,9 +89,16 @@ capabilities:
             properties:
               parsed:
                 type: object
-                description: 解析后的需求字段。
+                description: 解析后的需求字段；低置信地理编码会在 geo_diagnostic 中返回质量、置信度和 GEO_* 警告。
+                properties:
+                  geo_diagnostic:
+                    type:
+                      - object
+                      - "null"
+                    description: 地理编码诊断，包含 quality、confidence、warnings、reverse 等字段。
               warnings:
                 type: array
+                description: 解析警告；地理编码低置信时包含 GEO_* 代码。
                 items:
                   type: string
               errors:
@@ -115,6 +113,7 @@ capabilities:
                 type: boolean
               confirmation_reasons:
                 type: array
+                description: 需要确认的原因；地理编码低置信时包含 GEO_* 代码。
                 items:
                   type: string
     examples:
@@ -177,6 +176,11 @@ capabilities:
                   - string
                   - "null"
                 description: 需求描述。
+              raw_text:
+                type:
+                  - string
+                  - "null"
+                description: 需求原文。
               requirement_code:
                 type:
                   - string
@@ -574,6 +578,347 @@ capabilities:
         command: hyacinthus requirements catalog reorder --target subjects --ids 3,1,2 --yes
       - title: 重排年级目录
         command: hyacinthus requirements catalog reorder --target grades --ids 2,1,3 --yes
+
+  - id: users.me_read
+    title: 读取个人资料
+    description: Agent CLI 读取当前授权用户的完整个人资料、联系方式、身份标识和教育经历。
+    domain: users
+    command: hyacinthus user me
+    method: GET
+    path: /api/v1/agent/users/me
+    required_scopes:
+      - users:read
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      properties: {}
+    response_schema:
+      type: object
+      required:
+        - id
+        - display_name
+        - identities
+      properties:
+        id:
+          type: integer
+        display_name:
+          type:
+            - string
+            - "null"
+        avatar_url:
+          type:
+            - string
+            - "null"
+        status:
+          type: string
+        identities:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - identity_type
+              - identifier
+              - is_primary
+              - is_verified
+            properties:
+              id:
+                type: integer
+              identity_type:
+                type: string
+              identifier:
+                type: string
+              is_primary:
+                type: boolean
+              is_verified:
+                type: boolean
+        profile:
+          type:
+            - object
+            - "null"
+          properties:
+            gender:
+              type:
+                - string
+                - "null"
+            birth_date:
+              type:
+                - string
+                - "null"
+            default_address:
+              type:
+                - string
+                - "null"
+            default_location:
+              type:
+                - object
+                - "null"
+              properties:
+                lng:
+                  type: number
+                lat:
+                  type: number
+            bio:
+              type:
+                - string
+                - "null"
+            emergency_contact:
+              type:
+                - object
+                - "null"
+              properties:
+                name:
+                  type:
+                    - string
+                    - "null"
+                phone:
+                  type:
+                    - string
+                    - "null"
+                relation:
+                  type:
+                    - string
+                    - "null"
+            ext:
+              type:
+                - object
+                - "null"
+              properties:
+                want_to_teach:
+                  type:
+                    - boolean
+                    - "null"
+                want_to_learn:
+                  type:
+                    - boolean
+                    - "null"
+                current_role:
+                  type:
+                    - string
+                    - "null"
+                province:
+                  type:
+                    - string
+                    - "null"
+                city:
+                  type:
+                    - string
+                    - "null"
+                district:
+                  type:
+                    - string
+                    - "null"
+                postal_code:
+                  type:
+                    - string
+                    - "null"
+                contact_wechat:
+                  type:
+                    - string
+                    - "null"
+            educations:
+              type:
+                - array
+                - "null"
+              items:
+                type: object
+    examples:
+      - title: 读取当前授权用户资料
+        command: hyacinthus user me
+
+  - id: users.me_update
+    title: 更新个人资料
+    description: Agent CLI 更新当前授权用户的显示名、手机号、邮箱、完整 profile、联系微信和教育经历。
+    domain: users
+    command: hyacinthus user update
+    method: PUT
+    path: /api/v1/agent/users/me
+    required_scopes:
+      - users:read
+      - users:write
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      properties:
+        display_name:
+          type:
+            - string
+            - "null"
+        password:
+          type:
+            - string
+            - "null"
+        email:
+          type:
+            - string
+            - "null"
+        phone:
+          type:
+            - string
+            - "null"
+        profile:
+          type:
+            - object
+            - "null"
+          properties:
+            gender:
+              type:
+                - string
+                - "null"
+            birth_date:
+              type:
+                - string
+                - "null"
+            default_address:
+              type:
+                - string
+                - "null"
+            default_location:
+              type:
+                - object
+                - "null"
+              properties:
+                lng:
+                  type: number
+                lat:
+                  type: number
+            bio:
+              type:
+                - string
+                - "null"
+            emergency_contact:
+              type:
+                - object
+                - "null"
+              properties:
+                name:
+                  type:
+                    - string
+                    - "null"
+                phone:
+                  type:
+                    - string
+                    - "null"
+                relation:
+                  type:
+                    - string
+                    - "null"
+            ext:
+              type:
+                - object
+                - "null"
+              properties:
+                want_to_teach:
+                  type:
+                    - boolean
+                    - "null"
+                want_to_learn:
+                  type:
+                    - boolean
+                    - "null"
+                current_role:
+                  type:
+                    - string
+                    - "null"
+                province:
+                  type:
+                    - string
+                    - "null"
+                city:
+                  type:
+                    - string
+                    - "null"
+                district:
+                  type:
+                    - string
+                    - "null"
+                postal_code:
+                  type:
+                    - string
+                    - "null"
+                contact_wechat:
+                  type:
+                    - string
+                    - "null"
+        education_items:
+          type:
+            - array
+            - "null"
+          items:
+            type: object
+    response_schema:
+      type: object
+      required:
+        - id
+        - display_name
+        - identities
+      properties:
+        id:
+          type: integer
+        display_name:
+          type:
+            - string
+            - "null"
+        avatar_url:
+          type:
+            - string
+            - "null"
+        status:
+          type: string
+        identities:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - identity_type
+              - identifier
+              - is_primary
+              - is_verified
+            properties:
+              id:
+                type: integer
+              identity_type:
+                type: string
+              identifier:
+                type: string
+              is_primary:
+                type: boolean
+              is_verified:
+                type: boolean
+        profile:
+          type:
+            - object
+            - "null"
+          properties:
+            ext:
+              type:
+                - object
+                - "null"
+              properties:
+                contact_wechat:
+                  type:
+                    - string
+                    - "null"
+    examples:
+      - title: 更新显示名和联系微信
+        command: hyacinthus user update --display-name 张老师 --contact-wechat fxz-teacher --yes
+      - title: 从 JSON 更新完整资料
+        command: hyacinthus user update --data @profile.json --yes
 
   - id: admin.status
     title: 后台基础状态
