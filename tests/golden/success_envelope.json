@@ -4,19 +4,19 @@
       "description": "Shared 风信子家教中心 Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
       "name": "hyacinthus-shared",
       "path": "skills/hyacinthus-shared/SKILL.md",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     {
       "description": "Requirement parsing and import workflow rules for Agent operators.",
       "name": "hyacinthus-requirements",
       "path": "skills/hyacinthus-requirements/SKILL.md",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     {
       "description": "Agent runtime handoff rules for 风信子家教中心 Hyacinthus CLI link and QR authorization.",
       "name": "hyacinthus-agent-runtime",
       "path": "skills/hyacinthus-agent-runtime/SKILL.md",
-      "version": "0.1.1"
+      "version": "0.1.2"
     }
   ],
   "meta": {

@@ -1,4 +1,4 @@
-// 改动说明：CLI 参数模型收口需求解析参数，移除旧预设 JSON 和反向布尔开关。
+// 改动说明：CLI 参数模型收口需求导入参数，并压缩大枚举变体以满足 release 检查。
 use std::fmt;
 use std::str::FromStr;
 
@@ -44,7 +44,7 @@ pub enum Command {
     Capability(CapabilityCommand),
     Api(ApiArgs),
     Schema(SchemaArgs),
-    User(UserCommand),
+    User(Box<UserCommand>),
     Requirements(RequirementsCommand),
     Skills(SkillsCommand),
     Completion(CompletionArgs),
@@ -344,7 +344,7 @@ pub struct UserCommand {
 /// Current-user profile operations supported by Agent automation.
 pub enum UserSubcommand {
     Me,
-    Update(UserUpdateArgs),
+    Update(Box<UserUpdateArgs>),
 }
 
 #[derive(Clone, Debug, Args)]
