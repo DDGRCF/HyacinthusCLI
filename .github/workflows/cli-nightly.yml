@@ -1,0 +1,156 @@
+# Nightly CLI build packages Hyacinthus CLI archives for daily validation and manual runs.
+name: CLI Nightly Build
+
+on:
+  push:
+    paths:
+      - ".github/workflows/cli-nightly.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "assets/**"
+      - "scripts/package.sh"
+      - "skills/**"
+      - "src/**"
+  schedule:
+    # 02:00 Asia/Hong_Kong.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish or refresh the moving nightly prerelease"
+        required: false
+        default: "false"
+        type: boolean
+      release_tag:
+        description: "Moving prerelease tag to publish when enabled"
+        required: false
+        default: "nightly"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cli-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            apt_packages: musl-tools
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install native packages
+        if: ${{ matrix.apt_packages }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.apt_packages }}
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build CLI
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Smoke test binary
+        run: ./target/${{ matrix.target }}/release/hyacinthus --version
+
+      - name: Package CLI archive
+        run: scripts/package.sh ${{ matrix.target }}
+
+      - name: Collect packaged artifacts
+        run: |
+          mkdir -p nightly-artifacts
+          version="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')"
+          cp "dist/hyacinthus-cli-${version}-${{ matrix.target }}.tar.gz" nightly-artifacts/
+          cp "dist/hyacinthus-cli-${version}-${{ matrix.target }}.tar.gz.sha256" nightly-artifacts/
+          cp "dist/hyacinthus-cli-${{ matrix.target }}.tar.gz" nightly-artifacts/
+          cp "dist/hyacinthus-cli-${{ matrix.target }}.tar.gz.sha256" nightly-artifacts/
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyacinthus-cli-${{ matrix.target }}
+          path: nightly-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-nightly:
+    name: Publish moving nightly prerelease
+    needs: build
+    runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'schedule' || inputs.publish_release }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NIGHTLY_TAG: ${{ inputs.release_tag || 'nightly' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: nightly-dist
+          merge-multiple: true
+
+      - name: Prepare release notes
+        run: |
+          {
+            echo "Nightly CLI build for ${GITHUB_SHA}."
+            echo
+            echo "Triggered by: ${GITHUB_EVENT_NAME}"
+            echo "Built at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > nightly-release-notes.md
+
+      - name: Add release-tag asset aliases
+        run: |
+          release_version="${NIGHTLY_TAG#v}"
+          targets=(
+            x86_64-unknown-linux-gnu
+            aarch64-unknown-linux-gnu
+            x86_64-unknown-linux-musl
+            x86_64-apple-darwin
+            aarch64-apple-darwin
+          )
+          for target in "${targets[@]}"; do
+            source_archive="nightly-dist/hyacinthus-cli-${target}.tar.gz"
+            tagged_archive="nightly-dist/hyacinthus-cli-${release_version}-${target}.tar.gz"
+            if [[ -f "${source_archive}" && "${source_archive}" != "${tagged_archive}" ]]; then
+              cp "${source_archive}" "${tagged_archive}"
+              sha256sum "${tagged_archive}" > "${tagged_archive}.sha256"
+            fi
+          done
+
+      - name: Refresh nightly tag and prerelease
+        run: |
+          gh release delete "${NIGHTLY_TAG}" --cleanup-tag --yes || true
+          git tag -f "${NIGHTLY_TAG}" "${GITHUB_SHA}"
+          git push -f origin "refs/tags/${NIGHTLY_TAG}"
+          gh release create "${NIGHTLY_TAG}" nightly-dist/* \
+            --title "Hyacinthus CLI Nightly" \
+            --notes-file nightly-release-notes.md \
+            --prerelease \
+            --target "${GITHUB_SHA}"

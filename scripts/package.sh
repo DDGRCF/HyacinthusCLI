@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Packages a built CLI binary and writes portable SHA256 checksum files.
 set -euo pipefail
 
 target="${1:?usage: scripts/package.sh <target-triple> [profile]}"
@@ -9,6 +10,15 @@ archive_name="hyacinthus-cli-${version}-${target}"
 dist_dir="${root}/dist"
 work_dir="${dist_dir}/${archive_name}"
 binary="${root}/target/${target}/${profile}/hyacinthus"
+
+write_sha256() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${file}"
+    return
+  fi
+  shasum -a 256 "${file}"
+}
 
 if [[ ! -x "${binary}" ]]; then
   echo "binary not found: ${binary}" >&2
@@ -27,9 +37,9 @@ cp -R "${root}/assets" "${work_dir}/assets"
 (
   cd "${dist_dir}"
   tar -czf "${archive_name}.tar.gz" "${archive_name}"
-  sha256sum "${archive_name}.tar.gz" > "${archive_name}.tar.gz.sha256"
+  write_sha256 "${archive_name}.tar.gz" > "${archive_name}.tar.gz.sha256"
   cp "${archive_name}.tar.gz" "hyacinthus-cli-${target}.tar.gz"
-  sha256sum "hyacinthus-cli-${target}.tar.gz" > "hyacinthus-cli-${target}.tar.gz.sha256"
+  write_sha256 "hyacinthus-cli-${target}.tar.gz" > "hyacinthus-cli-${target}.tar.gz.sha256"
 )
 
 echo "${dist_dir}/${archive_name}.tar.gz"

@@ -241,6 +241,25 @@ git push origin v0.1.0
 
 The release workflow builds Linux/macOS x86_64 and arm64 archives, includes an Alpine-compatible `x86_64-unknown-linux-musl` archive, publishes `.tar.gz` assets, and uploads SHA256 checksum files.
 
+Nightly builds run daily at 02:00 Asia/Hong_Kong and can also be started manually:
+
+```bash
+gh workflow run cli-nightly.yml
+gh run list --workflow "CLI Nightly Build" --limit 5
+```
+
+Manual runs upload short-lived workflow artifacts by default. To also refresh the moving `nightly` prerelease:
+
+```bash
+gh workflow run cli-nightly.yml -f publish_release=true -f release_tag=nightly
+```
+
+After the prerelease is published, the npm wrapper can install it by tag:
+
+```bash
+HYACINTHUS_CLI_VERSION=nightly npx @ddgrcf/hyacinthus-cli install
+```
+
 Local packaging:
 
 ```bash
