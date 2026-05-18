@@ -1,4 +1,4 @@
-// 改动说明：轻量 JSON Schema 校验器补充职责注释。
+// 改动说明：轻量 JSON Schema 校验器补齐 enum 与 uniqueItems 约束。
 use serde_json::Value;
 
 /// JSON Schema primitive types supported by the CLI validator.
@@ -38,6 +38,9 @@ fn validate_at(path: &str, schema: &Value, value: &Value, errors: &mut Vec<Strin
     if value.is_array() {
         validate_array(path, schema, value, errors);
     }
+    if let Some(allowed) = schema.get("enum").and_then(Value::as_array) {
+        validate_enum(path, allowed, value, errors);
+    }
     if let Some(minimum) = schema.get("minimum").and_then(Value::as_f64) {
         if let Some(number) = value.as_f64() {
             if number < minimum {
@@ -71,6 +74,18 @@ fn validate_schema_at(path: &str, schema: &Value, errors: &mut Vec<String>) {
         match required.as_array() {
             Some(items) if items.iter().all(Value::is_string) => {}
             _ => errors.push(format!("{path}.required must be an array of strings")),
+        }
+    }
+    if let Some(enum_values) = object.get("enum") {
+        match enum_values.as_array() {
+            Some(items) if !items.is_empty() => {}
+            Some(_) => errors.push(format!("{path}.enum must not be empty")),
+            None => errors.push(format!("{path}.enum must be an array")),
+        }
+    }
+    if let Some(unique_items) = object.get("uniqueItems") {
+        if !unique_items.is_boolean() {
+            errors.push(format!("{path}.uniqueItems must be a boolean"));
         }
     }
     if let Some(properties) = object.get("properties") {
@@ -136,11 +151,37 @@ fn validate_array(path: &str, schema: &Value, value: &Value, errors: &mut Vec<St
             errors.push(format!("{path} item count must be >= {min_items}"));
         }
     }
+    if schema.get("uniqueItems").and_then(Value::as_bool) == Some(true) {
+        validate_unique_items(path, items, errors);
+    }
     let Some(item_schema) = schema.get("items") else {
         return;
     };
     for (index, item) in items.iter().enumerate() {
         validate_at(&format!("{path}[{index}]"), item_schema, item, errors);
+    }
+}
+
+/// Validate that a value is exactly one of the schema enum literals.
+fn validate_enum(path: &str, allowed: &[Value], value: &Value, errors: &mut Vec<String>) {
+    if allowed.iter().any(|item| item == value) {
+        return;
+    }
+    let allowed_text = allowed
+        .iter()
+        .map(|item| serde_json::to_string(item).unwrap_or_else(|_| item.to_string()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    errors.push(format!("{path} must be one of [{allowed_text}]"));
+}
+
+/// Validate array uniqueness using JSON value equality.
+fn validate_unique_items(path: &str, items: &[Value], errors: &mut Vec<String>) {
+    for (index, item) in items.iter().enumerate() {
+        if items[..index].iter().any(|previous| previous == item) {
+            errors.push(format!("{path} items must be unique"));
+            return;
+        }
     }
 }
 
@@ -225,6 +266,30 @@ mod tests {
         assert_eq!(
             validate(&schema, &json!("2026-05-10")),
             vec!["$ must be date"]
+        );
+    }
+
+    #[test]
+    fn validates_enum_and_unique_items() {
+        let schema = json!({
+            "type": "object",
+            "required": ["target", "ordered_ids"],
+            "properties": {
+                "target": { "type": "string", "enum": ["subjects", "grades"] },
+                "ordered_ids": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": { "type": "integer" }
+                }
+            }
+        });
+
+        assert_eq!(
+            validate(&schema, &json!({"target": "bad", "ordered_ids": [1, 1]})),
+            vec![
+                "$.ordered_ids items must be unique",
+                "$.target must be one of [\"subjects\", \"grades\"]"
+            ]
         );
     }
 }

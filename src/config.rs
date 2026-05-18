@@ -1,9 +1,9 @@
-// 改动说明：配置解析、实例身份推导和认证上下文补充职责注释。
+// 改动说明：配置解析统一 Agent profile 输出格式，并加固 token 配置文件权限。
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -125,7 +125,29 @@ pub fn save_config(config: &ConfigFile) -> CliResult<()> {
         .map_err(|err| CliError::internal(format!("failed to serialize config: {err}")))?;
     fs::write(&path, text).map_err(|err| {
         CliError::validation(format!("failed to write config {}: {err}", path.display()))
+    })?;
+    secure_config_permissions(&path)?;
+    Ok(())
+}
+
+/// Restrict the config file so saved Agent tokens are not world-readable.
+#[cfg(unix)]
+fn secure_config_permissions(path: &Path) -> CliResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let permissions = fs::Permissions::from_mode(0o600);
+    fs::set_permissions(path, permissions).map_err(|err| {
+        CliError::validation(format!(
+            "failed to secure config permissions {}: {err}",
+            path.display()
+        ))
     })
+}
+
+/// Keep a no-op permissions hook for non-Unix builds.
+#[cfg(not(unix))]
+fn secure_config_permissions(_path: &Path) -> CliResult<()> {
+    Ok(())
 }
 
 pub fn save_agent_credentials(
@@ -614,14 +636,9 @@ pub fn resolve_output_format(
         return OutputFormat::from_str(value.as_str()).map_err(CliError::validation);
     }
     let config = load_config()?;
-    let profile_name = profile_flag
-        .map(ToOwned::to_owned)
-        .or_else(|| env::var("HYACINTHUS_PROFILE").ok())
-        .or(config.active_profile.clone());
-    if let Some(profile_name) = profile_name {
-        if let Some(profile) = config.profiles.get(&profile_name) {
-            return Ok(profile.default_format);
-        }
+    let profile_name = resolve_profile_name(&config, profile_flag);
+    if let Some(profile) = config.profiles.get(&profile_name) {
+        return Ok(profile.default_format);
     }
     Ok(OutputFormat::Json)
 }

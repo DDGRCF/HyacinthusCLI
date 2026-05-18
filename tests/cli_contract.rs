@@ -996,6 +996,56 @@ fn config_show_redacts_token() {
     assert!(!stdout.contains("secret-token"));
 }
 
+#[cfg(unix)]
+#[test]
+fn config_file_is_not_world_readable_after_saving_token() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let config_dir = dir.path();
+    let set_profile = cli()
+        .args([
+            "config",
+            "set-profile",
+            "dev",
+            "--base-url",
+            "http://localhost:8000",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", config_dir)
+        .output()
+        .expect("set profile");
+    assert!(set_profile.status.success());
+
+    let set_token = cli()
+        .args([
+            "config",
+            "set-token",
+            "--profile",
+            "dev",
+            "--token",
+            "secret-token",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", config_dir)
+        .output()
+        .expect("set token");
+    assert!(set_token.status.success());
+
+    let mode = fs::metadata(config_dir.join("config.json"))
+        .expect("config metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
 #[test]
 fn auth_status_does_not_require_base_url() {
     let value = run_json(&["auth", "status"]);
@@ -1028,6 +1078,63 @@ fn auth_status_uses_local_profile_despite_existing_agent_home_dirs() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(value["data"]["profile"], "local");
     assert_eq!(value["data"]["client_type"], "hyacinthus-cli");
+}
+
+#[test]
+fn output_format_uses_agent_home_profile_before_active_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_dir = dir.path();
+    let hermes_home = dir.path().join(".hermes-worker");
+    fs::create_dir_all(&hermes_home).expect("create hermes home");
+    fs::write(
+        config_dir.join("config.json"),
+        r#"{
+  "active_profile": "dev",
+  "profiles": {
+    "dev": {
+      "name": "dev",
+      "base_url": "http://localhost:8000",
+      "client_instance_id": "dev-instance",
+      "client_display_name": "Dev",
+      "client_type": "hyacinthus-cli",
+      "default_instance_id": null,
+      "default_format": "table",
+      "token": null,
+      "scopes": [],
+      "raw_api_enabled": false
+    },
+    "hermes-hermes-worker": {
+      "name": "hermes-hermes-worker",
+      "base_url": "http://localhost:8000",
+      "client_instance_id": "hermes-worker-instance",
+      "client_display_name": "Hermes Worker",
+      "client_type": "hermes",
+      "default_instance_id": null,
+      "default_format": "json",
+      "token": null,
+      "scopes": [],
+      "raw_api_enabled": false
+    }
+  }
+}"#,
+    )
+    .expect("write config");
+
+    let output = cli()
+        .args(["auth", "status"])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", config_dir)
+        .env("HERMES_HOME", hermes_home)
+        .output()
+        .expect("auth status");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"]["profile"], "hermes-hermes-worker");
 }
 
 #[test]
@@ -3051,6 +3158,26 @@ fn capability_run_get_accepts_params_for_schema_validation() {
         value["data"]["request"]["path"],
         "/api/v1/agent/claw/skills?source=builtin"
     );
+}
+
+#[test]
+fn capability_run_validates_enum_and_unique_items() {
+    let value = run_json_expect_code(
+        &[
+            "capability",
+            "run",
+            "catalog.reorder",
+            "--data",
+            r#"{"target":"bad","ordered_ids":[1,1]}"#,
+            "--dry-run",
+        ],
+        &[],
+        2,
+    );
+
+    let message = value["error"]["message"].as_str().unwrap_or("");
+    assert!(message.contains("$.target must be one of"));
+    assert!(message.contains("$.ordered_ids items must be unique"));
 }
 
 #[test]

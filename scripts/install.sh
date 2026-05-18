@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Installs a released Hyacinthus CLI archive and verifies its checksum.
 set -euo pipefail
 
 repo="${HYACINTHUS_CLI_REPO:-DDGRCF/HyacinthusCLI}"
@@ -36,13 +37,33 @@ else
   asset_url="${base_url}/download/${version}/hyacinthus-cli-${version#v}-${target}.tar.gz"
   checksum_url="${asset_url}.sha256"
 fi
+archive_file="$(basename "${asset_url}")"
+checksum_file="${archive_file}.sha256"
 
-curl -fsSL "${asset_url}" -o "${tmp_dir}/hyacinthus.tar.gz"
-curl -fsSL "${checksum_url}" -o "${tmp_dir}/hyacinthus.tar.gz.sha256"
+verify_sha256() {
+  local file="$1"
+  local checksum="$2"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c "${checksum}"
+    return
+  fi
+  local expected actual
+  expected="$(awk '{print $1}' "${checksum}")"
+  actual="$(shasum -a 256 "${file}" | awk '{print $1}')"
+  if [[ "${actual}" != "${expected}" ]]; then
+    echo "${file}: FAILED" >&2
+    echo "sha256 mismatch: expected ${expected}, got ${actual}" >&2
+    exit 1
+  fi
+  echo "${file}: OK"
+}
+
+curl -fsSL "${asset_url}" -o "${tmp_dir}/${archive_file}"
+curl -fsSL "${checksum_url}" -o "${tmp_dir}/${checksum_file}"
 (
   cd "${tmp_dir}"
-  sha256sum -c hyacinthus.tar.gz.sha256
-  tar -xzf hyacinthus.tar.gz
+  verify_sha256 "${archive_file}" "${checksum_file}"
+  tar -xzf "${archive_file}"
 )
 
 binary="$(find "${tmp_dir}" -type f -name hyacinthus -perm -111 | head -n 1)"
