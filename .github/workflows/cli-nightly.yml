@@ -140,7 +140,10 @@ jobs:
             tagged_archive="nightly-dist/hyacinthus-cli-${release_version}-${target}.tar.gz"
             if [[ -f "${source_archive}" && "${source_archive}" != "${tagged_archive}" ]]; then
               cp "${source_archive}" "${tagged_archive}"
-              sha256sum "${tagged_archive}" > "${tagged_archive}.sha256"
+              (
+                cd nightly-dist
+                sha256sum "$(basename "${tagged_archive}")" > "$(basename "${tagged_archive}").sha256"
+              )
             fi
           done
 
