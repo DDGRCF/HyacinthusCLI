@@ -1,10 +1,17 @@
-// 改动说明：内置 Agent skill 导出与校验逻辑补充职责注释。
+// 改动说明：内置 Agent skill 导出与校验逻辑补充中文元数据。
 use std::fs;
 use std::path::Path;
 
 use serde::Serialize;
 
 use crate::output::{CliError, CliResult};
+
+const SHARED_SKILL_DESCRIPTION: &str =
+    "风信子家教中心 Hyacinthus CLI 通用规则：认证、输出协议、风险确认和能力发现。";
+const REQUIREMENTS_SKILL_DESCRIPTION: &str =
+    "风信子家教中心需求处理规则：解析、复核、目录确认和导入流程。";
+const AGENT_RUNTIME_SKILL_DESCRIPTION: &str =
+    "风信子家教中心 Hyacinthus CLI Agent 运行规则：链接和二维码授权交接。";
 
 /// Shared skill content embedded into the binary.
 const SHARED_SKILL: &str = include_str!("../skills/hyacinthus-shared/SKILL.md");
@@ -64,21 +71,21 @@ pub fn list() -> Vec<Skill> {
     vec![
         Skill {
             name: "hyacinthus-shared",
-            description: "Shared 风信子家教中心 Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+            description: SHARED_SKILL_DESCRIPTION,
             path: "skills/hyacinthus-shared/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: None,
         },
         Skill {
             name: "hyacinthus-requirements",
-            description: "Requirement parsing and import workflow rules for Agent operators.",
+            description: REQUIREMENTS_SKILL_DESCRIPTION,
             path: "skills/hyacinthus-requirements/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: None,
         },
         Skill {
             name: "hyacinthus-agent-runtime",
-            description: "Agent runtime handoff rules for 风信子家教中心 Hyacinthus CLI link and QR authorization.",
+            description: AGENT_RUNTIME_SKILL_DESCRIPTION,
             path: "skills/hyacinthus-agent-runtime/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: None,
@@ -184,21 +191,21 @@ pub fn show(name: &str) -> CliResult<Skill> {
     match name {
         "hyacinthus-shared" => Ok(Skill {
             name: "hyacinthus-shared",
-            description: "Shared 风信子家教中心 Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+            description: SHARED_SKILL_DESCRIPTION,
             path: "skills/hyacinthus-shared/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(SHARED_SKILL),
         }),
         "hyacinthus-requirements" => Ok(Skill {
             name: "hyacinthus-requirements",
-            description: "Requirement parsing and import workflow rules for Agent operators.",
+            description: REQUIREMENTS_SKILL_DESCRIPTION,
             path: "skills/hyacinthus-requirements/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(REQUIREMENTS_SKILL),
         }),
         "hyacinthus-agent-runtime" => Ok(Skill {
             name: "hyacinthus-agent-runtime",
-            description: "Agent runtime handoff rules for 风信子家教中心 Hyacinthus CLI link and QR authorization.",
+            description: AGENT_RUNTIME_SKILL_DESCRIPTION,
             path: "skills/hyacinthus-agent-runtime/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(AGENT_RUNTIME_SKILL),
@@ -212,21 +219,21 @@ fn full_skills() -> Vec<Skill> {
     vec![
         Skill {
             name: "hyacinthus-shared",
-            description: "Shared 风信子家教中心 Hyacinthus CLI rules for authentication, output, risk, and capability discovery.",
+            description: SHARED_SKILL_DESCRIPTION,
             path: "skills/hyacinthus-shared/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(SHARED_SKILL),
         },
         Skill {
             name: "hyacinthus-requirements",
-            description: "Requirement parsing and import workflow rules for Agent operators.",
+            description: REQUIREMENTS_SKILL_DESCRIPTION,
             path: "skills/hyacinthus-requirements/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(REQUIREMENTS_SKILL),
         },
         Skill {
             name: "hyacinthus-agent-runtime",
-            description: "Agent runtime handoff rules for 风信子家教中心 Hyacinthus CLI link and QR authorization.",
+            description: AGENT_RUNTIME_SKILL_DESCRIPTION,
             path: "skills/hyacinthus-agent-runtime/SKILL.md",
             version: env!("CARGO_PKG_VERSION"),
             content: Some(AGENT_RUNTIME_SKILL),
