@@ -1,3 +1,4 @@
+// 改动说明：CLI 契约测试新增需求关键字搜索覆盖。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -98,6 +99,42 @@ fn mock_once(body: &'static str) -> String {
         assert!(request_text
             .to_ascii_lowercase()
             .contains("x-agent-client-type: hermes"));
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    });
+    format!("http://{}", addr)
+}
+
+/// Start a one-shot mock server that asserts the HTTP request line or headers.
+fn mock_once_expect_request(body: &'static str, expected_request_fragment: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("mock addr");
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept mock request");
+        let mut request = [0_u8; 4096];
+        let size = stream.read(&mut request).expect("read request");
+        let request_text = String::from_utf8_lossy(&request[..size]);
+        assert!(request_text
+            .to_ascii_lowercase()
+            .contains("x-agent-key: test-token"));
+        assert!(request_text
+            .to_ascii_lowercase()
+            .contains("x-agent-client-instance: hermes-wechat-a"));
+        assert!(request_text
+            .to_ascii_lowercase()
+            .contains("x-agent-client-type: hermes"));
+        assert!(
+            request_text.contains(expected_request_fragment),
+            "request did not contain `{}`: {}",
+            expected_request_fragment,
+            request_text
+        );
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             body.len(),
@@ -409,6 +446,11 @@ fn capability_list_returns_embedded_manifest() {
         .as_array()
         .unwrap()
         .iter()
+        .any(|capability| capability["id"] == "requirements.search"));
+    assert!(value["data"]["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
         .any(|capability| capability["id"] == "admin.status"));
     assert!(value["data"]["capabilities"]
         .as_array()
@@ -429,7 +471,7 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 10);
+    assert_eq!(value["data"]["capability_count"], 11);
     assert_eq!(value["meta"]["source"], "embedded");
 }
 
@@ -701,6 +743,105 @@ fn requirements_options_uses_agent_options_endpoint() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(value["data"]["subjects"][0]["name"], "数学");
     assert_eq!(value["meta"]["capability"], "requirements.options");
+}
+
+#[test]
+fn requirements_search_uses_agent_search_endpoint() {
+    let base_url = mock_once_expect_request(
+        r#"{"code":0,"message":"success","data":{"total":1,"items":[{"id":7,"requirement_code":"CLI-001","title":"高一数学","status":"open","subject_names":["数学"],"grade_names":["高一"],"address_detail":"温州市瓯海区","user_id":3,"user_name":"家长A","created_at":"2026-05-10T00:00:00Z","expires_at":null}],"skip":0,"limit":20,"has_more":false,"scope":"active","keyword":"高一数学"}}"#,
+        "GET /api/v1/agent/requirements/search?keyword=%E9%AB%98%E4%B8%80%E6%95%B0%E5%AD%A6&limit=20&scope=active&skip=0 HTTP/1.1",
+    );
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "requirements",
+            "search",
+            "--keyword",
+            "高一数学",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:read")
+        .output()
+        .expect("requirements search");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"]["total"], 1);
+    assert_eq!(value["data"]["items"][0]["title"], "高一数学");
+    assert_eq!(value["meta"]["capability"], "requirements.search");
+}
+
+#[test]
+fn requirements_search_passes_scope_and_pagination_params() {
+    let base_url = mock_once_expect_request(
+        r#"{"code":0,"message":"success","data":{"total":0,"items":[],"skip":20,"limit":10,"has_more":false,"scope":"expired","keyword":"高一数学"}}"#,
+        "GET /api/v1/agent/requirements/search?keyword=%E9%AB%98%E4%B8%80%E6%95%B0%E5%AD%A6&limit=10&scope=expired&skip=20 HTTP/1.1",
+    );
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "requirements",
+            "search",
+            "--keyword",
+            "高一数学",
+            "--scope",
+            "expired",
+            "--skip",
+            "20",
+            "--limit",
+            "10",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:read")
+        .output()
+        .expect("requirements search params");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"]["scope"], "expired");
+    assert_eq!(value["data"]["skip"], 20);
+    assert_eq!(value["data"]["limit"], 10);
+}
+
+#[test]
+fn requirements_search_prechecks_missing_scope() {
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            "http://localhost:8000",
+            "requirements",
+            "search",
+            "--keyword",
+            "高一数学",
+        ],
+        &[("HYACINTHUS_AGENT_SCOPES", "claw:read")],
+        3,
+    );
+
+    assert_eq!(
+        value["error"]["detail"]["missing_scopes"][0],
+        "requirements:read"
+    );
 }
 
 #[test]

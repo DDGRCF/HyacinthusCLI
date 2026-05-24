@@ -47,10 +47,10 @@ hyacinthus admin status
 hyacinthus claw status
 hyacinthus claw skills list
 hyacinthus auth status
-hyacinthus auth login --scope requirements:parse --wait
+hyacinthus auth login --scope requirements:read --wait
 hyacinthus auth grant --scope admin:read
 hyacinthus auth scopes
-hyacinthus auth check --scope requirements:parse
+hyacinthus auth check --scope requirements:read
 hyacinthus doctor
 hyacinthus doctor --offline --strict
 hyacinthus capability list
@@ -67,6 +67,7 @@ hyacinthus skills show hyacinthus-requirements
 hyacinthus skills export --dir ./.tmp/agent-skills
 hyacinthus skills check --dir ./.tmp/agent-skills
 hyacinthus requirements options
+hyacinthus requirements search --keyword 高一数学
 hyacinthus requirements parse --file input.txt
 hyacinthus requirements catalog create-missing --file parsed.json --dry-run
 hyacinthus requirements catalog create-missing --file parsed.json --yes
@@ -126,6 +127,7 @@ JSON filtering supports deterministic dot paths and array expansion:
 
 ```bash
 hyacinthus capability list --jq '.data.capabilities[]'
+hyacinthus requirements search --keyword "高一数学" --scope active -q '.data.total'
 hyacinthus requirements parse --text "高一数学" --dry-run -q '.data.request.body'
 hyacinthus requirements parse --text "高一数学" --dry-run --force-ai
 hyacinthus --request-id trace-123 requirements parse --text "高一数学" --dry-run
@@ -152,6 +154,7 @@ Interactive Agent authorization is supported for hermes, Claw, and other automat
 
 ```bash
 hyacinthus auth login --scope requirements:parse
+hyacinthus auth login --scope requirements:read
 hyacinthus auth login --scope requirements:parse --wait
 hyacinthus auth wait --session-id sess_abc123
 hyacinthus auth grant --scope "requirements:parse requirements:write" --wait
@@ -173,10 +176,11 @@ HYACINTHUS_RAW_API=1 hyacinthus api GET /api/v1/agent/capabilities --output capa
 Known token scopes can be declared for local precheck:
 
 ```bash
+HYACINTHUS_AGENT_SCOPES=requirements:read hyacinthus requirements search --keyword 高一数学
 HYACINTHUS_AGENT_SCOPES=requirements:parse,requirements:write hyacinthus requirements import --dry-run --data @rows.json
-hyacinthus config set-profile dev --base-url http://localhost:8000 --scopes requirements:parse,requirements:write
+hyacinthus config set-profile dev --base-url http://localhost:8000 --scopes requirements:read,requirements:parse,requirements:write
 hyacinthus auth scopes --domain requirements
-hyacinthus auth check --scope "requirements:parse requirements:write"
+hyacinthus auth check --scope "requirements:read requirements:parse requirements:write"
 ```
 
 `config set-profile` is incremental for existing profiles: unspecified fields keep their current values. `auth logout` clears both the saved token and saved local scopes for the selected profile.

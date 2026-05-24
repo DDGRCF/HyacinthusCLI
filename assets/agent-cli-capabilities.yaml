@@ -1,4 +1,4 @@
-# 改动说明：Agent 需求能力清单不再要求 session-token 调用方传实例 ID。
+# 改动说明：Agent 需求能力清单新增需求关键字搜索能力。
 version: "2026-05-10"
 backend_min_version: "0.1.0"
 capabilities:
@@ -273,6 +273,131 @@ capabilities:
         command: hyacinthus requirements import --file confirmed.json --idempotency-key cli-20260510-demo
       - title: 预览批量导入请求
         command: hyacinthus requirements import --file confirmed.json --idempotency-key cli-20260510-demo --dry-run
+
+  - id: requirements.search
+    title: 搜索需求
+    description: Agent 专用需求关键字搜索能力，返回匹配总数和简表结果。
+    domain: requirements
+    command: hyacinthus requirements search
+    method: GET
+    path: /api/v1/agent/requirements/search
+    required_scopes:
+      - requirements:read
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - keyword
+      properties:
+        keyword:
+          type: string
+          minLength: 1
+          description: 搜索关键字，匹配标题、编号、地址、描述、时间、用户、科目、年级和目标角色。
+        scope:
+          type: string
+          enum:
+            - active
+            - all
+            - invalid
+            - expired
+          description: 搜索范围；默认 active 表示当前有效需求。
+        skip:
+          type: integer
+          minimum: 0
+          description: 跳过的匹配记录数。
+        limit:
+          type: integer
+          minimum: 1
+          description: 返回的简表数量，后端最大 100。
+    response_schema:
+      type: object
+      required:
+        - total
+        - items
+        - skip
+        - limit
+        - has_more
+        - scope
+        - keyword
+      properties:
+        total:
+          type: integer
+          description: 匹配需求总数。
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - status
+              - subject_names
+              - grade_names
+              - user_id
+              - created_at
+            properties:
+              id:
+                type: integer
+              requirement_code:
+                type:
+                  - string
+                  - "null"
+              title:
+                type:
+                  - string
+                  - "null"
+              status:
+                type: string
+              subject_names:
+                type: array
+                items:
+                  type: string
+              grade_names:
+                type: array
+                items:
+                  type: string
+              address_detail:
+                type:
+                  - string
+                  - "null"
+              user_id:
+                type: integer
+              user_name:
+                type:
+                  - string
+                  - "null"
+              created_at:
+                type: string
+              expires_at:
+                type:
+                  - string
+                  - "null"
+        skip:
+          type: integer
+        limit:
+          type: integer
+        has_more:
+          type: boolean
+        scope:
+          type: string
+          enum:
+            - active
+            - all
+            - invalid
+            - expired
+        keyword:
+          type: string
+    examples:
+      - title: 搜索有效需求并返回数量
+        command: hyacinthus requirements search --keyword 高一数学
+      - title: 搜索已过期需求
+        command: hyacinthus requirements search --keyword 高一数学 --scope expired
 
   - id: requirements.options
     title: 需求元数据选项

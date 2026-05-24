@@ -1,4 +1,4 @@
-// 改动说明：CLI 参数模型收口需求导入参数，并压缩大枚举变体以满足 release 检查。
+// 改动说明：CLI 参数模型新增需求关键字搜索参数。
 use std::fmt;
 use std::str::FromStr;
 
@@ -413,6 +413,7 @@ pub struct RequirementsCommand {
 /// Requirements workflows supported by Agent automation.
 pub enum RequirementsSubcommand {
     Options,
+    Search(RequirementsSearchArgs),
     Parse(RequirementsParseArgs),
     Import(RequirementsImportArgs),
     ImportRaw(RequirementsImportRawArgs),
@@ -431,6 +432,43 @@ pub struct RequirementsCatalogCommand {
 pub enum RequirementsCatalogSubcommand {
     CreateMissing(RequirementsCatalogCreateMissingArgs),
     Reorder(RequirementsCatalogReorderArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for searching existing requirements by keyword.
+pub struct RequirementsSearchArgs {
+    #[arg(long)]
+    pub keyword: String,
+    #[arg(long, value_enum, default_value_t = RequirementSearchScope::Active)]
+    pub scope: RequirementSearchScope,
+    #[arg(long, default_value_t = 0)]
+    pub skip: u64,
+    #[arg(long, default_value_t = 20)]
+    pub limit: u64,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, ValueEnum, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+/// Requirement lifecycle scope selected by requirement search.
+pub enum RequirementSearchScope {
+    Active,
+    All,
+    Invalid,
+    Expired,
+}
+
+impl std::fmt::Display for RequirementSearchScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Self::Active => "active",
+            Self::All => "all",
+            Self::Invalid => "invalid",
+            Self::Expired => "expired",
+        };
+        write!(f, "{value}")
+    }
 }
 
 #[derive(Clone, Debug, Args)]

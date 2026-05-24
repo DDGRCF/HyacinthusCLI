@@ -1,4 +1,4 @@
-// 改动说明：命令调度收口需求解析参数并新增原文一键解析导入流程。
+// 改动说明：命令调度新增需求关键字搜索流程。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -15,7 +15,8 @@ use crate::cli::{
     ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand,
     RequirementsCatalogCreateMissingArgs, RequirementsCatalogReorderArgs,
     RequirementsCatalogSubcommand, RequirementsImportArgs, RequirementsImportRawArgs,
-    RequirementsParseArgs, RequirementsSubcommand, UserSubcommand, UserUpdateArgs,
+    RequirementsParseArgs, RequirementsSearchArgs, RequirementsSubcommand, UserSubcommand,
+    UserUpdateArgs,
 };
 use crate::client::{self, ApiClient};
 use crate::config::{self, Profile, RuntimeContext};
@@ -78,6 +79,7 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
         Command::User(command) => user_command(cli, &command.command),
         Command::Requirements(command) => match &command.command {
             RequirementsSubcommand::Options => requirements_options(cli),
+            RequirementsSubcommand::Search(args) => requirements_search(cli, args),
             RequirementsSubcommand::Parse(args) => requirements_parse(cli, args),
             RequirementsSubcommand::Import(args) => requirements_import(cli, args),
             RequirementsSubcommand::ImportRaw(args) => requirements_import_raw(cli, args),
@@ -1227,6 +1229,38 @@ fn requirements_options(cli: &Cli) -> CliResult<(Value, Value)> {
     Ok((
         data,
         json!({ "command": "requirements options", "capability": "requirements.options" }),
+    ))
+}
+
+/// Search existing requirements by keyword through the Agent read endpoint.
+fn requirements_search(cli: &Cli, args: &RequirementsSearchArgs) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        cli.instance_id,
+        cli.request_id.as_deref(),
+    )?;
+    let capability = manifest::find_capability("requirements.search")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    let keyword = args.keyword.trim();
+    if keyword.is_empty() {
+        return Err(CliError::validation("keyword is required"));
+    }
+    let params = json!({
+        "keyword": keyword,
+        "scope": args.scope.to_string(),
+        "skip": args.skip,
+        "limit": args.limit,
+    });
+    validate_request_payload(&capability, &params)?;
+    let path = query::append_json_params(&capability.path, Some(&params))?;
+    let data = ApiClient::new(ctx)?.get(&path)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements search", "capability": "requirements.search" }),
     ))
 }
 
