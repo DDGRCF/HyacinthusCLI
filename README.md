@@ -67,11 +67,11 @@ hyacinthus skills show hyacinthus-requirements
 hyacinthus skills export --dir ./.tmp/agent-skills
 hyacinthus skills check --dir ./.tmp/agent-skills
 hyacinthus requirements options
-hyacinthus requirements parse --file input.txt --instance-id 1
+hyacinthus requirements parse --file input.txt
 hyacinthus requirements catalog create-missing --file parsed.json --dry-run
 hyacinthus requirements catalog create-missing --file parsed.json --yes
 hyacinthus requirements catalog reorder --target subjects --ids 3,1,2 --yes
-hyacinthus requirements import --file confirmed.json --instance-id 1 --idempotency-key cli-demo --yes
+hyacinthus requirements import --file confirmed.json --idempotency-key cli-demo --yes
 ```
 
 ## Environment Variables
@@ -126,9 +126,9 @@ JSON filtering supports deterministic dot paths and array expansion:
 
 ```bash
 hyacinthus capability list --jq '.data.capabilities[]'
-hyacinthus requirements parse --text "高一数学" --instance-id 1 --dry-run -q '.data.request.body'
-hyacinthus requirements parse --text "高一数学" --instance-id 1 --dry-run --force-ai
-hyacinthus --request-id trace-123 requirements parse --text "高一数学" --instance-id 1 --dry-run
+hyacinthus requirements parse --text "高一数学" --dry-run -q '.data.request.body'
+hyacinthus requirements parse --text "高一数学" --dry-run --force-ai
+hyacinthus --request-id trace-123 requirements parse --text "高一数学" --dry-run
 ```
 
 Paginated GET calls can be collected generically when the backend returns `has_more` and `next_page_token`:
@@ -165,8 +165,8 @@ Commands that return backend data can write the successful `data` payload to a f
 
 ```bash
 hyacinthus capability run requirements.options --output options.json
-hyacinthus requirements parse --text "高一数学" --instance-id 1 --output parsed.json
-hyacinthus requirements import --data @confirmed.json --instance-id 1 --yes --output import-result.json
+hyacinthus requirements parse --text "高一数学" --output parsed.json
+hyacinthus requirements import --data @confirmed.json --yes --output import-result.json
 HYACINTHUS_RAW_API=1 hyacinthus api GET /api/v1/agent/capabilities --output capabilities.json
 ```
 

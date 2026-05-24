@@ -14,6 +14,12 @@ Use this skill when the user wants to parse, clean, confirm, or import tutoring 
 
 Read `../hyacinthus-shared/SKILL.md` first for auth, doctor, dry-run, and error handling.
 
+## Instance Identity
+
+Use the current Hyacinthus CLI profile default instance. Do not add `--instance-id`
+unless the user explicitly provides an instance ID or `hyacinthus auth status`
+shows `default_instance_id` is missing.
+
 ## Pre-Parse Normalization
 
 Before parse, normalize toward:
@@ -39,13 +45,13 @@ Review if address is only city/district, fields are mixed, jobs are merged, or s
 2. Parse raw text:
 
 ```bash
-hyacinthus requirements parse --file input.txt --instance-id 1
+hyacinthus requirements parse --file input.txt
 ```
 
 or:
 
 ```bash
-hyacinthus requirements parse --text "高一数学，瓯海区，周末上课" --instance-id 1
+hyacinthus requirements parse --text "高一数学，瓯海区，周末上课"
 ```
 
 3. Inspect:
@@ -121,8 +127,8 @@ This command requires `catalog:write`.
 For raw copied demand text or a dataset file, prefer the atomic raw import command so the CLI, not the Agent, filters rows:
 
 ```bash
-hyacinthus requirements import-raw --file input.txt --instance-id 1 --preset-contact-phone 13800000000 --preset-contact-wechat hyacinthus_admin --dry-run --output outputs/import_raw_dry_run.json -q .data.parse_summary
-hyacinthus requirements import-raw --file input.txt --instance-id 1 --preset-contact-phone 13800000000 --preset-contact-wechat hyacinthus_admin --yes --output outputs/import_raw_execute.json -q .data.parse_summary
+hyacinthus requirements import-raw --file input.txt --preset-contact-phone 13800000000 --preset-contact-wechat hyacinthus_admin --dry-run --output outputs/import_raw_dry_run.json -q .data.parse_summary
+hyacinthus requirements import-raw --file input.txt --preset-contact-phone 13800000000 --preset-contact-wechat hyacinthus_admin --yes --output outputs/import_raw_execute.json -q .data.parse_summary
 ```
 
 `import-raw` parses first, imports only rows with `can_auto_commit: true` and `needs_confirmation: false`, and reports skipped rows with confirmation reasons. For datasets, write the full result to `outputs/` and keep stdout to a summary path; do not print large `skipped_rows` JSON unless debugging.
@@ -133,13 +139,13 @@ For already parsed or confirmed JSON rows:
 2. Dry-run first:
 
 ```bash
-hyacinthus requirements import --file confirmed.json --instance-id 1 --idempotency-key cli-demo --dry-run
+hyacinthus requirements import --file confirmed.json --idempotency-key cli-demo --dry-run
 ```
 
 3. Execute:
 
 ```bash
-hyacinthus requirements import --file confirmed.json --instance-id 1 --idempotency-key cli-demo --yes
+hyacinthus requirements import --file confirmed.json --idempotency-key cli-demo --yes
 ```
 
 Report:
@@ -159,6 +165,7 @@ If `failed > 0`, do not blindly retry the whole batch with a new idempotency key
 - Do not reorder subjects or grades without a complete ordered ID list approved by the user.
 - Do not import without an idempotency key unless the CLI generated one and returned it.
 - Do not bypass `import-raw`/`parse` confirmation rules for raw text.
+- Do not copy example instance IDs such as `1`; use the profile default instance unless explicitly told otherwise.
 - Do not invent address, duration, salary, or teacher requirements to fill missing fields.
 - Do not use raw API as the normal path.
 - Do not print tokens or secrets.

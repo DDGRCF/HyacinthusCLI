@@ -1370,11 +1370,13 @@ fn requirements_import_raw(
     let import_capability = manifest::find_capability("requirements.batch_import")?;
     manifest::ensure_supported(&import_capability)?;
     ensure_scopes(&ctx, &import_capability.required_scopes)?;
-    let import_payload = json!({
-        "instance_id": required_instance_id(ctx.instance_id)?,
+    let mut import_payload = json!({
         "idempotency_key": idempotency_key,
         "confirmed_rows": confirmed_rows
     });
+    if let Some(resolved_instance_id) = ctx.instance_id {
+        import_payload["instance_id"] = json!(resolved_instance_id);
+    }
     validate_request_payload(&import_capability, &import_payload)?;
     if args.dry_run {
         result["import_summary"] = dry_run_payload(
@@ -1688,8 +1690,8 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
     }
     if let Some(data) = &args.data {
         let mut payload = read_json_arg(data)?;
-        if payload.get("instance_id").is_none() {
-            payload["instance_id"] = json!(required_instance_id(instance_id)?);
+        if payload.get("instance_id").is_none() && instance_id.is_some() {
+            payload["instance_id"] = json!(instance_id.expect("checked instance id"));
         }
         return Ok(payload);
     }
@@ -1705,8 +1707,7 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
     if raw_text.trim().is_empty() {
         return Err(CliError::validation("raw_text is empty"));
     }
-    Ok(json!({
-        "instance_id": required_instance_id(instance_id)?,
+    let mut payload = json!({
         "raw_text": raw_text,
         "preset_contact_phone": args.preset_contact_phone,
         "preset_contact_wechat": args.preset_contact_wechat,
@@ -1714,7 +1715,11 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
         "force_ai": args.force_ai,
         "enable_ai_fallback": args.enable_ai_fallback,
         "skip_geocode": args.skip_geocode
-    }))
+    });
+    if let Some(resolved_instance_id) = instance_id {
+        payload["instance_id"] = json!(resolved_instance_id);
+    }
+    Ok(payload)
 }
 
 fn build_import_payload(
@@ -1784,8 +1789,8 @@ fn build_import_payload(
             "import input must be a payload, rows array, or parse output envelope",
         ));
     };
-    if payload.get("instance_id").is_none() {
-        payload["instance_id"] = json!(required_instance_id(instance_id)?);
+    if payload.get("instance_id").is_none() && instance_id.is_some() {
+        payload["instance_id"] = json!(instance_id.expect("checked instance id"));
     }
     if payload.get("idempotency_key").is_none() {
         payload["idempotency_key"] = json!(args.idempotency_key.clone().unwrap_or_default());
@@ -1817,8 +1822,8 @@ fn build_import_raw_parse_payload(
     }
     if let Some(data) = &args.data {
         let mut payload = read_json_arg(data)?;
-        if payload.get("instance_id").is_none() {
-            payload["instance_id"] = json!(required_instance_id(instance_id)?);
+        if payload.get("instance_id").is_none() && instance_id.is_some() {
+            payload["instance_id"] = json!(instance_id.expect("checked instance id"));
         }
         return Ok(payload);
     }
@@ -1834,8 +1839,7 @@ fn build_import_raw_parse_payload(
     if raw_text.trim().is_empty() {
         return Err(CliError::validation("raw_text is empty"));
     }
-    Ok(json!({
-        "instance_id": required_instance_id(instance_id)?,
+    let mut payload = json!({
         "raw_text": raw_text,
         "preset_contact_phone": args.preset_contact_phone,
         "preset_contact_wechat": args.preset_contact_wechat,
@@ -1843,7 +1847,11 @@ fn build_import_raw_parse_payload(
         "force_ai": args.force_ai,
         "enable_ai_fallback": args.enable_ai_fallback,
         "skip_geocode": args.skip_geocode
-    }))
+    });
+    if let Some(resolved_instance_id) = instance_id {
+        payload["instance_id"] = json!(resolved_instance_id);
+    }
+    Ok(payload)
 }
 
 /// Split parse output into importable payloads and concise review-only rows.
@@ -2256,11 +2264,6 @@ fn dry_run_payload(
         value["pagination"] = pagination;
     }
     value
-}
-
-/// Require an instance ID after profile, env, and explicit flag resolution.
-fn required_instance_id(instance_id: Option<i64>) -> CliResult<i64> {
-    instance_id.ok_or_else(|| CliError::validation("instance_id is required"))
 }
 
 /// Read JSON from an inline string, stdin (`-`), or `@file` path.

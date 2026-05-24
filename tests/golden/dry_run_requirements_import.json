@@ -9,8 +9,7 @@
             "title": "高一数学"
           }
         ],
-        "idempotency_key": "snapshot-key",
-        "instance_id": 1
+        "idempotency_key": "snapshot-key"
       },
       "method": "POST",
       "path": "/api/v1/agent/requirements/batch-import"

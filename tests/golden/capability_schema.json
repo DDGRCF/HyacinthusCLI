@@ -6,11 +6,11 @@
     "domain": "requirements",
     "examples": [
       {
-        "command": "hyacinthus requirements parse --file input.txt --instance-id 1",
+        "command": "hyacinthus requirements parse --file input.txt",
         "title": "从文本文件解析需求"
       },
       {
-        "command": "hyacinthus requirements parse --file input.txt --instance-id 1 --skip-geocode",
+        "command": "hyacinthus requirements parse --file input.txt --skip-geocode",
         "title": "跳过地理编码解析"
       }
     ],
@@ -32,7 +32,7 @@
           "type": "boolean"
         },
         "instance_id": {
-          "description": "Claw 实例 ID，用于解析 Agent 操作身份。",
+          "description": "Claw 实例 ID；静态 Agent key 调用时必填，session token 调用默认使用授权用户身份。",
           "minimum": 1,
           "type": "integer"
         },
@@ -69,7 +69,6 @@
         }
       },
       "required": [
-        "instance_id",
         "raw_text"
       ],
       "type": "object"

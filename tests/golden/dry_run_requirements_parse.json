@@ -5,7 +5,6 @@
       "body": {
         "enable_ai_fallback": false,
         "force_ai": false,
-        "instance_id": 1,
         "preset_city": null,
         "preset_contact_phone": null,
         "preset_contact_wechat": null,

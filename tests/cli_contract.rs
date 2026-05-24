@@ -333,8 +333,6 @@ fn dry_run_snapshots_match_golden() {
     let parse = run_json(&[
         "--base-url",
         "http://localhost:8000",
-        "--instance-id",
-        "1",
         "requirements",
         "parse",
         "--text",
@@ -346,8 +344,6 @@ fn dry_run_snapshots_match_golden() {
     let import = run_json(&[
         "--base-url",
         "http://localhost:8000",
-        "--instance-id",
-        "1",
         "requirements",
         "import",
         "--data",
@@ -643,8 +639,6 @@ fn requirements_parse_dry_run_is_agent_readable() {
     let value = run_json(&[
         "--base-url",
         "http://localhost:8000",
-        "--instance-id",
-        "1",
         "requirements",
         "parse",
         "--text",
@@ -655,7 +649,9 @@ fn requirements_parse_dry_run_is_agent_readable() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["dry_run"], true);
     assert_eq!(value["data"]["request"]["method"], "POST");
-    assert_eq!(value["data"]["request"]["body"]["instance_id"], 1);
+    assert!(value["data"]["request"]["body"]
+        .get("instance_id")
+        .is_none());
 }
 
 #[test]
@@ -2805,6 +2801,51 @@ fn import_dry_run_reports_idempotency_key() {
         .as_str()
         .unwrap_or("");
     assert!(key.starts_with("cli-"));
+}
+
+#[test]
+fn requirements_import_raw_dry_run_allows_session_token_without_instance_id() {
+    let base_url = mock_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}"#,
+    ]);
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "requirements",
+            "import-raw",
+            "--text",
+            "高一数学，周末上课",
+            "--idempotency-key",
+            "raw-no-instance",
+            "--dry-run",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env(
+            "HYACINTHUS_AGENT_SCOPES",
+            "requirements:parse,requirements:write",
+        )
+        .output()
+        .expect("requirements import-raw dry-run");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert!(value["data"]["import_summary"]["request"]["body"]
+        .get("instance_id")
+        .is_none());
+    assert_eq!(
+        value["data"]["import_summary"]["request"]["body"]["idempotency_key"],
+        "raw-no-instance"
+    );
 }
 
 #[test]

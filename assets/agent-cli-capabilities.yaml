@@ -1,4 +1,4 @@
-# 改动说明：Agent 能力清单移除旧解析预设 JSON 字段并保留地理诊断字段。
+# 改动说明：Agent 需求能力清单不再要求 session-token 调用方传实例 ID。
 version: "2026-05-10"
 backend_min_version: "0.1.0"
 capabilities:
@@ -22,13 +22,12 @@ capabilities:
     request_schema:
       type: object
       required:
-        - instance_id
         - raw_text
       properties:
         instance_id:
           type: integer
           minimum: 1
-          description: Claw 实例 ID，用于解析 Agent 操作身份。
+          description: Claw 实例 ID；静态 Agent key 调用时必填，session token 调用默认使用授权用户身份。
         raw_text:
           type: string
           minLength: 1
@@ -118,9 +117,9 @@ capabilities:
                   type: string
     examples:
       - title: 从文本文件解析需求
-        command: hyacinthus requirements parse --file input.txt --instance-id 1
+        command: hyacinthus requirements parse --file input.txt
       - title: 跳过地理编码解析
-        command: hyacinthus requirements parse --file input.txt --instance-id 1 --skip-geocode
+        command: hyacinthus requirements parse --file input.txt --skip-geocode
 
   - id: requirements.batch_import
     title: 批量导入需求
@@ -142,13 +141,12 @@ capabilities:
     request_schema:
       type: object
       required:
-        - instance_id
         - confirmed_rows
       properties:
         instance_id:
           type: integer
           minimum: 1
-          description: Claw 实例 ID，用于解析 Agent 操作身份。
+          description: Claw 实例 ID；静态 Agent key 调用时必填，session token 调用默认使用授权用户身份。
         idempotency_key:
           type:
             - string
@@ -272,9 +270,9 @@ capabilities:
           description: true 表示后端返回的是同一幂等 key 的历史结果。
     examples:
       - title: 使用幂等 key 批量导入
-        command: hyacinthus requirements import --file confirmed.json --instance-id 1 --idempotency-key cli-20260510-demo
+        command: hyacinthus requirements import --file confirmed.json --idempotency-key cli-20260510-demo
       - title: 预览批量导入请求
-        command: hyacinthus requirements import --file confirmed.json --instance-id 1 --idempotency-key cli-20260510-demo --dry-run
+        command: hyacinthus requirements import --file confirmed.json --idempotency-key cli-20260510-demo --dry-run
 
   - id: requirements.options
     title: 需求元数据选项
