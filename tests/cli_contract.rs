@@ -825,23 +825,35 @@ fn requirements_search_passes_scope_and_pagination_params() {
 
 #[test]
 fn requirements_search_prechecks_missing_scope() {
-    let value = run_json_expect_code(
-        &[
+    let base_url = mock_public_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-search-scope","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"READ-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=READ-1234","qr_code_text":"http://auth/verify?user_code=READ-1234","required_scopes":["requirements:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+    ]);
+    let output = cli()
+        .args([
             "--base-url",
-            "http://localhost:8000",
+            &base_url,
             "requirements",
             "search",
             "--keyword",
             "高一数学",
-        ],
-        &[("HYACINTHUS_AGENT_SCOPES", "claw:read")],
-        3,
-    );
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
+        .output()
+        .expect("requirements search missing scope");
+    assert_eq!(output.status.code(), Some(3));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
 
+    assert_eq!(value["error"]["type"], "auth_required");
     assert_eq!(
         value["error"]["detail"]["missing_scopes"][0],
         "requirements:read"
     );
+    assert_eq!(value["error"]["detail"]["session_id"], "sess-search-scope");
 }
 
 #[test]
