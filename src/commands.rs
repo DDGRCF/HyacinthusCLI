@@ -1724,8 +1724,10 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
     }
     if let Some(data) = &args.data {
         let mut payload = read_json_arg(data)?;
-        if payload.get("instance_id").is_none() && instance_id.is_some() {
-            payload["instance_id"] = json!(instance_id.expect("checked instance id"));
+        if payload.get("instance_id").is_none() {
+            if let Some(instance_id) = instance_id {
+                payload["instance_id"] = json!(instance_id);
+            }
         }
         return Ok(payload);
     }
@@ -1823,8 +1825,10 @@ fn build_import_payload(
             "import input must be a payload, rows array, or parse output envelope",
         ));
     };
-    if payload.get("instance_id").is_none() && instance_id.is_some() {
-        payload["instance_id"] = json!(instance_id.expect("checked instance id"));
+    if payload.get("instance_id").is_none() {
+        if let Some(instance_id) = instance_id {
+            payload["instance_id"] = json!(instance_id);
+        }
     }
     if payload.get("idempotency_key").is_none() {
         payload["idempotency_key"] = json!(args.idempotency_key.clone().unwrap_or_default());
@@ -1856,8 +1860,10 @@ fn build_import_raw_parse_payload(
     }
     if let Some(data) = &args.data {
         let mut payload = read_json_arg(data)?;
-        if payload.get("instance_id").is_none() && instance_id.is_some() {
-            payload["instance_id"] = json!(instance_id.expect("checked instance id"));
+        if payload.get("instance_id").is_none() {
+            if let Some(instance_id) = instance_id {
+                payload["instance_id"] = json!(instance_id);
+            }
         }
         return Ok(payload);
     }
