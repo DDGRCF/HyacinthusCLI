@@ -217,11 +217,18 @@ Errors return:
 
 When output contains risky prompt-injection text or terminal control characters, the envelope includes `_content_safety_alert` and removes unsafe control characters before printing.
 
-Update and skills notices are non-blocking and can be suppressed:
+Update notices are non-blocking. By default, the CLI checks the latest GitHub
+release at most once per day and caches the result next to the CLI config.
+Skills notices remain controlled by `HYACINTHUS_SKILLS_TARGET_VERSION`.
+All notices can be suppressed:
 
 ```bash
 hyacinthus --no-notice capability list
 ```
+
+For private or mirrored release sources, set `HYACINTHUS_CLI_REPO` or
+`HYACINTHUS_CLI_RELEASE_API_URL`. `HYACINTHUS_CLI_LATEST_VERSION` can still be
+used to force a local update notice without making a network request.
 
 ## Tests
 

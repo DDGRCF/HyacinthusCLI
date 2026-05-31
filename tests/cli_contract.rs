@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试新增需求关键字搜索覆盖。
+// 改动说明：CLI 契约测试新增版本更新提醒缓存覆盖。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -209,6 +209,29 @@ fn mock_once_invalid_json() -> String {
         let mut request = [0_u8; 4096];
         let _ = stream.read(&mut request).expect("read request");
         let body = "not-json";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    });
+    format!("http://{}", addr)
+}
+
+fn mock_release_once(body: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("mock addr");
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept mock request");
+        let mut request = [0_u8; 4096];
+        let size = stream.read(&mut request).expect("read request");
+        let request_text = String::from_utf8_lossy(&request[..size]);
+        let request_text_lower = request_text.to_ascii_lowercase();
+        assert!(request_text.contains("GET /"));
+        assert!(request_text_lower.contains("user-agent: hyacinthuscli/"));
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             body.len(),
@@ -1652,6 +1675,63 @@ fn notice_can_be_emitted_and_suppressed() {
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert!(value.get("_notice").is_none());
+}
+
+#[test]
+fn notice_checks_release_api_and_uses_cache() {
+    let config_dir = tempfile::tempdir().unwrap();
+    let release_url = mock_release_once(
+        r#"{"tag_name":"v0.2.0","html_url":"https://github.com/DDGRCF/HyacinthusCLI/releases/tag/v0.2.0"}"#,
+    );
+    let output = cli()
+        .args(["capability", "list"])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
+        .env("HYACINTHUS_CLI_RELEASE_API_URL", release_url)
+        .output()
+        .expect("release notice");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["_notice"]["update"]["latest"], "0.2.0");
+    assert_eq!(
+        value["_notice"]["update"]["url"],
+        "https://github.com/DDGRCF/HyacinthusCLI/releases/tag/v0.2.0"
+    );
+    assert_eq!(
+        value["_notice"]["update"]["install"],
+        "npx @ddgrcf/hyacinthus-cli install --version v0.2.0"
+    );
+
+    let output = cli()
+        .args(["capability", "list"])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
+        .env(
+            "HYACINTHUS_CLI_RELEASE_API_URL",
+            "http://127.0.0.1:9/releases/latest",
+        )
+        .output()
+        .expect("cached release notice");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["_notice"]["update"]["latest"], "0.2.0");
+    assert!(config_dir.path().join("notice-cache.json").exists());
 }
 
 #[test]
