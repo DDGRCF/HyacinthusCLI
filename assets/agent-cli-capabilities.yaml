@@ -1,4 +1,4 @@
-# 改动说明：Agent 需求能力清单新增需求关键字搜索能力。
+# 改动说明：Agent 需求能力清单同步当前需求导入字段与条件对象。
 version: "2026-05-10"
 backend_min_version: "0.1.0"
 capabilities:
@@ -159,8 +159,7 @@ capabilities:
           items:
             type: object
             required:
-              - requirement_type
-              - title
+              - description
             properties:
               requirement_type:
                 type: string
@@ -170,9 +169,8 @@ capabilities:
                 minLength: 1
                 description: 需求标题。
               description:
-                type:
-                  - string
-                  - "null"
+                type: string
+                minLength: 1
                 description: 需求描述。
               raw_text:
                 type:
@@ -184,6 +182,16 @@ capabilities:
                   - string
                   - "null"
                 description: 外部需求编号；为空时由后端处理。
+              target_role_id:
+                type:
+                  - integer
+                  - "null"
+                description: 目标角色 ID；为空时表示通用目标角色。
+              related_user_id:
+                type:
+                  - integer
+                  - "null"
+                description: 关联用户 ID，用于代他人发布场景。
               subject_ids:
                 type: array
                 items:
@@ -194,37 +202,198 @@ capabilities:
                 items:
                   type: integer
                 description: 年级 ID 列表。
+              compensation:
+                type:
+                  - object
+                  - "null"
+                description: 薪资结构化对象。
+                properties:
+                  raw_text:
+                    type:
+                      - string
+                      - "null"
+                    description: 薪资原文。
+                  amount_min:
+                    type:
+                      - number
+                      - "null"
+                    description: 最低金额。
+                  amount_max:
+                    type:
+                      - number
+                      - "null"
+                    description: 最高金额。
+                  currency:
+                    type: string
+                    description: 币种，默认 CNY。
+                  billing_period:
+                    type:
+                      - string
+                      - "null"
+                    description: 计费周期，例如 hour、lesson。
+                  billing_unit_text:
+                    type:
+                      - string
+                      - "null"
+                    description: 原始计费单位文本。
+                  is_negotiable:
+                    type: boolean
+                    description: 是否可议价。
+                  note:
+                    type:
+                      - string
+                      - "null"
+                    description: 薪资补充说明。
+                  source:
+                    type:
+                      - string
+                      - "null"
+                    description: 字段来源。
+                  confidence:
+                    type:
+                      - number
+                      - "null"
+                    description: 解析置信度。
+                  ext:
+                    type:
+                      - object
+                      - "null"
+                    description: 薪资扩展字段。
+              condition:
+                type:
+                  - object
+                  - "null"
+                description: 需求方信息和老师要求条件对象。
+                properties:
+                  requester_role:
+                    type:
+                      - string
+                      - "null"
+                    description: 需求方角色，例如 家长、学生。
+                  requester_gender:
+                    type:
+                      - string
+                      - "null"
+                    description: 需求方或学生性别。
+                  requester_education_level:
+                    type:
+                      - string
+                      - "null"
+                    description: 需求方学历。
+                  requester_education_note:
+                    type:
+                      - string
+                      - "null"
+                    description: 需求方学历补充说明。
+                  required_gender:
+                    type:
+                      - string
+                      - "null"
+                    description: 老师性别要求。
+                  required_education_levels:
+                    type:
+                      - array
+                      - string
+                      - "null"
+                    description: 老师学历要求，可为数组或原始字符串。
+                    items:
+                      type: string
+                  required_education_note:
+                    type:
+                      - string
+                      - "null"
+                    description: 老师学历补充说明。
+                  required_school_names:
+                    type:
+                      - array
+                      - string
+                      - "null"
+                    description: 老师学校要求，可为数组或原始字符串。
+                    items:
+                      type: string
+                  required_school_tiers:
+                    type:
+                      - array
+                      - string
+                      - "null"
+                    description: 老师学校层次要求，可为数组或原始字符串。
+                    items:
+                      type: string
+                  required_school_ids:
+                    type:
+                      - array
+                      - "null"
+                    description: 已确认的学校目录 ID 列表。
+                    items:
+                      type: integer
+                  required_occupation:
+                    type:
+                      - string
+                      - "null"
+                    description: 老师资格或职业要求。
+                  source:
+                    type:
+                      - string
+                      - "null"
+                    description: 字段来源。
+                  confidence:
+                    type:
+                      - number
+                      - "null"
+                    description: 解析置信度。
+                  ext:
+                    type:
+                      - object
+                      - "null"
+                    description: 条件扩展字段。
+              preferred_mode:
+                type: string
+                enum:
+                  - online
+                  - offline
+                  - hybrid
+                description: 授课方式，默认 hybrid。
+              class_time_text:
+                type:
+                  - string
+                  - "null"
+                description: 上课时间原文。
               address_detail:
                 type:
                   - string
                   - "null"
                 description: 上课地址详情。
-              latitude:
+              location:
                 type:
-                  - number
+                  - object
                   - "null"
-                description: 地址纬度。
-              longitude:
+                description: 坐标对象，使用 lng/lat。
+                properties:
+                  lng:
+                    type: number
+                  lat:
+                    type: number
+              tags:
                 type:
-                  - number
+                  - object
                   - "null"
-                description: 地址经度。
-              contact_phone:
+                description: 需求标签对象。
+              status:
                 type:
                   - string
                   - "null"
-                description: 联系电话。
-              contact_wechat:
-                type:
-                  - string
-                  - "null"
-                description: 微信号。
+                description: 需求状态；为空时后端使用默认 open。
               expires_at:
                 type:
                   - string
                   - "null"
                 format: date-time
                 description: 过期时间；为空时后端使用默认过期时间。
+              matched_user_id:
+                type:
+                  - integer
+                  - "null"
+                description: 已匹配用户 ID；普通导入通常为空。
               time_slots:
                 type: array
                 items:

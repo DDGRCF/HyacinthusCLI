@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试新增版本更新提醒缓存覆盖。
+// 改动说明：CLI 契约测试覆盖共享需求导入 skill 当前字段规则。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -379,7 +379,7 @@ fn error_envelopes_match_golden() {
             "requirements",
             "import",
             "--data",
-            r#"{"ok":true,"data":{"rows":[{"can_auto_commit":false,"needs_confirmation":true,"parsed":{"requirement_type":"tutoring","title":"高一数学"}}]}}"#,
+            r#"{"ok":true,"data":{"rows":[{"can_auto_commit":false,"needs_confirmation":true,"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}"#,
             "--dry-run",
         ],
         &[],
@@ -407,7 +407,7 @@ fn dry_run_snapshots_match_golden() {
         "requirements",
         "import",
         "--data",
-        r#"[{"requirement_type":"tutoring","title":"高一数学"}]"#,
+        r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
         "--idempotency-key",
         "snapshot-key",
         "--dry-run",
@@ -1772,7 +1772,7 @@ fn requirements_import_prechecks_missing_scope() {
             "requirements",
             "import",
             "--data",
-            r#"[{"requirement_type":"tutoring","title":"高一数学"}]"#,
+            r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
             "--dry-run",
         ])
         .env_clear()
@@ -1827,7 +1827,7 @@ fn profile_scopes_are_used_for_precheck() {
             "requirements",
             "import",
             "--data",
-            r#"[{"requirement_type":"tutoring","title":"高一数学"}]"#,
+            r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
             "--dry-run",
         ])
         .env_clear()
@@ -2569,7 +2569,7 @@ fn capability_run_write_requires_yes_for_real_execution() {
             "run",
             "requirements.batch_import",
             "--data",
-            r#"{"instance_id":1,"idempotency_key":"write-check","confirmed_rows":[{"requirement_type":"tutoring","title":"高一数学"}]}"#,
+            r#"{"instance_id":1,"idempotency_key":"write-check","confirmed_rows":[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]}"#,
         ])
         .env_clear()
         .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
@@ -2827,6 +2827,22 @@ fn skill_content_is_rendered_by_name() {
         .contains("Hyacinthus"));
 }
 
+/// 共享需求导入 skill 必须暴露当前字段名，供所有 agent 统一使用。
+#[test]
+fn requirements_skill_content_declares_current_batch_fields() {
+    let value = run_json(&["skills", "show", "hyacinthus-requirements"]);
+    let content = value["data"]["content"].as_str().unwrap_or("");
+
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["data"]["name"], "hyacinthus-requirements");
+    assert!(content.contains("需求方性别"));
+    assert!(content.contains("老师性别要求"));
+    assert!(content.contains("老师学历要求"));
+    assert!(content.contains("老师学校要求"));
+    assert!(content.contains("老师资格要求"));
+    assert!(content.contains("不要再使用旧字段 `性别`"));
+}
+
 #[test]
 fn skills_export_and_check_round_trip() {
     let config_dir = tempfile::tempdir().unwrap();
@@ -2908,7 +2924,7 @@ fn skills_check_reports_missing_files() {
 
 #[test]
 fn import_parse_output_blocks_confirmation_rows_without_yes() {
-    let parse_output = r#"{"ok":true,"data":{"rows":[{"can_auto_commit":false,"needs_confirmation":true,"parsed":{"requirement_type":"tutoring","title":"高一数学"}}]}}"#;
+    let parse_output = r#"{"ok":true,"data":{"rows":[{"can_auto_commit":false,"needs_confirmation":true,"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}"#;
     let output = cli()
         .args([
             "--base-url",
@@ -2944,7 +2960,7 @@ fn requirements_import_real_execution_requires_yes() {
             "requirements",
             "import",
             "--data",
-            r#"[{"requirement_type":"tutoring","title":"高一数学"}]"#,
+            r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
         ])
         .env_clear()
         .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
@@ -2977,7 +2993,7 @@ fn requirements_import_yes_posts_to_backend() {
             "requirements",
             "import",
             "--data",
-            r#"[{"requirement_type":"tutoring","title":"高一数学"}]"#,
+            r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
             "--idempotency-key",
             "yes-post",
             "--yes",
@@ -3013,7 +3029,7 @@ fn import_dry_run_reports_idempotency_key() {
             "requirements",
             "import",
             "--data",
-            r#"[{"requirement_type":"tutoring","title":"高一数学"}]"#,
+            r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
             "--dry-run",
         ])
         .env_clear()
@@ -3110,7 +3126,10 @@ fn requirements_import_reads_file_dash_from_stdin() {
         .stdin
         .as_mut()
         .unwrap()
-        .write_all(r#"[{"requirement_type":"tutoring","title":"高一数学"}]"#.as_bytes())
+        .write_all(
+            r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#
+                .as_bytes(),
+        )
         .expect("write stdin");
     let output = child.wait_with_output().expect("wait import stdin");
     assert!(
