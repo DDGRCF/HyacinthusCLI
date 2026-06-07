@@ -1,4 +1,4 @@
-// 改动说明：配置解析统一 Agent profile 输出格式，并加固 token 配置文件权限。
+// 改动说明：配置解析避免临时命令写入缺失 profile，并加固 token 配置文件权限。
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -261,7 +261,12 @@ pub fn resolve_context(
     let (client_instance_id, client_display_name, client_type, identity_changed) =
         resolve_client_identity(profile.as_ref(), &profile_name)?;
     let normalized_base_url = resolve_base_url(profile.as_ref(), base_url_flag)?;
-    if identity_changed {
+    let identity_from_env = env::var("HYACINTHUS_CLIENT_INSTANCE_ID").is_ok()
+        || env::var("HYACINTHUS_CLIENT_DISPLAY_NAME").is_ok()
+        || env::var("HYACINTHUS_CLIENT_TYPE").is_ok();
+    let inferred_agent_home_profile = profile_name_inferred_from_agent_home(profile_flag);
+    if identity_changed && !identity_from_env && (profile.is_some() || inferred_agent_home_profile)
+    {
         upsert_profile_identity(
             &mut config,
             &profile_name,
@@ -325,6 +330,21 @@ pub fn resolve_context(
         scopes,
         raw_api_enabled,
     })
+}
+
+/// Return whether profile resolution will use an Agent HOME-derived profile name.
+fn profile_name_inferred_from_agent_home(profile_flag: Option<&str>) -> bool {
+    if profile_flag.is_some() {
+        return false;
+    }
+    if env::var("HYACINTHUS_PROFILE")
+        .ok()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    detect_agent_home_env().is_some()
 }
 
 /// Resolve only profile and scope hints for local authorization checks.

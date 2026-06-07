@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Fixed runtime profile resolution so temporary Agent environment identity no longer forces default config writes.
+- Preserved Agent HOME-derived profile persistence for stable authorization identity.
+- Added a contract test for `requirements parse --dry-run` in configless Agent environments.
+
 ## 0.1.4
 
 - Updated the bundled requirements import capability schema for current demand fields.

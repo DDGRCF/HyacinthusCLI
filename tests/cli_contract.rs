@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试覆盖共享需求导入 skill 当前字段规则。
+// 改动说明：CLI 契约测试覆盖临时身份不落盘与共享需求导入字段规则。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -2734,6 +2734,42 @@ fn requirements_parse_data_validates_manifest_request_schema() {
         .as_str()
         .unwrap_or("")
         .contains("$.raw_text length must be >= 1"));
+}
+
+#[test]
+fn requirements_parse_dry_run_does_not_create_default_config_from_env_identity() {
+    let home = tempfile::tempdir().unwrap();
+    let output = cli()
+        .args([
+            "--no-notice",
+            "--base-url",
+            "http://localhost:8000",
+            "--instance-id",
+            "1",
+            "requirements",
+            "parse",
+            "--text",
+            "高一数学，温州，周末",
+            "--dry-run",
+        ])
+        .env_clear()
+        .env("HOME", home.path())
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
+        .output()
+        .expect("requirements parse dry-run without config dir");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!home
+        .path()
+        .join(".config/hyacinthus-cli/config.json")
+        .exists());
 }
 
 #[test]
