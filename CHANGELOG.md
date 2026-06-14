@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6
+
+- Added Agent CLI commands for requirement priority-rule management.
+- Added bundled capability definitions for priority-rule list, write, preview, match, refresh, import, and export flows.
+- Added contract tests for priority-rule list, confirmation, dry-run, and import behavior.
+
 ## 0.1.5
 
 - Fixed runtime profile resolution so temporary Agent environment identity no longer forces default config writes.

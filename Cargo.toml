@@ -1,6 +1,6 @@
 [package]
 name = "hyacinthus"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Agent-oriented CLI for Hyacinthus backend operations"
 license = "MIT"

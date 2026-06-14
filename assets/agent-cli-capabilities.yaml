@@ -568,6 +568,658 @@ capabilities:
       - title: 搜索已过期需求
         command: hyacinthus requirements search --keyword 高一数学 --scope expired
 
+  - id: requirements.priority_rules.list
+    title: 查询需求优先级规则
+    description: Agent CLI 查询数据库中的需求编号优先级规则。
+    domain: requirements
+    command: hyacinthus requirements priority-rules list
+    method: GET
+    path: /api/v1/agent/requirements/priority-rules
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      properties: {}
+    response_schema:
+      type: array
+      items:
+        type: object
+        required:
+          - id
+          - pattern
+          - priority
+          - enabled
+          - sort_order
+          - created_at
+          - updated_at
+        properties:
+          id:
+            type: integer
+          pattern:
+            type: string
+          priority:
+            type: integer
+          enabled:
+            type: boolean
+          description:
+            type:
+              - string
+              - "null"
+          sort_order:
+            type: integer
+          created_at:
+            type: string
+          updated_at:
+            type: string
+    examples:
+      - title: 查询全部优先级规则
+        command: hyacinthus requirements priority-rules list
+
+  - id: requirements.priority_rules.create
+    title: 创建需求优先级规则
+    description: Agent CLI 创建数据库中的需求编号优先级规则。
+    domain: requirements
+    command: hyacinthus requirements priority-rules add
+    method: POST
+    path: /api/v1/agent/requirements/priority-rules
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - pattern
+        - priority
+      properties:
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+        pattern:
+          type: string
+          minLength: 1
+        priority:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        description:
+          type:
+            - string
+            - "null"
+        sort_order:
+          type:
+            - integer
+            - "null"
+    response_schema:
+      type: object
+      required:
+        - id
+        - pattern
+        - priority
+        - enabled
+        - sort_order
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+        pattern:
+          type: string
+        priority:
+          type: integer
+        enabled:
+          type: boolean
+        description:
+          type:
+            - string
+            - "null"
+        sort_order:
+          type: integer
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    examples:
+      - title: 创建 VIP 编号规则
+        command: hyacinthus requirements priority-rules add --pattern '^VIP' --priority 10 --yes
+
+  - id: requirements.priority_rules.update
+    title: 更新需求优先级规则
+    description: Agent CLI 更新数据库中的需求编号优先级规则。
+    domain: requirements
+    command: hyacinthus requirements priority-rules update
+    method: PUT
+    path: /api/v1/agent/requirements/priority-rules/update
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - rule_id
+      properties:
+        rule_id:
+          type: integer
+          minimum: 1
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+        pattern:
+          type: string
+          minLength: 1
+        priority:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+        description:
+          type:
+            - string
+            - "null"
+        sort_order:
+          type:
+            - integer
+            - "null"
+    response_schema:
+      type: object
+      required:
+        - id
+        - pattern
+        - priority
+        - enabled
+        - sort_order
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+        pattern:
+          type: string
+        priority:
+          type: integer
+        enabled:
+          type: boolean
+        description:
+          type:
+            - string
+            - "null"
+        sort_order:
+          type: integer
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    examples:
+      - title: 更新规则优先级
+        command: hyacinthus requirements priority-rules update 1 --priority 5 --yes
+
+  - id: requirements.priority_rules.delete
+    title: 删除需求优先级规则
+    description: Agent CLI 删除数据库中的需求编号优先级规则。
+    domain: requirements
+    command: hyacinthus requirements priority-rules delete
+    method: POST
+    path: /api/v1/agent/requirements/priority-rules/delete
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - rule_id
+      properties:
+        rule_id:
+          type: integer
+          minimum: 1
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+    response_schema:
+      type: object
+      required:
+        - deleted
+        - rule_id
+      properties:
+        deleted:
+          type: boolean
+        rule_id:
+          type: integer
+    examples:
+      - title: 删除规则
+        command: hyacinthus requirements priority-rules delete 1 --yes
+
+  - id: requirements.priority_rules.enable
+    title: 启用需求优先级规则
+    description: Agent CLI 启用数据库中的需求编号优先级规则。
+    domain: requirements
+    command: hyacinthus requirements priority-rules enable
+    method: POST
+    path: /api/v1/agent/requirements/priority-rules/enable
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - rule_id
+      properties:
+        rule_id:
+          type: integer
+          minimum: 1
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+    response_schema:
+      type: object
+      required:
+        - id
+        - pattern
+        - priority
+        - enabled
+        - sort_order
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+        pattern:
+          type: string
+        priority:
+          type: integer
+        enabled:
+          type: boolean
+        description:
+          type:
+            - string
+            - "null"
+        sort_order:
+          type: integer
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    examples:
+      - title: 启用规则
+        command: hyacinthus requirements priority-rules enable 1 --yes
+
+  - id: requirements.priority_rules.disable
+    title: 停用需求优先级规则
+    description: Agent CLI 停用数据库中的需求编号优先级规则。
+    domain: requirements
+    command: hyacinthus requirements priority-rules disable
+    method: POST
+    path: /api/v1/agent/requirements/priority-rules/disable
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - rule_id
+      properties:
+        rule_id:
+          type: integer
+          minimum: 1
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+    response_schema:
+      type: object
+      required:
+        - id
+        - pattern
+        - priority
+        - enabled
+        - sort_order
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+        pattern:
+          type: string
+        priority:
+          type: integer
+        enabled:
+          type: boolean
+        description:
+          type:
+            - string
+            - "null"
+        sort_order:
+          type: integer
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    examples:
+      - title: 停用规则
+        command: hyacinthus requirements priority-rules disable 1 --yes
+
+  - id: requirements.priority_rules.preview_counts
+    title: 预览需求优先级规则命中数
+    description: Agent CLI 预览数据库优先级规则在需求编号中的命中数量。
+    domain: requirements
+    command: hyacinthus requirements priority-rules preview
+    method: POST
+    path: /api/v1/agent/requirements/priority-rules/preview-counts
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      properties: {}
+    response_schema:
+      type: array
+      items:
+        type: object
+        required:
+          - id
+          - pattern
+          - priority
+          - enabled
+          - sort_order
+          - match_count
+          - created_at
+          - updated_at
+        properties:
+          id:
+            type: integer
+          pattern:
+            type: string
+          priority:
+            type: integer
+          enabled:
+            type: boolean
+          description:
+            type:
+              - string
+              - "null"
+          sort_order:
+            type: integer
+          match_count:
+            type: integer
+          created_at:
+            type: string
+          updated_at:
+            type: string
+    examples:
+      - title: 预览命中数量
+        command: hyacinthus requirements priority-rules preview
+
+  - id: requirements.priority_rules.matches
+    title: 查询需求优先级规则命中编号
+    description: Agent CLI 分页查询单条优先级规则命中的需求编号。
+    domain: requirements
+    command: hyacinthus requirements priority-rules matches
+    method: POST
+    path: /api/v1/agent/requirements/priority-rules/matches
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - rule_id
+      properties:
+        rule_id:
+          type: integer
+          minimum: 1
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+    response_schema:
+      type: object
+      required:
+        - rule_id
+        - pattern
+        - total
+        - page
+        - page_size
+        - items
+      properties:
+        rule_id:
+          type: integer
+        pattern:
+          type: string
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - requirement_code
+            properties:
+              id:
+                type: integer
+              requirement_code:
+                type: string
+              priority:
+                type:
+                  - integer
+                  - "null"
+    examples:
+      - title: 查询规则命中编号
+        command: hyacinthus requirements priority-rules matches 1 --page-size 20
+
+  - id: requirements.priority_rules.refresh
+    title: 刷新需求优先级
+    description: Agent CLI 按单条启用规则命中的需求编号重新计算并刷新 ext.priority。
+    domain: requirements
+    command: hyacinthus requirements priority-rules refresh
+    method: POST
+    path: /api/v1/agent/requirements/priority-rules/refresh
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - rule_id
+      properties:
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+        rule_id:
+          type: integer
+          minimum: 1
+    response_schema:
+      type: object
+      required:
+        - rule_id
+        - pattern
+        - priority
+        - matched_count
+        - updated_count
+      properties:
+        rule_id:
+          type: integer
+        pattern:
+          type: string
+        priority:
+          type: integer
+        matched_count:
+          type: integer
+        updated_count:
+          type: integer
+    examples:
+      - title: 按规则刷新优先级
+        command: hyacinthus requirements priority-rules refresh 1 --yes
+
+  - id: requirements.priority_rules.import
+    title: 导入需求优先级规则
+    description: Agent CLI 批量导入数据库优先级规则。
+    domain: requirements
+    command: hyacinthus requirements priority-rules import-json
+    method: POST
+    path: /api/v1/agent/requirements/priority-rules/import
+    required_scopes:
+      - requirements:priority_rules
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - rules
+      properties:
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+        replace:
+          type: boolean
+        rules:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - pattern
+              - priority
+            properties:
+              pattern:
+                type: string
+                minLength: 1
+              priority:
+                type: integer
+                minimum: 1
+              enabled:
+                type: boolean
+              description:
+                type:
+                  - string
+                  - "null"
+              sort_order:
+                type:
+                  - integer
+                  - "null"
+    response_schema:
+      type: array
+      items:
+        type: object
+        required:
+          - id
+          - pattern
+          - priority
+          - enabled
+          - sort_order
+          - created_at
+          - updated_at
+        properties:
+          id:
+            type: integer
+          pattern:
+            type: string
+          priority:
+            type: integer
+          enabled:
+            type: boolean
+          description:
+            type:
+              - string
+              - "null"
+          sort_order:
+            type: integer
+          created_at:
+            type: string
+          updated_at:
+            type: string
+    examples:
+      - title: 从 JSON 文件导入规则
+        command: hyacinthus requirements priority-rules import-json --file priority-rules.json --yes
+
   - id: requirements.options
     title: 需求元数据选项
     description: Agent 专用需求元数据查询能力，返回需求解析和导入可用的角色、科目、年级与授课方式选项。

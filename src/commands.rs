@@ -1,4 +1,4 @@
-// 改动说明：命令调度新增需求关键字搜索流程。
+// 改动说明：命令调度新增需求优先级规则管理流程。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -15,8 +15,11 @@ use crate::cli::{
     ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand,
     RequirementsCatalogCreateMissingArgs, RequirementsCatalogReorderArgs,
     RequirementsCatalogSubcommand, RequirementsImportArgs, RequirementsImportRawArgs,
-    RequirementsParseArgs, RequirementsSearchArgs, RequirementsSubcommand, UserSubcommand,
-    UserUpdateArgs,
+    RequirementsParseArgs, RequirementsPriorityRuleAddArgs, RequirementsPriorityRuleExportJsonArgs,
+    RequirementsPriorityRuleIdWriteArgs, RequirementsPriorityRuleImportJsonArgs,
+    RequirementsPriorityRuleMatchesArgs, RequirementsPriorityRuleUpdateArgs,
+    RequirementsPriorityRulesListArgs, RequirementsPriorityRulesSubcommand, RequirementsSearchArgs,
+    RequirementsSubcommand, UserSubcommand, UserUpdateArgs,
 };
 use crate::client::{self, ApiClient};
 use crate::config::{self, Profile, RuntimeContext};
@@ -83,6 +86,9 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
             RequirementsSubcommand::Parse(args) => requirements_parse(cli, args),
             RequirementsSubcommand::Import(args) => requirements_import(cli, args),
             RequirementsSubcommand::ImportRaw(args) => requirements_import_raw(cli, args),
+            RequirementsSubcommand::PriorityRules(command) => {
+                requirements_priority_rules(cli, &command.command)
+            }
             RequirementsSubcommand::Catalog(command) => match &command.command {
                 RequirementsCatalogSubcommand::CreateMissing(args) => {
                     requirements_catalog_create_missing(cli, args)
@@ -1262,6 +1268,391 @@ fn requirements_search(cli: &Cli, args: &RequirementsSearchArgs) -> CliResult<(V
         data,
         json!({ "command": "requirements search", "capability": "requirements.search" }),
     ))
+}
+
+/// Route requirement priority-rule subcommands to Agent capability endpoints.
+fn requirements_priority_rules(
+    cli: &Cli,
+    command: &RequirementsPriorityRulesSubcommand,
+) -> CliResult<(Value, Value)> {
+    match command {
+        RequirementsPriorityRulesSubcommand::List(args) => {
+            requirements_priority_rules_list(cli, args)
+        }
+        RequirementsPriorityRulesSubcommand::Add(args) => requirements_priority_rule_add(cli, args),
+        RequirementsPriorityRulesSubcommand::Update(args) => {
+            requirements_priority_rule_update(cli, args)
+        }
+        RequirementsPriorityRulesSubcommand::Delete(args) => {
+            requirements_priority_rule_simple_write(
+                cli,
+                "requirements.priority_rules.delete",
+                "requirements priority-rules delete",
+                args,
+            )
+        }
+        RequirementsPriorityRulesSubcommand::Enable(args) => {
+            requirements_priority_rule_simple_write(
+                cli,
+                "requirements.priority_rules.enable",
+                "requirements priority-rules enable",
+                args,
+            )
+        }
+        RequirementsPriorityRulesSubcommand::Disable(args) => {
+            requirements_priority_rule_simple_write(
+                cli,
+                "requirements.priority_rules.disable",
+                "requirements priority-rules disable",
+                args,
+            )
+        }
+        RequirementsPriorityRulesSubcommand::Preview(args) => {
+            requirements_priority_rules_preview(cli, args)
+        }
+        RequirementsPriorityRulesSubcommand::Matches(args) => {
+            requirements_priority_rule_matches(cli, args)
+        }
+        RequirementsPriorityRulesSubcommand::Refresh(args) => {
+            requirements_priority_rule_refresh(cli, args)
+        }
+        RequirementsPriorityRulesSubcommand::ImportJson(args) => {
+            requirements_priority_rules_import_json(cli, args)
+        }
+        RequirementsPriorityRulesSubcommand::ExportJson(args) => {
+            requirements_priority_rules_export_json(cli, args)
+        }
+    }
+}
+
+/// List database priority rules through the Agent endpoint.
+fn requirements_priority_rules_list(
+    cli: &Cli,
+    args: &RequirementsPriorityRulesListArgs,
+) -> CliResult<(Value, Value)> {
+    let (ctx, capability) = priority_rule_context(cli, "requirements.priority_rules.list")?;
+    let data = ApiClient::new(ctx)?.get(&capability.path)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements priority-rules list", "capability": capability.id }),
+    ))
+}
+
+/// Create one database priority rule through the Agent endpoint.
+fn requirements_priority_rule_add(
+    cli: &Cli,
+    args: &RequirementsPriorityRuleAddArgs,
+) -> CliResult<(Value, Value)> {
+    let (ctx, capability) = priority_rule_context(cli, "requirements.priority_rules.create")?;
+    let mut payload = json!({
+        "pattern": args.pattern,
+        "priority": args.priority,
+        "enabled": !args.disabled,
+    });
+    insert_instance_id(&mut payload, ctx.instance_id)?;
+    set_optional_string(&mut payload, &["description"], &args.description)?;
+    if let Some(sort_order) = args.sort_order {
+        set_path_value(&mut payload, &["sort_order"], json!(sort_order))?;
+    }
+    priority_rule_write(
+        ctx,
+        &capability,
+        "requirements priority-rules add",
+        &capability.path,
+        payload,
+        args.dry_run,
+        args.yes,
+        args.output.as_deref(),
+    )
+}
+
+/// Update one database priority rule through the Agent endpoint.
+fn requirements_priority_rule_update(
+    cli: &Cli,
+    args: &RequirementsPriorityRuleUpdateArgs,
+) -> CliResult<(Value, Value)> {
+    if args.enabled && args.disabled {
+        return Err(CliError::validation(
+            "--enabled and --disabled cannot be used together",
+        ));
+    }
+    let rule_id = validate_priority_rule_id(args.rule_id)?;
+    let (ctx, capability) = priority_rule_context(cli, "requirements.priority_rules.update")?;
+    let mut payload = json!({ "rule_id": rule_id });
+    insert_instance_id(&mut payload, ctx.instance_id)?;
+    set_optional_string(&mut payload, &["pattern"], &args.pattern)?;
+    set_optional_string(&mut payload, &["description"], &args.description)?;
+    if let Some(priority) = args.priority {
+        set_path_value(&mut payload, &["priority"], json!(priority))?;
+    }
+    if let Some(sort_order) = args.sort_order {
+        set_path_value(&mut payload, &["sort_order"], json!(sort_order))?;
+    }
+    if args.enabled || args.disabled {
+        set_path_value(&mut payload, &["enabled"], json!(args.enabled))?;
+    }
+    let update_field_count = payload
+        .as_object()
+        .map(|items| {
+            items
+                .keys()
+                .filter(|key| !matches!(key.as_str(), "instance_id" | "rule_id"))
+                .count()
+        })
+        .unwrap_or(0);
+    if update_field_count == 0 {
+        return Err(CliError::validation(
+            "no priority rule update fields provided",
+        ));
+    }
+    let path = priority_rule_path(&capability.path, rule_id);
+    priority_rule_write(
+        ctx,
+        &capability,
+        "requirements priority-rules update",
+        &path,
+        payload,
+        args.dry_run,
+        args.yes,
+        args.output.as_deref(),
+    )
+}
+
+/// Execute a write action that only needs a rule id and optional instance id.
+fn requirements_priority_rule_simple_write(
+    cli: &Cli,
+    capability_id: &str,
+    command_name: &str,
+    args: &RequirementsPriorityRuleIdWriteArgs,
+) -> CliResult<(Value, Value)> {
+    let rule_id = validate_priority_rule_id(args.rule_id)?;
+    let (ctx, capability) = priority_rule_context(cli, capability_id)?;
+    let mut payload = json!({ "rule_id": rule_id });
+    insert_instance_id(&mut payload, ctx.instance_id)?;
+    let path = priority_rule_path(&capability.path, rule_id);
+    priority_rule_write(
+        ctx,
+        &capability,
+        command_name,
+        &path,
+        payload,
+        args.dry_run,
+        args.yes,
+        args.output.as_deref(),
+    )
+}
+
+/// Preview match counts for all database priority rules.
+fn requirements_priority_rules_preview(
+    cli: &Cli,
+    args: &RequirementsPriorityRulesListArgs,
+) -> CliResult<(Value, Value)> {
+    let (ctx, capability) =
+        priority_rule_context(cli, "requirements.priority_rules.preview_counts")?;
+    let data = ApiClient::new(ctx)?.post(&capability.path, json!({}))?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements priority-rules preview", "capability": capability.id }),
+    ))
+}
+
+/// List requirement codes matched by one database priority rule.
+fn requirements_priority_rule_matches(
+    cli: &Cli,
+    args: &RequirementsPriorityRuleMatchesArgs,
+) -> CliResult<(Value, Value)> {
+    let rule_id = validate_priority_rule_id(args.rule_id)?;
+    if args.page <= 0 || args.page_size <= 0 {
+        return Err(CliError::validation(
+            "--page and --page-size must be positive",
+        ));
+    }
+    let (ctx, capability) = priority_rule_context(cli, "requirements.priority_rules.matches")?;
+    let payload = json!({
+        "rule_id": rule_id,
+        "page": args.page,
+        "page_size": args.page_size,
+    });
+    validate_request_payload(&capability, &payload)?;
+    let data = ApiClient::new(ctx)?.post(&capability.path, payload)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements priority-rules matches", "capability": capability.id }),
+    ))
+}
+
+/// Refresh requirement ext.priority for rows matched by one database priority rule.
+fn requirements_priority_rule_refresh(
+    cli: &Cli,
+    args: &RequirementsPriorityRuleIdWriteArgs,
+) -> CliResult<(Value, Value)> {
+    let rule_id = validate_priority_rule_id(args.rule_id)?;
+    let (ctx, capability) = priority_rule_context(cli, "requirements.priority_rules.refresh")?;
+    let mut payload = json!({ "rule_id": rule_id });
+    insert_instance_id(&mut payload, ctx.instance_id)?;
+    priority_rule_write(
+        ctx,
+        &capability,
+        "requirements priority-rules refresh",
+        "/api/v1/agent/requirements/priority-rules/refresh",
+        payload,
+        args.dry_run,
+        args.yes,
+        args.output.as_deref(),
+    )
+}
+
+/// Import database priority rules from JSON through the Agent endpoint.
+fn requirements_priority_rules_import_json(
+    cli: &Cli,
+    args: &RequirementsPriorityRuleImportJsonArgs,
+) -> CliResult<(Value, Value)> {
+    let source_count = [&args.file, &args.data]
+        .iter()
+        .filter(|value| value.is_some())
+        .count();
+    if source_count != 1 {
+        return Err(CliError::validation(
+            "exactly one of --file or --data is required",
+        ));
+    }
+    let raw = if let Some(file) = &args.file {
+        if file == "-" {
+            read_json_arg("-")?
+        } else {
+            read_json_arg(&format!("@{file}"))?
+        }
+    } else if let Some(data) = args.data.as_ref() {
+        read_json_arg(data)?
+    } else {
+        return Err(CliError::validation(
+            "exactly one of --file or --data is required",
+        ));
+    };
+    let mut payload = if raw.get("rules").is_some() {
+        raw
+    } else if raw.is_array() {
+        json!({ "rules": raw })
+    } else {
+        return Err(CliError::validation(
+            "priority rule import input must be a rules array or payload object",
+        ));
+    };
+    let (ctx, capability) = priority_rule_context(cli, "requirements.priority_rules.import")?;
+    insert_instance_id(&mut payload, ctx.instance_id)?;
+    payload["replace"] = json!(args.replace);
+    priority_rule_write(
+        ctx,
+        &capability,
+        "requirements priority-rules import-json",
+        "/api/v1/agent/requirements/priority-rules/import",
+        payload,
+        args.dry_run,
+        args.yes,
+        args.output.as_deref(),
+    )
+}
+
+/// Export database priority rules as JSON, optionally writing them to a local file.
+fn requirements_priority_rules_export_json(
+    cli: &Cli,
+    args: &RequirementsPriorityRuleExportJsonArgs,
+) -> CliResult<(Value, Value)> {
+    let (ctx, capability) = priority_rule_context(cli, "requirements.priority_rules.list")?;
+    let data = ApiClient::new(ctx)?.get(&capability.path)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.path.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements priority-rules export-json", "capability": capability.id }),
+    ))
+}
+
+/// Resolve runtime context and manifest capability for priority-rule operations.
+fn priority_rule_context(
+    cli: &Cli,
+    capability_id: &str,
+) -> CliResult<(RuntimeContext, crate::manifest::Capability)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        cli.instance_id,
+        cli.request_id.as_deref(),
+    )?;
+    let capability = manifest::find_capability(capability_id)?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    Ok((ctx, capability))
+}
+
+/// Execute one priority-rule write command with validation, dry-run, confirmation, and output.
+fn priority_rule_write(
+    ctx: RuntimeContext,
+    capability: &crate::manifest::Capability,
+    command_name: &str,
+    path: &str,
+    payload: Value,
+    dry_run: bool,
+    yes: bool,
+    output: Option<&str>,
+) -> CliResult<(Value, Value)> {
+    validate_request_payload(&capability, &payload)?;
+    if dry_run {
+        return Ok((
+            dry_run_payload(
+                &capability.method,
+                path,
+                payload,
+                None,
+                ctx.request_id.as_deref(),
+            ),
+            json!({ "command": command_name, "capability": capability.id }),
+        ));
+    }
+    ensure_execution_confirmed(yes, &capability)?;
+    let client = ApiClient::new(ctx)?;
+    let data = match capability.method.as_str() {
+        "POST" => client.post(path, payload)?,
+        "PUT" => client.put(path, payload)?,
+        method => {
+            return Err(CliError::validation(format!(
+                "unsupported priority rule method: {method}"
+            )))
+        }
+    };
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, output)?;
+    Ok((
+        data,
+        json!({ "command": command_name, "capability": capability.id }),
+    ))
+}
+
+/// Insert the resolved Agent instance id into a JSON object when available.
+fn insert_instance_id(payload: &mut Value, instance_id: Option<i64>) -> CliResult<()> {
+    if let Some(instance_id) = instance_id {
+        set_path_value(payload, &["instance_id"], json!(instance_id))?;
+    }
+    Ok(())
+}
+
+/// Validate a CLI priority-rule id before using it in a request path.
+fn validate_priority_rule_id(rule_id: i64) -> CliResult<i64> {
+    if rule_id <= 0 {
+        return Err(CliError::validation("priority rule id must be positive"));
+    }
+    Ok(rule_id)
+}
+
+/// Substitute a validated rule id into a manifest path template.
+fn priority_rule_path(path: &str, rule_id: i64) -> String {
+    path.replace("{rule_id}", &rule_id.to_string())
 }
 
 /// Parse raw requirement input into confirmable rows through the backend parser.

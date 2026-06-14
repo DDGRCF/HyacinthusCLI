@@ -1,4 +1,4 @@
-// 改动说明：CLI 参数模型新增需求关键字搜索参数。
+// 改动说明：CLI 参数模型新增需求优先级规则管理命令。
 use std::fmt;
 use std::str::FromStr;
 
@@ -417,7 +417,131 @@ pub enum RequirementsSubcommand {
     Parse(RequirementsParseArgs),
     Import(RequirementsImportArgs),
     ImportRaw(RequirementsImportRawArgs),
+    PriorityRules(RequirementsPriorityRulesCommand),
     Catalog(RequirementsCatalogCommand),
+}
+
+#[derive(Clone, Debug, Args)]
+/// Requirements priority rule command group wrapper.
+pub struct RequirementsPriorityRulesCommand {
+    #[command(subcommand)]
+    pub command: RequirementsPriorityRulesSubcommand,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+/// Priority rule maintenance operations for requirement codes.
+pub enum RequirementsPriorityRulesSubcommand {
+    List(RequirementsPriorityRulesListArgs),
+    Add(RequirementsPriorityRuleAddArgs),
+    Update(RequirementsPriorityRuleUpdateArgs),
+    Delete(RequirementsPriorityRuleIdWriteArgs),
+    Enable(RequirementsPriorityRuleIdWriteArgs),
+    Disable(RequirementsPriorityRuleIdWriteArgs),
+    Preview(RequirementsPriorityRulesListArgs),
+    Matches(RequirementsPriorityRuleMatchesArgs),
+    Refresh(RequirementsPriorityRuleIdWriteArgs),
+    ImportJson(RequirementsPriorityRuleImportJsonArgs),
+    ExportJson(RequirementsPriorityRuleExportJsonArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for listing or previewing requirement priority rules.
+pub struct RequirementsPriorityRulesListArgs {
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for creating a requirement priority rule.
+pub struct RequirementsPriorityRuleAddArgs {
+    #[arg(long)]
+    pub pattern: String,
+    #[arg(long)]
+    pub priority: i64,
+    #[arg(long)]
+    pub description: Option<String>,
+    #[arg(long)]
+    pub sort_order: Option<i64>,
+    #[arg(long)]
+    pub disabled: bool,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for updating a requirement priority rule.
+pub struct RequirementsPriorityRuleUpdateArgs {
+    pub rule_id: i64,
+    #[arg(long)]
+    pub pattern: Option<String>,
+    #[arg(long)]
+    pub priority: Option<i64>,
+    #[arg(long)]
+    pub description: Option<String>,
+    #[arg(long)]
+    pub sort_order: Option<i64>,
+    #[arg(long)]
+    pub enabled: bool,
+    #[arg(long)]
+    pub disabled: bool,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for write operations that target one priority rule.
+pub struct RequirementsPriorityRuleIdWriteArgs {
+    pub rule_id: i64,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for listing requirements matched by one priority rule.
+pub struct RequirementsPriorityRuleMatchesArgs {
+    pub rule_id: i64,
+    #[arg(long, default_value_t = 1)]
+    pub page: i64,
+    #[arg(long, default_value_t = 20)]
+    pub page_size: i64,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for importing requirement priority rules from JSON.
+pub struct RequirementsPriorityRuleImportJsonArgs {
+    #[arg(long)]
+    pub file: Option<String>,
+    #[arg(long)]
+    pub data: Option<String>,
+    #[arg(long)]
+    pub replace: bool,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for exporting requirement priority rules as JSON.
+pub struct RequirementsPriorityRuleExportJsonArgs {
+    #[arg(long)]
+    pub path: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]

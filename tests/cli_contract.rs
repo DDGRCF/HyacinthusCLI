@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试覆盖临时身份不落盘与共享需求导入字段规则。
+// 改动说明：CLI 契约测试覆盖需求优先级规则管理命令。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -494,8 +494,134 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 11);
+    assert_eq!(value["data"]["capability_count"], 21);
     assert_eq!(value["meta"]["source"], "embedded");
+}
+
+#[test]
+fn requirements_priority_rules_list_uses_agent_endpoint() {
+    let base_url = mock_once_expect_request(
+        r#"{"code":0,"message":"success","data":[{"id":1,"pattern":"^VIP","priority":10,"enabled":true,"description":null,"sort_order":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-10T00:00:00Z"}]}"#,
+        "GET /api/v1/agent/requirements/priority-rules HTTP/1.1",
+    );
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "requirements",
+            "priority-rules",
+            "list",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:priority_rules")
+        .output()
+        .expect("requirements priority rules list");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"][0]["pattern"], "^VIP");
+    assert_eq!(
+        value["meta"]["capability"],
+        "requirements.priority_rules.list"
+    );
+}
+
+#[test]
+fn requirements_priority_rules_add_requires_confirmation() {
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            "http://localhost:8000",
+            "requirements",
+            "priority-rules",
+            "add",
+            "--pattern",
+            "^VIP",
+            "--priority",
+            "10",
+        ],
+        &[("HYACINTHUS_AGENT_SCOPES", "requirements:priority_rules")],
+        10,
+    );
+
+    assert_eq!(value["error"]["type"], "confirmation_required");
+    assert_eq!(
+        value["error"]["risk"]["action"],
+        "hyacinthus requirements priority-rules add"
+    );
+}
+
+#[test]
+fn requirements_priority_rules_refresh_dry_run_builds_request() {
+    let value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "--instance-id",
+        "7",
+        "requirements",
+        "priority-rules",
+        "refresh",
+        "3",
+        "--dry-run",
+    ]);
+
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["data"]["request"]["method"], "POST");
+    assert_eq!(
+        value["data"]["request"]["path"],
+        "/api/v1/agent/requirements/priority-rules/refresh"
+    );
+    assert_eq!(value["data"]["request"]["body"]["rule_id"], 3);
+    assert_eq!(value["data"]["request"]["body"]["instance_id"], 7);
+}
+
+#[test]
+fn requirements_priority_rules_import_posts_to_agent_endpoint() {
+    let base_url = mock_once_expect_request(
+        r#"{"code":0,"message":"success","data":[{"id":2,"pattern":"^KKH","priority":5,"enabled":true,"description":null,"sort_order":1,"created_at":"2026-05-10T00:00:00Z","updated_at":"2026-05-10T00:00:00Z"}]}"#,
+        "POST /api/v1/agent/requirements/priority-rules/import HTTP/1.1",
+    );
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "requirements",
+            "priority-rules",
+            "import-json",
+            "--data",
+            r#"[{"pattern":"^KKH","priority":5}]"#,
+            "--yes",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:priority_rules")
+        .output()
+        .expect("requirements priority rules import");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"][0]["priority"], 5);
+    assert_eq!(
+        value["meta"]["capability"],
+        "requirements.priority_rules.import"
+    );
 }
 
 #[test]
