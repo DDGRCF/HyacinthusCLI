@@ -1358,13 +1358,15 @@ fn requirements_priority_rule_add(
     }
     priority_rule_write(
         ctx,
-        &capability,
-        "requirements priority-rules add",
-        &capability.path,
-        payload,
-        args.dry_run,
-        args.yes,
-        args.output.as_deref(),
+        PriorityRuleWriteRequest {
+            capability: &capability,
+            command_name: "requirements priority-rules add",
+            path: &capability.path,
+            payload,
+            dry_run: args.dry_run,
+            yes: args.yes,
+            output: args.output.as_deref(),
+        },
     )
 }
 
@@ -1410,13 +1412,15 @@ fn requirements_priority_rule_update(
     let path = priority_rule_path(&capability.path, rule_id);
     priority_rule_write(
         ctx,
-        &capability,
-        "requirements priority-rules update",
-        &path,
-        payload,
-        args.dry_run,
-        args.yes,
-        args.output.as_deref(),
+        PriorityRuleWriteRequest {
+            capability: &capability,
+            command_name: "requirements priority-rules update",
+            path: &path,
+            payload,
+            dry_run: args.dry_run,
+            yes: args.yes,
+            output: args.output.as_deref(),
+        },
     )
 }
 
@@ -1434,13 +1438,15 @@ fn requirements_priority_rule_simple_write(
     let path = priority_rule_path(&capability.path, rule_id);
     priority_rule_write(
         ctx,
-        &capability,
-        command_name,
-        &path,
-        payload,
-        args.dry_run,
-        args.yes,
-        args.output.as_deref(),
+        PriorityRuleWriteRequest {
+            capability: &capability,
+            command_name,
+            path: &path,
+            payload,
+            dry_run: args.dry_run,
+            yes: args.yes,
+            output: args.output.as_deref(),
+        },
     )
 }
 
@@ -1498,13 +1504,15 @@ fn requirements_priority_rule_refresh(
     insert_instance_id(&mut payload, ctx.instance_id)?;
     priority_rule_write(
         ctx,
-        &capability,
-        "requirements priority-rules refresh",
-        "/api/v1/agent/requirements/priority-rules/refresh",
-        payload,
-        args.dry_run,
-        args.yes,
-        args.output.as_deref(),
+        PriorityRuleWriteRequest {
+            capability: &capability,
+            command_name: "requirements priority-rules refresh",
+            path: "/api/v1/agent/requirements/priority-rules/refresh",
+            payload,
+            dry_run: args.dry_run,
+            yes: args.yes,
+            output: args.output.as_deref(),
+        },
     )
 }
 
@@ -1549,13 +1557,15 @@ fn requirements_priority_rules_import_json(
     payload["replace"] = json!(args.replace);
     priority_rule_write(
         ctx,
-        &capability,
-        "requirements priority-rules import-json",
-        "/api/v1/agent/requirements/priority-rules/import",
-        payload,
-        args.dry_run,
-        args.yes,
-        args.output.as_deref(),
+        PriorityRuleWriteRequest {
+            capability: &capability,
+            command_name: "requirements priority-rules import-json",
+            path: "/api/v1/agent/requirements/priority-rules/import",
+            payload,
+            dry_run: args.dry_run,
+            yes: args.yes,
+            output: args.output.as_deref(),
+        },
     )
 }
 
@@ -1591,46 +1601,51 @@ fn priority_rule_context(
     Ok((ctx, capability))
 }
 
-/// Execute one priority-rule write command with validation, dry-run, confirmation, and output.
-fn priority_rule_write(
-    ctx: RuntimeContext,
-    capability: &crate::manifest::Capability,
-    command_name: &str,
-    path: &str,
+/// Captures the variable parts of a priority-rule write request.
+struct PriorityRuleWriteRequest<'a> {
+    capability: &'a crate::manifest::Capability,
+    command_name: &'a str,
+    path: &'a str,
     payload: Value,
     dry_run: bool,
     yes: bool,
-    output: Option<&str>,
+    output: Option<&'a str>,
+}
+
+/// Execute one priority-rule write command with validation, dry-run, confirmation, and output.
+fn priority_rule_write(
+    ctx: RuntimeContext,
+    request: PriorityRuleWriteRequest<'_>,
 ) -> CliResult<(Value, Value)> {
-    validate_request_payload(&capability, &payload)?;
-    if dry_run {
+    validate_request_payload(request.capability, &request.payload)?;
+    if request.dry_run {
         return Ok((
             dry_run_payload(
-                &capability.method,
-                path,
-                payload,
+                &request.capability.method,
+                request.path,
+                request.payload,
                 None,
                 ctx.request_id.as_deref(),
             ),
-            json!({ "command": command_name, "capability": capability.id }),
+            json!({ "command": request.command_name, "capability": request.capability.id }),
         ));
     }
-    ensure_execution_confirmed(yes, &capability)?;
+    ensure_execution_confirmed(request.yes, request.capability)?;
     let client = ApiClient::new(ctx)?;
-    let data = match capability.method.as_str() {
-        "POST" => client.post(path, payload)?,
-        "PUT" => client.put(path, payload)?,
+    let data = match request.capability.method.as_str() {
+        "POST" => client.post(request.path, request.payload)?,
+        "PUT" => client.put(request.path, request.payload)?,
         method => {
             return Err(CliError::validation(format!(
                 "unsupported priority rule method: {method}"
             )))
         }
     };
-    validate_response_payload(&capability, &data)?;
-    write_output_if_needed(&data, output)?;
+    validate_response_payload(request.capability, &data)?;
+    write_output_if_needed(&data, request.output)?;
     Ok((
         data,
-        json!({ "command": command_name, "capability": capability.id }),
+        json!({ "command": request.command_name, "capability": request.capability.id }),
     ))
 }
 
