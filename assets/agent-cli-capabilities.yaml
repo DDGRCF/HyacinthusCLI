@@ -1,4 +1,4 @@
-# 改动说明：Agent 需求能力清单同步当前需求导入字段与条件对象。
+# 改动说明：Agent 需求能力清单同步当前需求导入字段、自动导入与地理编码行为。
 version: "2026-05-10"
 backend_min_version: "0.1.0"
 capabilities:
@@ -123,7 +123,7 @@ capabilities:
 
   - id: requirements.batch_import
     title: 批量导入需求
-    description: Agent 专用需求批量导入能力，创建或更新已确认需求，并返回逐批统计与失败行。
+    description: Agent 专用需求批量导入能力，创建或更新已确认需求，并返回逐批统计与失败行；CLI import-raw 会先解析并只导入 can_auto_commit 且无需确认的行。
     domain: requirements
     command: hyacinthus requirements import
     method: POST
@@ -375,9 +375,11 @@ capabilities:
                     type: number
               tags:
                 type:
-                  - object
+                  - array
                   - "null"
-                description: 需求标签对象。
+                description: 需求标签列表。
+                items:
+                  type: string
               status:
                 type:
                   - string
@@ -398,12 +400,33 @@ capabilities:
                 type: array
                 items:
                   type: object
-                description: 可上课时间段。
+                  properties:
+                    weekday:
+                      type: integer
+                      minimum: 1
+                      maximum: 7
+                      description: 周几，1=周一，7=周日。
+                    start_minute:
+                      type: integer
+                      minimum: 0
+                      maximum: 1439
+                      description: 当天开始分钟。
+                    end_minute:
+                      type: integer
+                      minimum: 1
+                      maximum: 1440
+                      description: 当天结束分钟，必须大于 start_minute。
+                    ext:
+                      type:
+                        - object
+                        - "null"
+                      description: 时段扩展字段。
+                description: 可上课时间段；parse 结果为 null 时，CLI/Agent 复核导入前应转换为空数组。
               ext:
                 type:
                   - object
                   - "null"
-                description: 需求扩展字段。
+                description: 需求扩展字段；Agent 导入会补默认 priority/admin contact，并写入压缩后的 geo_diagnostic 与 geo_location_source。
     response_schema:
       type: object
       required:
