@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7
+
+- Fixed `requirements import` so it can consume `requirements parse -o` data-only output directly.
+- Normalized parse-row import payloads by converting numeric compensation strings to JSON numbers and `time_slots: null` to `[]`.
+- Added contract coverage for parse-output-to-import dry-run behavior.
+
 ## 0.1.6
 
 - Added Agent CLI commands for requirement priority-rule management.

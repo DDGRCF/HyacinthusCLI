@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试覆盖需求优先级规则管理命令。
+// 改动说明：CLI 契约测试覆盖需求解析结果直连导入。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -3308,6 +3308,38 @@ fn requirements_import_reads_file_dash_from_stdin() {
     assert_eq!(
         value["data"]["request"]["body"]["confirmed_rows"][0]["title"],
         "高一数学"
+    );
+}
+
+#[test]
+fn requirements_import_accepts_data_only_parse_output() {
+    let value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "--instance-id",
+        "1",
+        "requirements",
+        "import",
+        "--data",
+        r#"{"rows":[{"can_auto_commit":true,"needs_confirmation":false,"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学","compensation":{"amount_min":"90","amount_max":"1.2E2"},"time_slots":null}}],"summary":{"total":1}}"#,
+        "--idempotency-key",
+        "parse-output-key",
+        "--dry-run",
+    ]);
+
+    let body = &value["data"]["request"]["body"];
+    assert_eq!(body["confirmed_rows"][0]["title"], "高一数学");
+    assert_eq!(
+        body["confirmed_rows"][0]["compensation"]["amount_min"],
+        90.0
+    );
+    assert_eq!(
+        body["confirmed_rows"][0]["compensation"]["amount_max"],
+        120.0
+    );
+    assert_eq!(
+        body["confirmed_rows"][0]["time_slots"],
+        serde_json::json!([])
     );
 }
 

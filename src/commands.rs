@@ -1,4 +1,4 @@
-// 改动说明：命令调度新增需求优先级规则管理流程。
+// 改动说明：需求导入兼容解析输出并规范化可导入字段。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -2195,13 +2195,10 @@ fn build_import_payload(
         raw
     } else if raw.is_array() {
         json!({ "confirmed_rows": raw })
-    } else if raw.pointer("/data/rows").is_some() {
-        let rows = raw
-            .pointer("/data/rows")
-            .and_then(Value::as_array)
-            .ok_or_else(|| {
-                CliError::validation("parse output envelope must contain data.rows array")
-            })?;
+    } else if let Some(rows_value) = raw.pointer("/data/rows").or_else(|| raw.get("rows")) {
+        let rows = rows_value
+            .as_array()
+            .ok_or_else(|| CliError::validation("parse output must contain rows array"))?;
         let blocked = rows
             .iter()
             .filter(|row| row.get("needs_confirmation").and_then(Value::as_bool) == Some(true))
@@ -2220,9 +2217,10 @@ fn build_import_payload(
                         && row.get("needs_confirmation").and_then(Value::as_bool) == Some(true))
             })
             .map(|row| {
-                row.get("parsed").cloned().ok_or_else(|| {
+                let parsed = row.get("parsed").cloned().ok_or_else(|| {
                     CliError::validation("parse output row is missing parsed payload")
-                })
+                })?;
+                Ok(normalize_parsed_row_for_import(parsed))
             })
             .collect::<CliResult<Vec<_>>>()?;
         json!({ "confirmed_rows": confirmed })
@@ -2248,6 +2246,40 @@ fn build_import_payload(
         return Err(CliError::validation("confirmed_rows is empty"));
     }
     Ok(payload)
+}
+
+/// Normalize a parse row's payload into the stricter import request shape.
+fn normalize_parsed_row_for_import(mut parsed: Value) -> Value {
+    let Some(object) = parsed.as_object_mut() else {
+        return parsed;
+    };
+    if object.get("time_slots").is_some_and(Value::is_null) {
+        object.insert("time_slots".to_string(), json!([]));
+    }
+    if let Some(compensation) = object
+        .get_mut("compensation")
+        .and_then(Value::as_object_mut)
+    {
+        normalize_json_number_field(compensation, "amount_min");
+        normalize_json_number_field(compensation, "amount_max");
+    }
+    parsed
+}
+
+/// Convert numeric strings emitted by parse responses into JSON numbers.
+fn normalize_json_number_field(object: &mut Map<String, Value>, key: &str) {
+    let Some(raw) = object.get(key).and_then(Value::as_str) else {
+        return;
+    };
+    let Ok(number) = raw.parse::<f64>() else {
+        return;
+    };
+    if !number.is_finite() {
+        return;
+    }
+    if let Some(value) = serde_json::Number::from_f64(number) {
+        object.insert(key.to_string(), Value::Number(value));
+    }
 }
 
 /// Convert import-raw flags into the existing backend batch-parse payload.
