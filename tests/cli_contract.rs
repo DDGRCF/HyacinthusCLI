@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试覆盖需求解析结果直连导入。
+// 改动说明：CLI 契约测试覆盖 import-raw 自动提交归一化解析结果。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -3257,6 +3257,50 @@ fn requirements_import_raw_dry_run_allows_session_token_without_instance_id() {
         value["data"]["import_summary"]["request"]["body"]["idempotency_key"],
         "raw-no-instance"
     );
+}
+
+#[test]
+fn requirements_import_raw_dry_run_preserves_catalog_ids_from_parse() {
+    let base_url = mock_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"初一-英语-男","description":"初一英语男生，需要辅导","subject_ids":[123],"grade_ids":[456],"compensation":{"amount_min":"160","amount_max":"200"}}}]}}"#,
+    ]);
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "requirements",
+            "import-raw",
+            "--text",
+            "初一英语男生，需要辅导",
+            "--idempotency-key",
+            "raw-catalog-ids",
+            "--dry-run",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env(
+            "HYACINTHUS_AGENT_SCOPES",
+            "requirements:parse,requirements:write",
+        )
+        .output()
+        .expect("requirements import-raw catalog dry-run");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    let row = &value["data"]["import_summary"]["request"]["body"]["confirmed_rows"][0];
+    assert_eq!(row["title"], "初一-英语-男");
+    assert_eq!(row["subject_ids"], serde_json::json!([123]));
+    assert_eq!(row["grade_ids"], serde_json::json!([456]));
+    assert_eq!(row["compensation"]["amount_min"], 160.0);
+    assert_eq!(row["compensation"]["amount_max"], 200.0);
 }
 
 #[test]

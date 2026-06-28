@@ -2344,9 +2344,10 @@ fn split_import_raw_rows(parse_data: &Value) -> CliResult<(Vec<Value>, Vec<Value
         if row.get("can_auto_commit").and_then(Value::as_bool) == Some(true)
             && row.get("needs_confirmation").and_then(Value::as_bool) != Some(true)
         {
-            confirmed_rows.push(row.get("parsed").cloned().ok_or_else(|| {
+            let parsed = row.get("parsed").cloned().ok_or_else(|| {
                 CliError::validation("parse output row is missing parsed payload")
-            })?);
+            })?;
+            confirmed_rows.push(normalize_parsed_row_for_import(parsed));
         } else {
             skipped_rows.push(import_raw_skip_summary(index + 1, row));
         }
