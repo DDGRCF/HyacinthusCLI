@@ -39,6 +39,14 @@ The npm wrapper does not contain the Rust binary. It uses `GITHUB_TOKEN`, `GH_TO
 
 The wrapper package lives in `npm/hyacinthus-cli` and can be published privately with `npm publish --access restricted`. Private npm access only controls the wrapper download; GitHub release access is still checked separately by GitHub.
 
+Installed release binaries default to the production API:
+
+```text
+https://www.fxzjjzx.cn
+```
+
+Do not pass `--base-url` for normal production use. Only set `HYACINTHUS_BASE_URL` or a profile `--base-url` when intentionally targeting development or staging.
+
 ## Core Commands
 
 ```bash
@@ -151,6 +159,11 @@ Raw API is disabled by default and must be explicitly enabled:
 HYACINTHUS_RAW_API=1 hyacinthus api GET /api/v1/agent/capabilities --dry-run
 HYACINTHUS_RAW_API=1 hyacinthus api POST /api/v1/admin/items --data @payload.json --dry-run
 HYACINTHUS_RAW_API=1 hyacinthus api POST /api/v1/admin/items --data @payload.json --yes
+```
+
+For development or staging profiles, configure the non-production backend explicitly:
+
+```bash
 hyacinthus config set-profile dev --base-url http://localhost:8000 --raw-api-enabled
 ```
 
@@ -186,9 +199,14 @@ Known token scopes can be declared for local precheck:
 HYACINTHUS_AGENT_SCOPES=requirements:read hyacinthus requirements search --keyword 高一数学
 HYACINTHUS_AGENT_SCOPES=requirements:parse,requirements:write hyacinthus requirements import --dry-run --data @rows.json
 HYACINTHUS_AGENT_SCOPES=requirements:write hyacinthus requirements extend KKH347 --dry-run
-hyacinthus config set-profile dev --base-url http://localhost:8000 --scopes requirements:read,requirements:parse,requirements:write
 hyacinthus auth scopes --domain requirements
 hyacinthus auth check --scope "requirements:read requirements:parse requirements:write"
+```
+
+Development profile example:
+
+```bash
+hyacinthus config set-profile dev --base-url http://localhost:8000 --scopes requirements:read,requirements:parse,requirements:write
 ```
 
 ## Requirement Deadline Extension
