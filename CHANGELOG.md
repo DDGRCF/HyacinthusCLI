@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.10
+
+- Clarified that release binaries default to the production API at `https://www.fxzjjzx.cn`.
+- Marked `localhost` base URL examples as development/staging-only configuration.
+
 ## 0.1.9
 
 - Added `hyacinthus requirements extend <requirement_code>` for extending one requirement deadline by business code.
