@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.9
+
+- Added `hyacinthus requirements extend <requirement_code>` for extending one requirement deadline by business code.
+- Added optional `--expires-at` to set a future deadline manually; omitting it uses the backend default extension window.
+- Added the `requirements.extend` capability schema and contract coverage for dry-run, confirmation, schema lookup, and backend POST behavior.
+
 ## 0.1.7
 
 - Fixed `requirements import` so it can consume `requirements parse -o` data-only output directly.

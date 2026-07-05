@@ -1,4 +1,4 @@
-// 改动说明：需求导入兼容解析输出并规范化可导入字段。
+// 改动说明：需求命令新增按编号延期执行逻辑。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -14,12 +14,13 @@ use crate::cli::{
     AdminSubcommand, AuthLoginArgs, AuthSubcommand, AuthWaitArgs, CapabilitySubcommand,
     ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand,
     RequirementsCatalogCreateMissingArgs, RequirementsCatalogReorderArgs,
-    RequirementsCatalogSubcommand, RequirementsImportArgs, RequirementsImportRawArgs,
-    RequirementsParseArgs, RequirementsPriorityRuleAddArgs, RequirementsPriorityRuleExportJsonArgs,
-    RequirementsPriorityRuleIdWriteArgs, RequirementsPriorityRuleImportJsonArgs,
-    RequirementsPriorityRuleMatchesArgs, RequirementsPriorityRuleUpdateArgs,
-    RequirementsPriorityRulesListArgs, RequirementsPriorityRulesSubcommand, RequirementsSearchArgs,
-    RequirementsSubcommand, UserSubcommand, UserUpdateArgs,
+    RequirementsCatalogSubcommand, RequirementsExtendArgs, RequirementsImportArgs,
+    RequirementsImportRawArgs, RequirementsParseArgs, RequirementsPriorityRuleAddArgs,
+    RequirementsPriorityRuleExportJsonArgs, RequirementsPriorityRuleIdWriteArgs,
+    RequirementsPriorityRuleImportJsonArgs, RequirementsPriorityRuleMatchesArgs,
+    RequirementsPriorityRuleUpdateArgs, RequirementsPriorityRulesListArgs,
+    RequirementsPriorityRulesSubcommand, RequirementsSearchArgs, RequirementsSubcommand,
+    UserSubcommand, UserUpdateArgs,
 };
 use crate::client::{self, ApiClient};
 use crate::config::{self, Profile, RuntimeContext};
@@ -83,6 +84,7 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
         Command::Requirements(command) => match &command.command {
             RequirementsSubcommand::Options => requirements_options(cli),
             RequirementsSubcommand::Search(args) => requirements_search(cli, args),
+            RequirementsSubcommand::Extend(args) => requirements_extend(cli, args),
             RequirementsSubcommand::Parse(args) => requirements_parse(cli, args),
             RequirementsSubcommand::Import(args) => requirements_import(cli, args),
             RequirementsSubcommand::ImportRaw(args) => requirements_import_raw(cli, args),
@@ -1267,6 +1269,55 @@ fn requirements_search(cli: &Cli, args: &RequirementsSearchArgs) -> CliResult<(V
     Ok((
         data,
         json!({ "command": "requirements search", "capability": "requirements.search" }),
+    ))
+}
+
+/// Extend one requirement deadline through the Agent write endpoint.
+fn requirements_extend(cli: &Cli, args: &RequirementsExtendArgs) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        args.instance_id.or(cli.instance_id),
+        cli.request_id.as_deref(),
+    )?;
+    let capability = manifest::find_capability("requirements.extend")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    let requirement_code = args.requirement_code.trim();
+    if requirement_code.is_empty() {
+        return Err(CliError::validation("requirement_code is required"));
+    }
+    let mut payload = json!({
+        "instance_id": ctx.instance_id,
+        "requirement_code": requirement_code,
+    });
+    if let Some(expires_at) = &args.expires_at {
+        let normalized = expires_at.trim();
+        if normalized.is_empty() {
+            return Err(CliError::validation("--expires-at must not be empty"));
+        }
+        payload["expires_at"] = json!(normalized);
+    }
+    validate_request_payload(&capability, &payload)?;
+    if args.dry_run {
+        return Ok((
+            dry_run_payload(
+                "POST",
+                "/api/v1/agent/requirements/extend",
+                payload,
+                None,
+                ctx.request_id.as_deref(),
+            ),
+            json!({ "command": "requirements extend", "capability": "requirements.extend" }),
+        ));
+    }
+    ensure_execution_confirmed(args.yes, &capability)?;
+    let data = ApiClient::new(ctx)?.post("/api/v1/agent/requirements/extend", payload)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements extend", "capability": "requirements.extend" }),
     ))
 }
 

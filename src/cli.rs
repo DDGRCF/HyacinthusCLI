@@ -1,4 +1,4 @@
-// 改动说明：CLI 参数模型新增需求优先级规则管理命令。
+// 改动说明：CLI 参数模型新增需求按编号延期命令。
 use std::fmt;
 use std::str::FromStr;
 
@@ -414,6 +414,7 @@ pub struct RequirementsCommand {
 pub enum RequirementsSubcommand {
     Options,
     Search(RequirementsSearchArgs),
+    Extend(RequirementsExtendArgs),
     Parse(RequirementsParseArgs),
     Import(RequirementsImportArgs),
     ImportRaw(RequirementsImportRawArgs),
@@ -569,6 +570,22 @@ pub struct RequirementsSearchArgs {
     pub skip: u64,
     #[arg(long, default_value_t = 20)]
     pub limit: u64,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for extending one requirement deadline by requirement code.
+pub struct RequirementsExtendArgs {
+    pub requirement_code: String,
+    #[arg(long)]
+    pub expires_at: Option<String>,
+    #[arg(long)]
+    pub instance_id: Option<i64>,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
     #[arg(long, short = 'o')]
     pub output: Option<String>,
 }

@@ -4,19 +4,19 @@
       "description": "风信子家教中心 Hyacinthus CLI 通用规则：认证、输出协议、风险确认和能力发现。",
       "name": "hyacinthus-shared",
       "path": "skills/hyacinthus-shared/SKILL.md",
-      "version": "0.1.8"
+      "version": "0.1.9"
     },
     {
       "description": "风信子家教中心需求处理规则：解析、复核、目录确认和导入流程。",
       "name": "hyacinthus-requirements",
       "path": "skills/hyacinthus-requirements/SKILL.md",
-      "version": "0.1.8"
+      "version": "0.1.9"
     },
     {
       "description": "风信子家教中心 Hyacinthus CLI Agent 运行规则：链接和二维码授权交接。",
       "name": "hyacinthus-agent-runtime",
       "path": "skills/hyacinthus-agent-runtime/SKILL.md",
-      "version": "0.1.8"
+      "version": "0.1.9"
     }
   ],
   "meta": {

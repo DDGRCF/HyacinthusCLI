@@ -175,6 +175,37 @@ hyacinthus requirements search --keyword 青山湖科技城站 --scope active
 
 搜索结果只用于查重和定位，不等于导入成功。导入仍必须走 parse/import-raw/import 的确认规则。
 
+## 需求延期流程
+
+用户要求“延期需求”“续期需求”“激活过期需求并刷新截止时间”，且给出需求编号时，使用 `requirements extend`。该命令按业务 `requirement_code` 定位需求，不使用数据库 ID。
+
+默认延期使用后端配置的默认有效期，逻辑与后台需求列表的延期/激活一致：
+
+```bash
+hyacinthus requirements extend HZ260514701 --dry-run
+hyacinthus requirements extend HZ260514701 --yes
+```
+
+如果用户明确给出延期到某个时间，传 `--expires-at`，时间必须是未来时间：
+
+```bash
+hyacinthus requirements extend HZ260514701 --expires-at 2026-07-10T12:00:00 --dry-run
+hyacinthus requirements extend HZ260514701 --expires-at 2026-07-10T12:00:00 --yes
+```
+
+此命令需要 `requirements:write`。执行成功后只汇报关键字段：
+
+- `requirement_id`
+- `requirement_code`
+- `expires_at`
+
+常见失败码：
+
+- `REQUIREMENT_CODE_REQUIRED`：编号为空。
+- `REQUIREMENT_CODE_NOT_FOUND`：编号不存在，向用户说明没有找到该需求编号。
+- `REQUIREMENT_CODE_DUPLICATED`：编号重复，需要人工在后台处理。
+- `REQUIREMENT_EXTEND_EXPIRES_AT_INVALID`：手动延期时间不是未来时间。
+
 ## 警告处理
 
 把 `confirmation_reasons` 当作人工复核动作；收集未映射目录名称时再查看 `warnings`：

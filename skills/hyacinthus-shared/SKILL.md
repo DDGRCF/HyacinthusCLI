@@ -128,6 +128,8 @@ hyacinthus capability diff --remote
 - 写能力仍然必须先 `--dry-run`，用户批准后才加 `--yes`。
 - GET 能力需要分页时，只在 capability 标记支持分页时使用 `--page-all`。
 
+完整 Agent API 与 capability 对照表维护在主仓库 `docs/requirements/agent-cli/08-agent-api-index.md`。如果某个 `/api/v1/agent/*` 端点或 capability 不在索引里，先补文档再使用或实现新命令。
+
 新增 capability 时，优先使用更语义化的命令，例如 `requirements search/options/parse/import`、`requirements catalog ...`、`user me/update`、`claw status/skills list`。只有语义化命令不存在时，才回退到 `capability run`。
 
 ## 用户资料能力

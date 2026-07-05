@@ -12,6 +12,15 @@ npx @ddgrcf/hyacinthus-cli skills install --target picoclaw --dir /data/picoclaw
 
 The token must be able to read the private `DDGRCF/HyacinthusCLI` repository.
 
+After installation, use the installed `hyacinthus` binary directly:
+
+```bash
+hyacinthus requirements extend KKH347 --yes
+hyacinthus requirements extend KKH347 --expires-at 2026-07-10T12:00:00 --yes
+```
+
+The extension command requires `requirements:write`. Without `--expires-at`, it uses the backend default requirement extension window.
+
 Publish this wrapper from this directory:
 
 ```bash

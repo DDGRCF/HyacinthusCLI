@@ -494,7 +494,7 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 21);
+    assert_eq!(value["data"]["capability_count"], 22);
     assert_eq!(value["meta"]["source"], "embedded");
 }
 
@@ -1003,6 +1003,119 @@ fn requirements_search_prechecks_missing_scope() {
         "requirements:read"
     );
     assert_eq!(value["error"]["detail"]["session_id"], "sess-search-scope");
+}
+
+#[test]
+fn requirements_extend_dry_run_builds_request() {
+    let value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "--instance-id",
+        "1",
+        "requirements",
+        "extend",
+        "KKH347",
+        "--expires-at",
+        "2026-07-10T12:00:00",
+        "--dry-run",
+    ]);
+
+    assert_eq!(value["data"]["request"]["method"], "POST");
+    assert_eq!(
+        value["data"]["request"]["path"],
+        "/api/v1/agent/requirements/extend"
+    );
+    assert_eq!(value["data"]["request"]["body"]["instance_id"], 1);
+    assert_eq!(
+        value["data"]["request"]["body"]["requirement_code"],
+        "KKH347"
+    );
+    assert_eq!(
+        value["data"]["request"]["body"]["expires_at"],
+        "2026-07-10T12:00:00"
+    );
+    assert_eq!(value["meta"]["capability"], "requirements.extend");
+}
+
+#[test]
+fn requirements_extend_real_execution_requires_yes() {
+    let output = cli()
+        .args([
+            "--base-url",
+            "http://localhost:8000",
+            "--instance-id",
+            "1",
+            "requirements",
+            "extend",
+            "KKH347",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:write")
+        .output()
+        .expect("requirements extend write confirmation");
+    assert_eq!(output.status.code(), Some(10));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["error"]["type"], "confirmation_required");
+    assert_eq!(
+        value["error"]["risk"]["action"],
+        "hyacinthus requirements extend"
+    );
+}
+
+#[test]
+fn requirements_extend_yes_posts_to_backend() {
+    let base_url = mock_once_expect_request(
+        r#"{"code":0,"message":"success","data":{"requirement_id":123,"requirement_code":"KKH347","expires_at":"2026-07-10T12:00:00"}}"#,
+        "POST /api/v1/agent/requirements/extend HTTP/1.1",
+    );
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "--instance-id",
+            "1",
+            "requirements",
+            "extend",
+            "KKH347",
+            "--expires-at",
+            "2026-07-10T12:00:00",
+            "--yes",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:write")
+        .output()
+        .expect("requirements extend yes");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"]["requirement_id"], 123);
+    assert_eq!(value["data"]["requirement_code"], "KKH347");
+    assert_eq!(value["meta"]["capability"], "requirements.extend");
+}
+
+#[test]
+fn requirements_extend_schema_is_available() {
+    let value = run_json(&["schema", "requirements.extend"]);
+
+    assert_eq!(value["data"]["id"], "requirements.extend");
+    assert_eq!(value["data"]["required_scopes"][0], "requirements:write");
+    assert_eq!(
+        value["data"]["request_schema"]["properties"]["requirement_code"]["maxLength"],
+        64
+    );
 }
 
 #[test]

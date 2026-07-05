@@ -68,12 +68,16 @@ hyacinthus skills export --dir ./.tmp/agent-skills
 hyacinthus skills check --dir ./.tmp/agent-skills
 hyacinthus requirements options
 hyacinthus requirements search --keyword 高一数学
+hyacinthus requirements extend KKH347 --yes
+hyacinthus requirements extend KKH347 --expires-at 2026-07-10T12:00:00 --yes
 hyacinthus requirements parse --file input.txt
 hyacinthus requirements catalog create-missing --file parsed.json --dry-run
 hyacinthus requirements catalog create-missing --file parsed.json --yes
 hyacinthus requirements catalog reorder --target subjects --ids 3,1,2 --yes
 hyacinthus requirements import --file confirmed.json --idempotency-key cli-demo --yes
 ```
+
+The complete Agent API and capability index is maintained in `docs/requirements/agent-cli/08-agent-api-index.md` in the main repository. Use `hyacinthus capability list` or `hyacinthus schema <id>` for the runtime schema actually exposed by the backend.
 
 ## Environment Variables
 
@@ -128,6 +132,8 @@ JSON filtering supports deterministic dot paths and array expansion:
 ```bash
 hyacinthus capability list --jq '.data.capabilities[]'
 hyacinthus requirements search --keyword "高一数学" --scope active -q '.data.total'
+hyacinthus requirements extend KKH347 --dry-run -q '.data.request.body'
+hyacinthus requirements extend KKH347 --yes -q '.data.expires_at'
 hyacinthus requirements parse --text "高一数学" --dry-run -q '.data.request.body'
 hyacinthus requirements parse --text "高一数学" --dry-run --force-ai
 hyacinthus --request-id trace-123 requirements parse --text "高一数学" --dry-run
@@ -170,6 +176,7 @@ Commands that return backend data can write the successful `data` payload to a f
 hyacinthus capability run requirements.options --output options.json
 hyacinthus requirements parse --text "高一数学" --output parsed.json
 hyacinthus requirements import --data @confirmed.json --yes --output import-result.json
+hyacinthus requirements extend KKH347 --yes --output extend-result.json
 HYACINTHUS_RAW_API=1 hyacinthus api GET /api/v1/agent/capabilities --output capabilities.json
 ```
 
@@ -178,10 +185,35 @@ Known token scopes can be declared for local precheck:
 ```bash
 HYACINTHUS_AGENT_SCOPES=requirements:read hyacinthus requirements search --keyword 高一数学
 HYACINTHUS_AGENT_SCOPES=requirements:parse,requirements:write hyacinthus requirements import --dry-run --data @rows.json
+HYACINTHUS_AGENT_SCOPES=requirements:write hyacinthus requirements extend KKH347 --dry-run
 hyacinthus config set-profile dev --base-url http://localhost:8000 --scopes requirements:read,requirements:parse,requirements:write
 hyacinthus auth scopes --domain requirements
 hyacinthus auth check --scope "requirements:read requirements:parse requirements:write"
 ```
+
+## Requirement Deadline Extension
+
+`requirements extend` updates one requirement by business requirement code. It requires `requirements:write`, supports CLI dry-run, and requires `--yes` for real execution.
+
+```bash
+hyacinthus requirements extend KKH347 --dry-run
+hyacinthus requirements extend KKH347 --yes
+hyacinthus requirements extend KKH347 --expires-at 2026-07-10T12:00:00 --yes
+```
+
+Without `--expires-at`, the backend uses the same default extension rule as the admin requirement list: it refreshes `expires_at` from the configured default validity window and reactivates expired requirements. With `--expires-at`, the backend sets the deadline to that future datetime.
+
+Successful output data:
+
+```json
+{
+  "requirement_id": 123,
+  "requirement_code": "KKH347",
+  "expires_at": "2026-07-10T12:00:00"
+}
+```
+
+Common backend error codes are `REQUIREMENT_CODE_REQUIRED`, `REQUIREMENT_CODE_NOT_FOUND`, `REQUIREMENT_CODE_DUPLICATED`, and `REQUIREMENT_EXTEND_EXPIRES_AT_INVALID`.
 
 `config set-profile` is incremental for existing profiles: unspecified fields keep their current values. `auth logout` clears both the saved token and saved local scopes for the selected profile.
 

@@ -1,4 +1,4 @@
-# 改动说明：Agent 需求能力清单同步当前需求导入字段、自动导入与地理编码行为。
+# 改动说明：Agent 需求能力清单新增按编号延期能力。
 version: "2026-05-10"
 backend_min_version: "0.1.0"
 capabilities:
@@ -465,6 +465,65 @@ capabilities:
         command: hyacinthus requirements import --file confirmed.json --idempotency-key cli-20260510-demo
       - title: 预览批量导入请求
         command: hyacinthus requirements import --file confirmed.json --idempotency-key cli-20260510-demo --dry-run
+
+  - id: requirements.extend
+    title: 延期需求
+    description: Agent 专用需求延期能力，按需求编号刷新默认截止时间或设置指定截止时间。
+    domain: requirements
+    command: hyacinthus requirements extend
+    method: POST
+    path: /api/v1/agent/requirements/extend
+    required_scopes:
+      - requirements:write
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    deprecated: false
+    request_schema:
+      type: object
+      required:
+        - requirement_code
+      properties:
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: Claw 实例 ID；静态 Agent key 调用时必填，session token 调用默认使用授权用户身份。
+        requirement_code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 需求编号。
+        expires_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: 手动指定延期到的时间；为空时使用系统默认延期时间。
+    response_schema:
+      type: object
+      required:
+        - requirement_id
+        - requirement_code
+        - expires_at
+      properties:
+        requirement_id:
+          type: integer
+        requirement_code:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    examples:
+      - title: 使用默认延期时间
+        command: hyacinthus requirements extend KKH347 --yes
+      - title: 手动设置延期到指定时间
+        command: hyacinthus requirements extend KKH347 --expires-at 2026-07-10T12:00:00 --yes
 
   - id: requirements.search
     title: 搜索需求
