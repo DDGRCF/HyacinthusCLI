@@ -1,4 +1,4 @@
-# 改动说明：需求解析能力切换到严格模板默认、先进匹配可选的异步任务接口。
+# 改动说明：需求导入 schema 封闭为始终创建 open、未匹配需求的内容载荷。
 version: "2026-05-10"
 backend_min_version: "0.1.0"
 capabilities:
@@ -131,6 +131,7 @@ capabilities:
     introduced_in: "0.1.0"
     request_schema:
       type: object
+      additionalProperties: false
       required:
         - confirmed_rows
       properties:
@@ -146,9 +147,11 @@ capabilities:
         confirmed_rows:
           type: array
           minItems: 1
+          maxItems: 2000
           description: 已确认可导入的需求创建 payload 列表。
           items:
             type: object
+            additionalProperties: false
             required:
               - description
             properties:
@@ -371,22 +374,12 @@ capabilities:
                 description: 需求标签列表。
                 items:
                   type: string
-              status:
-                type:
-                  - string
-                  - "null"
-                description: 需求状态；为空时后端使用默认 open。
               expires_at:
                 type:
                   - string
                   - "null"
                 format: date-time
                 description: 过期时间；为空时后端使用默认过期时间。
-              matched_user_id:
-                type:
-                  - integer
-                  - "null"
-                description: 已匹配用户 ID；普通导入通常为空。
               time_slots:
                 type: array
                 items:
@@ -1224,6 +1217,7 @@ capabilities:
         rules:
           type: array
           minItems: 1
+          maxItems: 1000
           items:
             type: object
             required:
@@ -1392,9 +1386,11 @@ capabilities:
     introduced_in: "0.1.0"
     request_schema:
       type: object
+      additionalProperties: false
       properties:
         subjects:
           type: array
+          maxItems: 5000
           items:
             type: object
             required:
@@ -1419,6 +1415,7 @@ capabilities:
                 type: boolean
         grades:
           type: array
+          maxItems: 5000
           items:
             type: object
             required:
@@ -1535,6 +1532,7 @@ capabilities:
         ordered_ids:
           type: array
           minItems: 1
+          maxItems: 5000
           uniqueItems: true
           description: 必须覆盖目标目录当前全部 ID，且不能重复。
           items:

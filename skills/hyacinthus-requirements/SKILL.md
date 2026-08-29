@@ -276,6 +276,7 @@ hyacinthus requirements catalog create-missing --subject 科创编程 --grade �
 导入 confirmed rows 前，按 import schema 形态校验 payload：
 
 - `confirmed_rows` 必须是数组。
+- confirmed row 只能包含创建内容字段，不得包含 `status` 或 `matched_user_id`；导入始终创建 open、未匹配需求，后续状态变化必须使用管理员 lifecycle 接口。
 - `time_slots` 必须是数组；如果 parse 产出 `null`，转换为 `[]`。
 - `grade_ids` 和 `subject_ids` 必须是包含已确认目录 ID 的数组。如果任一字段缺失或为空，不要静默设成 `[]`；先解决年级/科目。
 - `address_detail` 必须是用户确认后的可定位地址。

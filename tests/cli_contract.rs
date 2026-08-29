@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试验证当前闭合 manifest 不再接受 deprecated 字段。
+// 改动说明：CLI 契约测试验证需求导入 schema 封闭生命周期字段与批量上限。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -805,6 +805,18 @@ fn schema_returns_one_capability() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["id"], "requirements.batch_import");
     assert_eq!(value["data"]["supports_idempotency"], true);
+    let row_schema = &value["data"]["request_schema"]["properties"]["confirmed_rows"]["items"];
+    assert_eq!(
+        value["data"]["request_schema"]["additionalProperties"],
+        false
+    );
+    assert_eq!(row_schema["additionalProperties"], false);
+    assert_eq!(
+        value["data"]["request_schema"]["properties"]["confirmed_rows"]["maxItems"],
+        2_000
+    );
+    assert!(row_schema["properties"].get("status").is_none());
+    assert!(row_schema["properties"].get("matched_user_id").is_none());
 }
 
 #[test]
