@@ -1,4 +1,4 @@
-// 改动说明：CLI 参数模型新增需求按编号延期命令。
+// 改动说明：分页与授权轮询参数在命令行解析阶段限制范围，避免异常请求量和长时间挂起。
 use std::fmt;
 use std::str::FromStr;
 
@@ -189,7 +189,7 @@ pub struct AuthLoginArgs {
     pub scope: Option<String>,
     #[arg(long)]
     pub wait: bool,
-    #[arg(long, default_value_t = 30)]
+    #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=600))]
     pub poll_limit: u64,
 }
 
@@ -198,7 +198,9 @@ pub struct AuthLoginArgs {
 pub struct AuthWaitArgs {
     #[arg(long)]
     pub session_id: String,
-    #[arg(long, default_value_t = 30)]
+    #[arg(long)]
+    pub device_code: String,
+    #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=600))]
     pub poll_limit: u64,
 }
 
@@ -319,11 +321,11 @@ pub struct ApiArgs {
 pub struct PaginationArgs {
     #[arg(long)]
     pub page_all: bool,
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..=1000))]
     pub page_size: Option<u64>,
-    #[arg(long, default_value_t = 10)]
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..=100))]
     pub page_limit: u64,
-    #[arg(long, default_value_t = 200)]
+    #[arg(long, default_value_t = 200, value_parser = clap::value_parser!(u64).range(0..=60000))]
     pub page_delay: u64,
 }
 
@@ -354,10 +356,6 @@ pub struct UserUpdateArgs {
     pub data: Option<String>,
     #[arg(long)]
     pub display_name: Option<String>,
-    #[arg(long)]
-    pub email: Option<String>,
-    #[arg(long)]
-    pub phone: Option<String>,
     #[arg(long)]
     pub gender: Option<String>,
     #[arg(long)]
@@ -630,11 +628,7 @@ pub struct RequirementsParseArgs {
     #[arg(long)]
     pub preset_contact_wechat: Option<String>,
     #[arg(long, default_value_t = false)]
-    pub force_ai: bool,
-    #[arg(long, default_value_t = false)]
-    pub enable_ai_fallback: bool,
-    #[arg(long)]
-    pub skip_geocode: bool,
+    pub advanced_matching: bool,
     #[arg(long)]
     pub dry_run: bool,
     #[arg(long, short = 'o')]
@@ -678,11 +672,7 @@ pub struct RequirementsImportRawArgs {
     #[arg(long)]
     pub preset_contact_wechat: Option<String>,
     #[arg(long, default_value_t = false)]
-    pub force_ai: bool,
-    #[arg(long, default_value_t = false)]
-    pub enable_ai_fallback: bool,
-    #[arg(long)]
-    pub skip_geocode: bool,
+    pub advanced_matching: bool,
     #[arg(long)]
     pub idempotency_key: Option<String>,
     #[arg(long)]

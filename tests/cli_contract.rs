@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试覆盖 import-raw 自动提交归一化解析结果。
+// 改动说明：CLI 契约测试验证当前闭合 manifest 不再接受 deprecated 字段。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -296,12 +296,43 @@ fn mock_public_sequence(bodies: Vec<&'static str>) -> String {
     format!("http://{}", addr)
 }
 
+/// Serves public responses while asserting each device-flow request method, path, and body.
+fn mock_public_sequence_expect_requests(
+    exchanges: Vec<(&'static str, Vec<&'static str>)>,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("mock addr");
+    thread::spawn(move || {
+        for (body, expected_fragments) in exchanges {
+            let (mut stream, _) = listener.accept().expect("accept mock request");
+            let mut request = [0_u8; 4096];
+            let size = stream.read(&mut request).expect("read request");
+            let request_text = String::from_utf8_lossy(&request[..size]);
+            for fragment in expected_fragments {
+                assert!(
+                    request_text.contains(fragment),
+                    "request missing {fragment:?}: {request_text}"
+                );
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        }
+    });
+    format!("http://{}", addr)
+}
+
 fn remote_requirements_options_capability() -> &'static str {
-    r#"{"id":"requirements.options","title":"需求选项","description":"远端需求选项","domain":"requirements","command":"hyacinthus requirements options","method":"GET","path":"/api/v1/agent/requirements/options","required_scopes":["requirements:parse"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":false,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","deprecated":false,"request_schema":{"type":"object","properties":{}},"response_schema":{"type":"object","properties":{}},"examples":[]}"#
+    r#"{"id":"requirements.options","title":"需求选项","description":"远端需求选项","domain":"requirements","command":"hyacinthus requirements options","method":"GET","path":"/api/v1/agent/requirements/options","required_scopes":["requirements:parse"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":false,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","request_schema":{"type":"object","properties":{}},"response_schema":{"type":"object","properties":{}},"examples":[]}"#
 }
 
 fn remote_required_source_capability() -> &'static str {
-    r#"{"id":"claw.skills_list","title":"Claw Skills","description":"远端 Claw Skills","domain":"claw","command":"hyacinthus claw skills list","method":"GET","path":"/api/v1/agent/claw/skills","required_scopes":["claw:read"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":false,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","deprecated":false,"request_schema":{"type":"object","required":["source"],"properties":{"source":{"type":"string","minLength":1}}},"response_schema":{"type":"array","items":{"type":"object"}},"examples":[]}"#
+    r#"{"id":"claw.skills_list","title":"Claw Skills","description":"远端 Claw Skills","domain":"claw","command":"hyacinthus claw skills list","method":"GET","path":"/api/v1/agent/claw/skills","required_scopes":["claw:read"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":false,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","request_schema":{"type":"object","required":["source"],"properties":{"source":{"type":"string","minLength":1}}},"response_schema":{"type":"array","items":{"type":"object"}},"examples":[]}"#
 }
 
 fn remote_manifest_with_options_capability() -> String {
@@ -416,7 +447,7 @@ fn dry_run_snapshots_match_golden() {
 }
 
 #[test]
-fn requirements_parse_force_ai_flag_overrides_default() {
+fn requirements_parse_advanced_matching_flag_overrides_default() {
     let value = run_json(&[
         "--base-url",
         "http://localhost:8000",
@@ -426,11 +457,11 @@ fn requirements_parse_force_ai_flag_overrides_default() {
         "parse",
         "--text",
         "高一数学，瓯海区，周末上课",
-        "--force-ai",
+        "--advanced-matching",
         "--dry-run",
     ]);
 
-    assert_eq!(value["data"]["request"]["body"]["force_ai"], true);
+    assert_eq!(value["data"]["request"]["body"]["advanced_matching"], true);
 }
 
 #[test]
@@ -806,7 +837,7 @@ fn admin_status_posts_to_agent_status_endpoint() {
 #[test]
 fn admin_status_prechecks_missing_scope() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-admin-scope","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"ADMIN-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=ADMIN-1234","qr_code_text":"http://auth/verify?user_code=ADMIN-1234","required_scopes":["admin:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-admin-scope","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"ADMIN-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=ADMIN-1234","qr_code_text":"http://auth/verify?user_code=ADMIN-1234","required_scopes":["admin:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
     ]);
     let output = cli()
         .args(["--base-url", &base_url, "admin", "status"])
@@ -823,6 +854,10 @@ fn admin_status_prechecks_missing_scope() {
     assert_eq!(value["error"]["type"], "auth_required");
     assert_eq!(value["error"]["detail"]["missing_scopes"][0], "admin:read");
     assert_eq!(value["error"]["detail"]["session_id"], "sess-admin-scope");
+    assert_eq!(
+        value["error"]["detail"]["device_code"],
+        "device-code-0123456789abcdef0123456789abcdef"
+    );
 }
 
 #[test]
@@ -975,7 +1010,7 @@ fn requirements_search_passes_scope_and_pagination_params() {
 #[test]
 fn requirements_search_prechecks_missing_scope() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-search-scope","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"READ-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=READ-1234","qr_code_text":"http://auth/verify?user_code=READ-1234","required_scopes":["requirements:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-search-scope","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"READ-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=READ-1234","qr_code_text":"http://auth/verify?user_code=READ-1234","required_scopes":["requirements:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
     ]);
     let output = cli()
         .args([
@@ -1146,6 +1181,23 @@ fn user_me_uses_agent_user_endpoint() {
 }
 
 #[test]
+fn user_update_schema_excludes_login_credentials() {
+    let value = run_json(&["schema", "users.me_update"]);
+    let properties = &value["data"]["request_schema"]["properties"];
+
+    assert_eq!(
+        value["data"]["request_schema"]["additionalProperties"],
+        false
+    );
+    assert!(properties.get("display_name").is_some());
+    assert!(properties.get("profile").is_some());
+    assert!(properties.get("education_items").is_some());
+    assert!(properties.get("email").is_none());
+    assert!(properties.get("phone").is_none());
+    assert!(properties.get("password").is_none());
+}
+
+#[test]
 fn user_update_dry_run_merges_profile_flags() {
     let value = run_json(&[
         "--base-url",
@@ -1154,10 +1206,6 @@ fn user_update_dry_run_merges_profile_flags() {
         "update",
         "--display-name",
         "CLI资料用户",
-        "--email",
-        "cli@example.com",
-        "--phone",
-        "13800018888",
         "--contact-wechat",
         "fxz-cli",
         "--province",
@@ -1178,8 +1226,9 @@ fn user_update_dry_run_merges_profile_flags() {
         value["data"]["request"]["body"]["display_name"],
         "CLI资料用户"
     );
-    assert_eq!(value["data"]["request"]["body"]["email"], "cli@example.com");
-    assert_eq!(value["data"]["request"]["body"]["phone"], "13800018888");
+    assert!(value["data"]["request"]["body"].get("email").is_none());
+    assert!(value["data"]["request"]["body"].get("phone").is_none());
+    assert!(value["data"]["request"]["body"].get("password").is_none());
     assert_eq!(
         value["data"]["request"]["body"]["profile"]["ext"]["contact_wechat"],
         "fxz-cli"
@@ -1193,7 +1242,7 @@ fn user_update_dry_run_merges_profile_flags() {
 #[test]
 fn user_update_requires_write_scope_precheck() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-users-write","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"USER-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=USER-1234","qr_code_text":"http://auth/verify?user_code=USER-1234","required_scopes":["users:read","users:write"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-users-write","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"USER-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=USER-1234","qr_code_text":"http://auth/verify?user_code=USER-1234","required_scopes":["users:read","users:write"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
     ]);
     let output = cli()
         .args([
@@ -1223,27 +1272,61 @@ fn user_update_requires_write_scope_precheck() {
 }
 
 #[test]
-fn user_update_rejects_password_argv_flag() {
-    let output = cli()
-        .args([
-            "--base-url",
-            "http://localhost:8000",
-            "user",
-            "update",
-            "--password",
-            "secret",
-            "--dry-run",
-        ])
-        .env_clear()
-        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
-        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
-        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
-        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
-        .output()
-        .expect("user update password argv");
+fn user_update_rejects_credential_argv_flags() {
+    for field in ["--email", "--phone", "--password"] {
+        let output = cli()
+            .args([
+                "--base-url",
+                "http://localhost:8000",
+                "user",
+                "update",
+                field,
+                "must-not-be-accepted",
+                "--dry-run",
+            ])
+            .env_clear()
+            .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+            .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+            .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+            .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+            .output()
+            .expect("user update credential argv");
 
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument '--password'"));
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(field));
+    }
+}
+
+#[test]
+fn user_update_rejects_credential_json_fields() {
+    for field in ["email", "phone", "password"] {
+        let payload = format!(r#"{{"{field}":"must-not-be-accepted"}}"#);
+        let output = cli()
+            .args([
+                "--base-url",
+                "http://localhost:8000",
+                "user",
+                "update",
+                "--data",
+                &payload,
+                "--dry-run",
+            ])
+            .env_clear()
+            .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+            .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+            .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+            .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+            .output()
+            .expect("user update credential JSON");
+
+        assert_eq!(output.status.code(), Some(2));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+        assert_eq!(value["error"]["type"], "validation");
+        assert!(value["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(field));
+    }
 }
 
 #[test]
@@ -1303,7 +1386,7 @@ fn explicit_request_id_is_sent_to_backend() {
 }
 
 #[test]
-fn doctor_reports_embedded_manifest_compatibility() {
+fn doctor_reports_embedded_manifest_integrity() {
     let value = run_json(&["--base-url", "http://localhost:8000", "doctor", "--offline"]);
 
     assert_eq!(value["ok"], true);
@@ -1311,9 +1394,7 @@ fn doctor_reports_embedded_manifest_compatibility() {
         .as_array()
         .unwrap()
         .iter()
-        .any(
-            |check| check["name"] == "embedded_manifest_compatibility" && check["status"] == "pass"
-        ));
+        .any(|check| check["name"] == "embedded_manifest_integrity" && check["status"] == "pass"));
 }
 
 #[test]
@@ -1576,9 +1657,25 @@ fn auth_status_reports_env_overrides_without_secrets() {
 
 #[test]
 fn auth_login_wait_saves_agent_token_and_scopes() {
-    let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-1","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"ABCD-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=ABCD-1234","qr_code_text":"http://auth/verify?user_code=ABCD-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-1","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","status":"approved","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":"hat_test","token_type":"agent","scopes":["requirements:parse"]}}"#,
+    let base_url = mock_public_sequence_expect_requests(vec![
+        (
+            r#"{"code":0,"message":"success","data":{"session_id":"sess-1","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"ABCD-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=ABCD-1234","qr_code_text":"http://auth/verify?user_code=ABCD-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+            vec!["POST /api/v1/agent/auth/sessions HTTP/1.1"],
+        ),
+        (
+            r#"{"code":0,"message":"success","data":{"session_id":"sess-1","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","status":"approved","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":"hat_test","token_type":"agent","scopes":["requirements:parse"]}}"#,
+            vec![
+                "POST /api/v1/agent/auth/sessions/sess-1/poll HTTP/1.1",
+                r#"{"device_code":"device-code-0123456789abcdef0123456789abcdef"}"#,
+            ],
+        ),
+        (
+            r#"{"code":0,"message":"success","data":{"session_id":"sess-1","acknowledged":true}}"#,
+            vec![
+                "POST /api/v1/agent/auth/sessions/sess-1/ack HTTP/1.1",
+                r#"{"device_code":"device-code-0123456789abcdef0123456789abcdef"}"#,
+            ],
+        ),
     ]);
     let config_dir = tempfile::tempdir().unwrap();
     let output = cli()
@@ -1620,6 +1717,7 @@ fn auth_login_wait_saves_agent_token_and_scopes() {
 fn auth_wait_saves_existing_session_token_and_scopes() {
     let base_url = mock_public_sequence(vec![
         r#"{"code":0,"message":"success","data":{"session_id":"sess-existing","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","status":"approved","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":"hat_existing","token_type":"agent","scopes":["requirements:parse"]}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-existing","acknowledged":true}}"#,
     ]);
     let config_dir = tempfile::tempdir().unwrap();
     let output = cli()
@@ -1630,6 +1728,8 @@ fn auth_wait_saves_existing_session_token_and_scopes() {
             "wait",
             "--session-id",
             "sess-existing",
+            "--device-code",
+            "device-code-0123456789abcdef0123456789abcdef",
         ])
         .env_clear()
         .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
@@ -1666,6 +1766,8 @@ fn auth_wait_timeout_includes_backend_handoff_fields() {
             "wait",
             "--session-id",
             "sess-pending",
+            "--device-code",
+            "device-code-0123456789abcdef0123456789abcdef",
             "--poll-limit",
             "1",
         ])
@@ -1689,7 +1791,7 @@ fn auth_wait_timeout_includes_backend_handoff_fields() {
 #[test]
 fn auth_login_wait_times_out_with_auth_error() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-timeout","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"TIME-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=TIME-1234","qr_code_text":"http://auth/verify?user_code=TIME-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-timeout","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"TIME-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=TIME-1234","qr_code_text":"http://auth/verify?user_code=TIME-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
         r#"{"code":0,"message":"success","data":{"session_id":"sess-timeout","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","status":"pending","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":null,"token_type":null,"scopes":[]}}"#,
     ]);
     let output = cli()
@@ -1713,6 +1815,14 @@ fn auth_login_wait_times_out_with_auth_error() {
         .expect("auth login wait timeout");
     assert_eq!(output.status.code(), Some(3));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(
+        value["error"]["detail"]["device_code"],
+        "device-code-0123456789abcdef0123456789abcdef"
+    );
+    assert!(!value["error"]["detail"]["authorize_url"]
+        .as_str()
+        .expect("authorize URL")
+        .contains("device_code"));
     assert_eq!(value["error"]["type"], "auth");
     assert_eq!(value["error"]["code"], "AUTH_SESSION_TIMEOUT");
     assert_eq!(value["error"]["detail"]["status"], "pending");
@@ -1721,7 +1831,7 @@ fn auth_login_wait_times_out_with_auth_error() {
 #[test]
 fn auth_login_wait_rejects_terminal_non_pending_status() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-denied","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"NOPE-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=NOPE-1234","qr_code_text":"http://auth/verify?user_code=NOPE-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-denied","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"NOPE-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=NOPE-1234","qr_code_text":"http://auth/verify?user_code=NOPE-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
         r#"{"code":0,"message":"success","data":{"session_id":"sess-denied","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","status":"denied","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","poll_interval_seconds":0,"access_token":null,"token_type":null,"scopes":[]}}"#,
     ]);
     let output = cli()
@@ -1753,7 +1863,7 @@ fn auth_login_wait_rejects_terminal_non_pending_status() {
 #[test]
 fn missing_scope_with_token_returns_auth_required_link() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-2","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"EFGH-5678","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=EFGH-5678","qr_code_text":"http://auth/verify?user_code=EFGH-5678","required_scopes":["admin:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":2}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-2","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"EFGH-5678","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=EFGH-5678","qr_code_text":"http://auth/verify?user_code=EFGH-5678","required_scopes":["admin:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":2}}"#,
     ]);
     let output = cli()
         .args(["--base-url", &base_url, "admin", "status"])
@@ -2000,7 +2110,7 @@ fn raw_api_is_disabled_by_default() {
 #[test]
 fn requirements_import_prechecks_missing_scope() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-import-scope","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"WRITE-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=WRITE-1234","qr_code_text":"http://auth/verify?user_code=WRITE-1234","required_scopes":["requirements:write"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-import-scope","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"WRITE-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=WRITE-1234","qr_code_text":"http://auth/verify?user_code=WRITE-1234","required_scopes":["requirements:write"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
     ]);
     let output = cli()
         .args([
@@ -2269,7 +2379,7 @@ fn hermes_home_inferrs_profile_and_generates_stable_identity() {
     let hermes_home = dir.path().join(".hermes-wechat-a");
     fs::create_dir_all(&hermes_home).expect("create hermes home");
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-home","client_instance_id":"hermes-hermes-wechat-a-fixed","client_display_name":"Hermes (.hermes-wechat-a)","client_type":"hermes","user_code":"HOME-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=HOME-1234","qr_code_text":"http://auth/verify?user_code=HOME-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-home","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-hermes-wechat-a-fixed","client_display_name":"Hermes (.hermes-wechat-a)","client_type":"hermes","user_code":"HOME-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=HOME-1234","qr_code_text":"http://auth/verify?user_code=HOME-1234","required_scopes":["requirements:parse"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
     ]);
     let output = cli()
         .args([
@@ -2291,6 +2401,15 @@ fn hermes_home_inferrs_profile_and_generates_stable_identity() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON stdout");
+    assert_eq!(
+        value["data"]["device_code"],
+        "device-code-0123456789abcdef0123456789abcdef"
+    );
+    assert!(!value["data"]["authorize_url"]
+        .as_str()
+        .expect("authorize URL")
+        .contains("device_code"));
 
     let config_text = fs::read_to_string(dir.path().join("config.json")).expect("read config");
     let config_value: serde_json::Value = serde_json::from_str(&config_text).expect("config json");
@@ -2482,7 +2601,7 @@ fn claw_status_uses_agent_status_endpoint() {
 #[test]
 fn claw_status_prechecks_missing_scope() {
     let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-claw-scope","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"CLAW-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=CLAW-1234","qr_code_text":"http://auth/verify?user_code=CLAW-1234","required_scopes":["claw:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
+        r#"{"code":0,"message":"success","data":{"session_id":"sess-claw-scope","device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"CLAW-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=CLAW-1234","qr_code_text":"http://auth/verify?user_code=CLAW-1234","required_scopes":["claw:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
     ]);
     let output = cli()
         .args(["--base-url", &base_url, "claw", "status"])
@@ -3330,7 +3449,8 @@ fn import_dry_run_reports_idempotency_key() {
 #[test]
 fn requirements_import_raw_dry_run_allows_session_token_without_instance_id() {
     let base_url = mock_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-1","status":"queued"}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-1","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}}"#,
     ]);
     let output = cli()
         .args([
@@ -3375,7 +3495,8 @@ fn requirements_import_raw_dry_run_allows_session_token_without_instance_id() {
 #[test]
 fn requirements_import_raw_dry_run_preserves_catalog_ids_from_parse() {
     let base_url = mock_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"初一-英语-男","description":"初一英语男生，需要辅导","subject_ids":[123],"grade_ids":[456],"compensation":{"amount_min":"160","amount_max":"200"}}}]}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-2","status":"queued"}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-2","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"初一-英语-男","description":"初一英语男生，需要辅导","subject_ids":[123],"grade_ids":[456],"compensation":{"amount_min":"160","amount_max":"200"}}}]}}}"#,
     ]);
     let output = cli()
         .args([
@@ -3658,7 +3779,7 @@ fn capability_diff_requires_remote() {
 fn backend_unauthorized_maps_to_auth_error() {
     let base_url = mock_once_status(
         401,
-        r#"{"code":"INVALID_AGENT_KEY","message":"invalid agent key"}"#,
+        r#"{"code":4010,"message":"invalid agent key","data":{"code":"INVALID_AGENT_KEY"}}"#,
     );
     let output = cli()
         .args(["--base-url", &base_url, "capability", "list", "--remote"])
@@ -3677,10 +3798,10 @@ fn backend_unauthorized_maps_to_auth_error() {
 }
 
 #[test]
-fn backend_server_error_preserves_string_code() {
+fn backend_server_error_preserves_structured_code() {
     let base_url = mock_once_status(
         500,
-        r#"{"code":"BACKEND_FAILURE","message":"backend failed"}"#,
+        r#"{"code":5000,"message":"backend failed","data":{"code":"BACKEND_FAILURE"}}"#,
     );
     let output = cli()
         .args(["--base-url", &base_url, "requirements", "options"])
@@ -3826,9 +3947,11 @@ fn capability_run_validates_enum_and_unique_items() {
 
 #[test]
 fn requirements_parse_posts_to_backend() {
-    let base_url = mock_once(
-        r#"{"code":0,"message":"success","data":{"summary":{"auto_commit_ready":0,"needs_confirmation":0},"rows":[]}}"#,
-    );
+    let base_url = mock_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"job_id":"job-3","status":"queued"}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-3","status":"retry_wait"}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-3","status":"succeeded","result":{"summary":{"auto_commit_ready":0,"needs_confirmation":0},"rows":[]}}}"#,
+    ]);
     let output = cli()
         .args([
             "--base-url",
@@ -3857,4 +3980,329 @@ fn requirements_parse_posts_to_backend() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(value["data"]["rows"].as_array().unwrap().len(), 0);
     assert_eq!(value["meta"]["capability"], "requirements.batch_parse");
+}
+
+/// Verify generic capability execution also waits for an asynchronous parse job.
+#[test]
+fn capability_run_requirements_parse_waits_for_job() {
+    let base_url = mock_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"job_id":"job-capability","status":"queued"}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-capability","status":"succeeded","result":{"summary":{"auto_commit_ready":0,"needs_confirmation":0},"rows":[]}}}"#,
+    ]);
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "capability",
+            "run",
+            "requirements.batch_parse",
+            "--data",
+            r#"{"instance_id":1,"raw_text":"需求1："}"#,
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
+        .output()
+        .expect("capability run requirements parse");
+
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"]["rows"], serde_json::json!([]));
+}
+
+/// Verifies a cancelled parse job exits as a stable API error instead of an unknown status.
+#[test]
+fn requirements_parse_reports_cancelled_job() {
+    let base_url = mock_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"job_id":"job-cancelled","status":"queued"}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-cancelled","status":"cancelled","result":null,"error":null}}"#,
+    ]);
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base_url,
+            "--instance-id",
+            "1",
+            "requirements",
+            "parse",
+            "--text",
+            "高一数学",
+        ],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        1,
+    );
+
+    assert_eq!(value["error"]["code"], "REQUIREMENT_PARSE_JOB_CANCELLED");
+    assert_eq!(
+        value["error"]["message"],
+        "requirement parse job was cancelled"
+    );
+    assert_eq!(value["error"]["detail"]["status"], "cancelled");
+}
+
+/// Saved profile credentials must never follow a one-off backend origin override.
+#[test]
+fn saved_token_is_not_sent_to_an_overridden_backend_origin() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unexpected backend");
+    listener
+        .set_nonblocking(true)
+        .expect("set unexpected backend nonblocking");
+    let overridden_base_url = format!("http://{}", listener.local_addr().expect("backend addr"));
+    let config_dir = tempfile::tempdir().expect("config dir");
+    fs::write(
+        config_dir.path().join("config.json"),
+        r#"{
+  "active_profile": "dev",
+  "profiles": {
+    "dev": {
+      "name": "dev",
+      "base_url": "http://localhost:8000",
+      "client_instance_id": "hermes-wechat-a",
+      "client_display_name": "Hermes WeChat A",
+      "client_type": "hermes",
+      "default_instance_id": null,
+      "default_format": "json",
+      "token": "saved-secret-token",
+      "scopes": ["requirements:parse"],
+      "raw_api_enabled": false
+    }
+  }
+}"#,
+    )
+    .expect("write config");
+
+    let output = cli()
+        .args([
+            "--no-notice",
+            "--profile",
+            "dev",
+            "--base-url",
+            &overridden_base_url,
+            "requirements",
+            "options",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
+        .output()
+        .expect("run with overridden backend");
+
+    assert_eq!(output.status.code(), Some(3));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON stdout");
+    assert_eq!(value["error"]["type"], "auth");
+    let error = listener
+        .accept()
+        .expect_err("overridden backend must receive no request");
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+}
+
+/// Authenticated API calls must surface redirects without forwarding the Agent key.
+#[test]
+fn authenticated_request_does_not_follow_redirects() {
+    let target = TcpListener::bind("127.0.0.1:0").expect("bind redirect target");
+    target
+        .set_nonblocking(true)
+        .expect("set redirect target nonblocking");
+    let target_url = format!("http://{}", target.local_addr().expect("target addr"));
+    let redirect = TcpListener::bind("127.0.0.1:0").expect("bind redirect source");
+    let redirect_addr = redirect.local_addr().expect("redirect addr");
+    let redirect_thread = thread::spawn(move || {
+        let (mut stream, _) = redirect.accept().expect("accept redirect request");
+        let mut request = [0_u8; 4096];
+        let _ = stream.read(&mut request).expect("read redirect request");
+        let body =
+            r#"{"code":3020,"message":"redirect refused","data":{"code":"REDIRECT_REFUSED"}}"#;
+        let response = format!(
+            "HTTP/1.1 302 Found\r\nlocation: {target_url}/capture\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write redirect response");
+    });
+    let base_url = format!("http://{redirect_addr}");
+    let output = cli()
+        .args([
+            "--no-notice",
+            "--base-url",
+            &base_url,
+            "requirements",
+            "options",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
+        .output()
+        .expect("redirected request");
+    redirect_thread.join().expect("redirect thread");
+
+    assert_eq!(output.status.code(), Some(1));
+    let error = target
+        .accept()
+        .expect_err("redirect target must receive no request");
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+}
+
+/// Repeating an opaque continuation token is a backend contract error, not another request loop.
+#[test]
+fn page_all_rejects_a_repeated_continuation_token() {
+    let base_url = mock_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"items":[1],"has_more":true,"next_page_token":"loop"}}"#,
+        r#"{"code":0,"message":"success","data":{"items":[2],"has_more":true,"next_page_token":"loop"}}"#,
+    ]);
+    let output = cli()
+        .args([
+            "--no-notice",
+            "--base-url",
+            &base_url,
+            "api",
+            "GET",
+            "/api/v1/admin/items",
+            "--page-all",
+            "--page-delay",
+            "0",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_RAW_API", "1")
+        .output()
+        .expect("page loop request");
+
+    assert_eq!(output.status.code(), Some(1));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON stdout");
+    assert_eq!(value["error"]["code"], "PAGINATION_TOKEN_LOOP");
+}
+
+/// A remote capability cannot smuggle traversal into the path the CLI would execute.
+#[test]
+fn remote_capability_run_rejects_a_traversal_path() {
+    let capability = r#"{"id":"requirements.options","title":"Options","description":"Options","domain":"requirements","command":"hyacinthus requirements options","method":"GET","path":"/api/v1/agent/../admin/users","required_scopes":["requirements:parse"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":false,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","request_schema":{"type":"object","properties":{}},"response_schema":{"type":"object","properties":{}},"examples":[]}"#;
+    let body = Box::leak(
+        format!(r#"{{"code":0,"message":"success","data":{capability}}}"#).into_boxed_str(),
+    );
+    let base_url = mock_once(body);
+    let output = cli()
+        .args([
+            "--no-notice",
+            "--base-url",
+            &base_url,
+            "capability",
+            "run",
+            "requirements.options",
+            "--remote",
+            "--dry-run",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
+        .output()
+        .expect("remote capability traversal");
+
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON stdout");
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("invalid capability contract"));
+}
+
+/// A generic GitHub token must not be sent to a custom update-notice mirror.
+#[test]
+fn custom_release_api_does_not_receive_github_token() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind release mirror");
+    let addr = listener.local_addr().expect("release mirror addr");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept release request");
+        let mut request = [0_u8; 4096];
+        let size = stream.read(&mut request).expect("read release request");
+        let request = String::from_utf8_lossy(&request[..size]).to_string();
+        let body = r#"{"tag_name":"v0.2.0","html_url":"https://example.invalid/release"}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write release response");
+        request
+    });
+    let release_url = format!("http://{addr}/releases/latest");
+    let output = cli()
+        .args(["capability", "list"])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_CLI_RELEASE_API_URL", release_url)
+        .env("GITHUB_TOKEN", "must-not-leak")
+        .output()
+        .expect("release notice request");
+    assert!(output.status.success());
+    let request = server.join().expect("release server").to_ascii_lowercase();
+    assert!(!request.contains("authorization:"));
+    assert!(!request.contains("must-not-leak"));
+}
+
+/// A declared oversized backend response is rejected before the body is buffered.
+#[test]
+fn oversized_backend_response_is_rejected() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind oversized backend");
+    let addr = listener.local_addr().expect("oversized backend addr");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept oversized request");
+        let mut request = [0_u8; 4096];
+        let _ = stream.read(&mut request).expect("read oversized request");
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 16777217\r\nconnection: close\r\n\r\n",
+            )
+            .expect("write oversized header");
+    });
+    let base_url = format!("http://{addr}");
+    let output = cli()
+        .args([
+            "--no-notice",
+            "--base-url",
+            &base_url,
+            "requirements",
+            "options",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
+        .output()
+        .expect("oversized response request");
+    server.join().expect("oversized server");
+
+    assert_eq!(output.status.code(), Some(1));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON stdout");
+    assert_eq!(value["error"]["code"], "RESPONSE_TOO_LARGE");
 }

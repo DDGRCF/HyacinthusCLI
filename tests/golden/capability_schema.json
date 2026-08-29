@@ -1,8 +1,7 @@
 {
   "data": {
     "command": "hyacinthus requirements parse",
-    "deprecated": false,
-    "description": "Agent 专用需求批量解析能力，返回候选记录、置信度、自动提交提示和确认原因。",
+    "description": "Agent 专用异步需求批量解析能力；CLI 自动轮询任务并返回最终候选记录。",
     "domain": "requirements",
     "examples": [
       {
@@ -10,25 +9,21 @@
         "title": "从文本文件解析需求"
       },
       {
-        "command": "hyacinthus requirements parse --file input.txt --skip-geocode",
-        "title": "跳过地理编码解析"
+        "command": "hyacinthus requirements parse --file input.txt --advanced-matching",
+        "title": "启用先进匹配"
       }
     ],
     "id": "requirements.batch_parse",
     "introduced_in": "0.1.0",
     "method": "POST",
     "min_backend_version": "0.1.0",
-    "path": "/api/v1/agent/requirements/batch-parse",
+    "path": "/api/v1/agent/requirements/batch-parse-jobs",
     "request_schema": {
+      "additionalProperties": false,
       "properties": {
-        "enable_ai_fallback": {
+        "advanced_matching": {
           "default": false,
-          "description": "是否允许 AI fallback。",
-          "type": "boolean"
-        },
-        "force_ai": {
-          "default": false,
-          "description": "是否强制使用 AI 解析。",
+          "description": "是否启用先进匹配；默认使用固定字段严格解析。",
           "type": "boolean"
         },
         "instance_id": {
@@ -61,11 +56,6 @@
           "description": "待批量解析的原始需求文本。",
           "minLength": 1,
           "type": "string"
-        },
-        "skip_geocode": {
-          "default": false,
-          "description": "是否跳过地理编码。",
-          "type": "boolean"
         }
       },
       "required": [

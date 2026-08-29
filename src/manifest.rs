@@ -1,4 +1,4 @@
-// 改动说明：能力 manifest 结构、兼容性检查和校验流程补充职责注释。
+// 改动说明：能力清单只接受当前闭合字段，彻底拒绝旧 deprecated 契约。
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
@@ -10,16 +10,18 @@ use crate::schema_validate;
 /// Capability manifest bundled into the CLI binary at compile time.
 const EMBEDDED_MANIFEST: &str = include_str!("../assets/agent-cli-capabilities.yaml");
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
 /// Full capability manifest used by the CLI and backend to agree on Agent operations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CapabilityManifest {
     pub version: String,
     pub backend_min_version: String,
     pub capabilities: Vec<Capability>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
 /// One executable Agent capability and its request/response contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Capability {
     pub id: String,
     pub title: String,
@@ -36,7 +38,6 @@ pub struct Capability {
     pub supports_file_upload: bool,
     pub min_backend_version: String,
     pub introduced_in: String,
-    pub deprecated: bool,
     pub request_schema: Value,
     pub response_schema: Value,
     pub examples: Vec<Value>,
@@ -66,47 +67,48 @@ pub fn find_capability(id: &str) -> CliResult<Capability> {
         .ok_or_else(|| CliError::validation(format!("unknown capability: {id}")))
 }
 
-/// Reject deprecated capabilities or capabilities requiring a newer CLI/backend version.
+/// Rejects capabilities whose executable contract is not current and valid.
 pub fn ensure_supported(capability: &Capability) -> CliResult<()> {
-    if capability.deprecated {
-        return Err(CliError::validation(format!(
-            "capability is deprecated: {}",
-            capability.id
-        )));
-    }
-    if version_is_newer(&capability.min_backend_version, env!("CARGO_PKG_VERSION")) {
-        return Err(CliError::validation(format!(
-            "capability {} requires backend/CLI version {} or newer",
-            capability.id, capability.min_backend_version
-        )));
-    }
-    Ok(())
+    ensure_valid_capability(capability)
 }
 
-/// Build a compact compatibility summary for doctor and manifest verification output.
-pub fn compatibility_summary(manifest: &CapabilityManifest) -> Value {
-    let unsupported = manifest
-        .capabilities
-        .iter()
-        .filter(|capability| {
-            capability.deprecated
-                || version_is_newer(&capability.min_backend_version, env!("CARGO_PKG_VERSION"))
-        })
-        .map(|capability| {
-            serde_json::json!({
-                "id": capability.id,
-                "deprecated": capability.deprecated,
-                "min_backend_version": capability.min_backend_version
-            })
-        })
-        .collect::<Vec<_>>();
-    serde_json::json!({
-        "manifest_version": manifest.version,
-        "backend_min_version": manifest.backend_min_version,
-        "cli_version": env!("CARGO_PKG_VERSION"),
-        "ok": unsupported.is_empty(),
-        "unsupported_capabilities": unsupported
-    })
+/// Reject a malformed capability before its method, path, scopes, or schemas are executed.
+pub fn ensure_valid_capability(capability: &Capability) -> CliResult<()> {
+    let mut issues = Vec::new();
+    validate_capability(capability, &mut BTreeSet::new(), &mut issues);
+    if issues.is_empty() {
+        return Ok(());
+    }
+    let detail = serde_json::to_value(&issues)
+        .map_err(|err| CliError::internal(format!("failed to serialize manifest issues: {err}")))?;
+    Err(CliError::validation_with_detail(
+        format!("invalid capability contract: {}", capability.id),
+        detail,
+    ))
+}
+
+/// Reject an invalid remote manifest before comparison or execution uses its contents.
+pub fn ensure_valid_manifest(manifest: &CapabilityManifest) -> CliResult<()> {
+    let issues = validate_manifest(manifest);
+    if issues.is_empty() {
+        return Ok(());
+    }
+    let detail = serde_json::to_value(&issues)
+        .map_err(|err| CliError::internal(format!("failed to serialize manifest issues: {err}")))?;
+    Err(CliError::validation_with_detail(
+        "invalid capability manifest",
+        detail,
+    ))
+}
+
+/// Validate a capability ID before it is interpolated into an API path.
+pub fn validate_capability_id(id: &str) -> CliResult<()> {
+    if valid_capability_id(id) {
+        return Ok(());
+    }
+    Err(CliError::validation(
+        "capability ID must contain 1-96 lowercase letters, digits, dots, hyphens, or underscores",
+    ))
 }
 
 /// Validate top-level and per-capability manifest invariants.
@@ -120,6 +122,12 @@ pub fn validate_manifest(manifest: &CapabilityManifest) -> Vec<ManifestIssue> {
             None,
             "backend_min_version",
             "backend_min_version is required",
+        ));
+    } else if parse_version(&manifest.backend_min_version).is_none() {
+        issues.push(manifest_issue(
+            None,
+            "backend_min_version",
+            "backend_min_version must be a dotted numeric version",
         ));
     }
     if manifest.capabilities.is_empty() {
@@ -144,8 +152,12 @@ fn validate_capability(
 ) {
     // Keep manifest defects explicit so frontend, backend, and CLI contract drift is visible.
     let id = Some(capability.id.clone());
-    if capability.id.trim().is_empty() {
-        issues.push(manifest_issue(id.clone(), "id", "id is required"));
+    if !valid_capability_id(&capability.id) {
+        issues.push(manifest_issue(
+            id.clone(),
+            "id",
+            "id must contain 1-96 lowercase letters, digits, dots, hyphens, or underscores",
+        ));
     } else if !ids.insert(capability.id.clone()) {
         issues.push(manifest_issue(id.clone(), "id", "id must be unique"));
     }
@@ -169,6 +181,21 @@ fn validate_capability(
             ));
         }
     }
+    for (field, value) in [
+        (
+            "min_backend_version",
+            capability.min_backend_version.as_str(),
+        ),
+        ("introduced_in", capability.introduced_in.as_str()),
+    ] {
+        if !value.trim().is_empty() && parse_version(value).is_none() {
+            issues.push(manifest_issue(
+                id.clone(),
+                field,
+                format!("{field} must be a dotted numeric version"),
+            ));
+        }
+    }
     if !["GET", "POST", "PUT"].contains(&capability.method.as_str()) {
         issues.push(manifest_issue(
             id.clone(),
@@ -176,11 +203,11 @@ fn validate_capability(
             "method must be GET, POST, or PUT",
         ));
     }
-    if !capability.path.starts_with("/api/v1/agent/") {
+    if crate::client::validate_api_path(&capability.path, "/api/v1/agent/").is_err() {
         issues.push(manifest_issue(
             id.clone(),
             "path",
-            "path must start with /api/v1/agent/",
+            "path must be a safe relative path under /api/v1/agent/",
         ));
     }
     if !["read", "write", "high-risk-write", "admin-maintenance"]
@@ -199,12 +226,17 @@ fn validate_capability(
             "at least one required scope is expected",
         ));
     }
+    let mut scopes = BTreeSet::new();
     for scope in &capability.required_scopes {
-        if !scope.contains(':') {
+        if scope.trim() != scope
+            || !scope.contains(':')
+            || scope.chars().any(char::is_control)
+            || !scopes.insert(scope)
+        {
             issues.push(manifest_issue(
                 id.clone(),
                 "required_scopes",
-                format!("scope `{scope}` must include a domain prefix"),
+                format!("scope `{scope}` must be unique, trimmed, and include a domain prefix"),
             ));
         }
     }
@@ -243,6 +275,18 @@ fn validate_capability(
     }
 }
 
+/// Return whether an ID is safe for manifest lookup and one URL path segment.
+fn valid_capability_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 96
+        && !id.starts_with('.')
+        && !id.ends_with('.')
+        && !id.contains("..")
+        && id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-' | b'_')
+        })
+}
+
 fn manifest_issue(
     capability_id: Option<String>,
     field: impl Into<String>,
@@ -256,14 +300,6 @@ fn manifest_issue(
     }
 }
 
-/// Compare dotted numeric versions and treat unparsable versions as not newer.
-fn version_is_newer(candidate: &str, current: &str) -> bool {
-    match (parse_version(candidate), parse_version(current)) {
-        (Some(candidate), Some(current)) => candidate > current,
-        _ => false,
-    }
-}
-
 /// Parse dotted numeric semantic-version-like strings.
 fn parse_version(value: &str) -> Option<Vec<u64>> {
     value
@@ -274,11 +310,22 @@ fn parse_version(value: &str) -> Option<Vec<u64>> {
 
 #[cfg(test)]
 mod tests {
-    use super::version_is_newer;
+    use super::{load_embedded, validate_capability_id, CapabilityManifest};
 
+    /// Rejects capability identifiers that could escape the Agent path namespace.
     #[test]
-    fn compares_versions() {
-        assert!(version_is_newer("0.2.0", "0.1.9"));
-        assert!(!version_is_newer("0.1.0", "0.1.0"));
+    fn rejects_capability_ids_that_can_change_a_request_path() {
+        assert!(validate_capability_id("requirements.batch_parse").is_ok());
+        assert!(validate_capability_id("../admin").is_err());
+        assert!(validate_capability_id("requirements%2fadmin").is_err());
+    }
+
+    /// Rejects the removed deprecated-capability marker at the manifest boundary.
+    #[test]
+    fn rejects_removed_deprecated_capability_field() {
+        let manifest = load_embedded().expect("embedded manifest parses");
+        let mut value = serde_json::to_value(manifest).expect("manifest serializes");
+        value["capabilities"][0]["deprecated"] = serde_json::json!(false);
+        assert!(serde_json::from_value::<CapabilityManifest>(value).is_err());
     }
 }

@@ -143,7 +143,7 @@ hyacinthus requirements search --keyword "高一数学" --scope active -q '.data
 hyacinthus requirements extend KKH347 --dry-run -q '.data.request.body'
 hyacinthus requirements extend KKH347 --yes -q '.data.expires_at'
 hyacinthus requirements parse --text "高一数学" --dry-run -q '.data.request.body'
-hyacinthus requirements parse --text "高一数学" --dry-run --force-ai
+hyacinthus requirements parse --text "高一数学" --dry-run --advanced-matching
 hyacinthus --request-id trace-123 requirements parse --text "高一数学" --dry-run
 ```
 
@@ -175,11 +175,11 @@ Interactive Agent authorization is supported for hermes, Claw, and other automat
 hyacinthus auth login --scope requirements:parse
 hyacinthus auth login --scope requirements:read
 hyacinthus auth login --scope requirements:parse --wait
-hyacinthus auth wait --session-id sess_abc123
+hyacinthus auth wait --session-id sess_abc123 --device-code '<device_code>'
 hyacinthus auth grant --scope "requirements:parse requirements:write" --wait
 ```
 
-`auth login` creates a backend authorization session and prints `session_id`, `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. Agents should send the URL or QR text to the user, then use `auth wait --session-id <session_id>` after the user approves that exact link. With `--wait`, the CLI creates a new session and polls it until approval, which is useful only when the user can approve that newly created session during the same command run. If approval times out or the backend returns a terminal non-`pending` status, the command exits non-zero with a structured auth error envelope.
+`auth login` creates a backend authorization session and prints a device-only `device_code` alongside `session_id`, `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. Send only the URL, QR text, and user code to the user; never send or embed `device_code` in a browser URL. After approval, reuse both local values with `auth wait --session-id <session_id> --device-code <device_code>`. Polling is retryable until the CLI saves the token and acknowledges delivery. With `--wait`, the CLI performs the same sequence in one process. Timeout errors preserve the device code for a local retry, while terminal non-`pending` states still exit non-zero.
 
 The CLI automatically binds each profile to a stable Agent identity. Supported `client_type` values are `hermes`, `codex`, `claude`, `picoclaw`, `nullclaw`, and `hyacinthus-cli`. Single-Agent setups can rely on default homes like `~/.hermes`; multi-instance setups should set a distinct `HYACINTHUS_PROFILE` or Agent home for each instance.
 

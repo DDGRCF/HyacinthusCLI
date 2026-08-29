@@ -1,9 +1,9 @@
-// 改动说明：需求命令新增按编号延期执行逻辑。
+// 改动说明：CLI doctor 仅验证当前闭合能力清单，不再维护 deprecated 兼容摘要。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::CommandFactory;
 use clap_complete::{generate, Shell};
@@ -212,6 +212,15 @@ fn config_command(cli: &Cli, command: &ConfigSubcommand) -> CliResult<(Value, Va
                     args.client_type.clone(),
                     existing.as_ref(),
                 )?;
+            let credential_context_changed = existing.as_ref().is_some_and(|profile| {
+                !config::normalize_base_url(&profile.base_url).is_ok_and(|value| value == base_url)
+                    || profile.client_instance_id.as_deref() != Some(client_instance_id.as_str())
+                    || profile.client_type.as_deref() != Some(client_type.as_str())
+            });
+            let credentials_cleared = credential_context_changed
+                && existing
+                    .as_ref()
+                    .is_some_and(|profile| profile.token.is_some());
             let profile = Profile {
                 name: args.name.clone(),
                 base_url,
@@ -227,13 +236,23 @@ fn config_command(cli: &Cli, command: &ConfigSubcommand) -> CliResult<(Value, Va
                     .default_format
                     .or_else(|| existing.as_ref().map(|profile| profile.default_format))
                     .unwrap_or(crate::cli::OutputFormat::Json),
-                token: existing.as_ref().and_then(|profile| profile.token.clone()),
-                scopes: args
-                    .scopes
-                    .as_deref()
-                    .map(config::parse_scope_list)
-                    .or_else(|| existing.as_ref().map(|profile| profile.scopes.clone()))
-                    .unwrap_or_default(),
+                token: if credential_context_changed {
+                    None
+                } else {
+                    existing.as_ref().and_then(|profile| profile.token.clone())
+                },
+                scopes: if credentials_cleared {
+                    args.scopes
+                        .as_deref()
+                        .map(config::parse_scope_list)
+                        .unwrap_or_default()
+                } else {
+                    args.scopes
+                        .as_deref()
+                        .map(config::parse_scope_list)
+                        .or_else(|| existing.as_ref().map(|profile| profile.scopes.clone()))
+                        .unwrap_or_default()
+                },
                 raw_api_enabled: if args.raw_api_enabled {
                     true
                 } else if args.no_raw_api_enabled {
@@ -251,7 +270,10 @@ fn config_command(cli: &Cli, command: &ConfigSubcommand) -> CliResult<(Value, Va
             }
             config::save_config(&config)?;
             Ok((
-                json!({ "profile": args.name }),
+                json!({
+                    "profile": args.name,
+                    "credentials_cleared": credentials_cleared
+                }),
                 json!({ "command": "config set-profile" }),
             ))
         }
@@ -326,7 +348,7 @@ fn config_command(cli: &Cli, command: &ConfigSubcommand) -> CliResult<(Value, Va
                 .profiles
                 .get_mut(&profile_name)
                 .ok_or_else(|| CliError::validation(format!("unknown profile: {profile_name}")))?;
-            profile.token = Some(token);
+            profile.token = Some(config::normalize_token(&token)?);
             config::save_config(&config)?;
             Ok((
                 json!({ "profile": profile_name, "token_present": true }),
@@ -461,6 +483,7 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
         status = Some(wait_for_auth_session(
             &ctx,
             &session.session_id,
+            &session.device_code,
             args.poll_limit,
             Some(&session),
         )?);
@@ -479,6 +502,7 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
     } else {
         json!({
             "session_id": session.session_id,
+            "device_code": session.device_code,
             "status": "pending",
             "authorize_url": session.authorize_url,
             "qr_code_text": session.qr_code_text,
@@ -509,7 +533,13 @@ fn auth_wait(cli: &Cli, args: &AuthWaitArgs) -> CliResult<(Value, Value)> {
         cli.instance_id,
         cli.request_id.as_deref(),
     )?;
-    let status = wait_for_auth_session(&ctx, &args.session_id, args.poll_limit, None)?;
+    let status = wait_for_auth_session(
+        &ctx,
+        &args.session_id,
+        &args.device_code,
+        args.poll_limit,
+        None,
+    )?;
     Ok((
         json!({
             "session_id": status.session_id,
@@ -530,12 +560,18 @@ fn auth_wait(cli: &Cli, args: &AuthWaitArgs) -> CliResult<(Value, Value)> {
 fn wait_for_auth_session(
     ctx: &RuntimeContext,
     session_id: &str,
+    device_code: &str,
     poll_limit: u64,
     created: Option<&client::AuthSessionCreated>,
 ) -> CliResult<client::AuthSessionStatus> {
+    if !(1..=600).contains(&poll_limit) {
+        return Err(CliError::validation(
+            "--poll-limit must be between 1 and 600",
+        ));
+    }
     let mut last_status = None;
     for _ in 0..poll_limit {
-        let current = client::get_auth_session(&ctx.base_url, session_id)?;
+        let current = client::poll_auth_session(&ctx.base_url, session_id, device_code)?;
         ensure_auth_session_belongs_to_context(ctx, &current)?;
         if current.status == "approved" {
             let token = current.access_token.clone().ok_or_else(|| {
@@ -554,14 +590,18 @@ fn wait_for_auth_session(
                 token,
                 current.scopes.clone(),
             )?;
+            acknowledge_saved_auth_session(&ctx.base_url, session_id, device_code)?;
             return Ok(current);
         }
         if current.status != "pending" {
             return Err(auth_session_error(created, &current));
         }
-        if current.poll_interval_seconds > 0 {
-            thread::sleep(Duration::from_secs(current.poll_interval_seconds));
-        }
+        let interval = if current.poll_interval_seconds == 0 {
+            Duration::from_millis(250)
+        } else {
+            Duration::from_secs(current.poll_interval_seconds.min(60))
+        };
+        thread::sleep(interval);
         last_status = Some(current);
     }
     Err(auth_session_timeout_error(
@@ -569,6 +609,24 @@ fn wait_for_auth_session(
         session_id,
         last_status.as_ref(),
     ))
+}
+
+/// Retry the idempotent delivery acknowledgement after credentials are durably saved.
+fn acknowledge_saved_auth_session(
+    base_url: &str,
+    session_id: &str,
+    device_code: &str,
+) -> CliResult<()> {
+    let mut last_error = None;
+    for _ in 0..3 {
+        match client::acknowledge_auth_session(base_url, session_id, device_code) {
+            Ok(_) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        CliError::internal("authorization acknowledgement retry produced no result")
+    }))
 }
 
 /// Prevent saving a token from a session created for another local Agent identity.
@@ -615,6 +673,7 @@ fn auth_session_timeout_error(
     if let Some(session) = created {
         detail = json!({
             "session_id": session.session_id,
+            "device_code": session.device_code,
             "status": "pending",
             "authorize_url": session.authorize_url,
             "qr_code_text": session.qr_code_text,
@@ -720,12 +779,7 @@ fn auth_scope_check(cli: &Cli, scope: &str) -> CliResult<(Value, Value)> {
 
 /// Keep raw API access inside the supported backend API namespace.
 fn ensure_raw_api_path(path: &str) -> CliResult<()> {
-    if path.starts_with("/api/v1/") {
-        return Ok(());
-    }
-    Err(CliError::validation(
-        "raw API path must start with /api/v1/",
-    ))
+    client::validate_api_path(path, "/api/v1/")
 }
 
 /// Execute the guarded raw API command when explicitly enabled.
@@ -810,13 +864,7 @@ fn doctor_command(cli: &Cli, offline: bool, strict: bool) -> CliResult<(Value, V
             }));
             match manifest::load_embedded() {
                 Ok(manifest) => {
-                    let compatibility = manifest::compatibility_summary(&manifest);
                     let issues = manifest::validate_manifest(&manifest);
-                    checks.push(json!({
-                        "name": "embedded_manifest_compatibility",
-                        "status": if compatibility.get("ok").and_then(Value::as_bool) == Some(true) { "pass" } else { "fail" },
-                        "message": compatibility
-                    }));
                     checks.push(json!({
                         "name": "embedded_manifest_integrity",
                         "status": if issues.is_empty() { "pass" } else { "fail" },
@@ -827,7 +875,7 @@ fn doctor_command(cli: &Cli, offline: bool, strict: bool) -> CliResult<(Value, V
                     }));
                 }
                 Err(err) => checks.push(json!({
-                    "name": "embedded_manifest_compatibility",
+                    "name": "embedded_manifest_integrity",
                     "status": "fail",
                     "message": err.message
                 })),
@@ -877,6 +925,7 @@ fn capability_command(cli: &Cli, command: &CapabilitySubcommand) -> CliResult<(V
             ))
         }
         CapabilitySubcommand::Schema(args) => {
+            manifest::validate_capability_id(&args.id)?;
             if args.remote {
                 let ctx = config::resolve_context(
                     cli.profile.as_deref(),
@@ -970,6 +1019,7 @@ fn capability_diff(cli: &Cli, remote: bool, strict: bool) -> CliResult<(Value, V
                 None,
             )
         })?;
+    manifest::ensure_valid_manifest(&remote_manifest)?;
     let diff = diff_manifests(&embedded, &remote_manifest);
     if strict && diff["ok"] == false {
         return Err(CliError::validation_with_detail(
@@ -1061,6 +1111,7 @@ fn changed_capability_fields(
 
 /// Execute one manifest capability with schema validation and risk confirmation.
 fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<(Value, Value)> {
+    manifest::validate_capability_id(&args.id)?;
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
         cli.base_url.as_deref(),
@@ -1119,6 +1170,9 @@ fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<
             } else {
                 client.get(&path)?
             }
+        }
+        "POST" if capability.id == "requirements.batch_parse" => {
+            submit_and_wait_for_parse_job(&client, body)?
         }
         "POST" => client.post(&path, body)?,
         "PUT" => client.put(&path, body)?,
@@ -1738,7 +1792,7 @@ fn requirements_parse(cli: &Cli, args: &RequirementsParseArgs) -> CliResult<(Val
         return Ok((
             dry_run_payload(
                 "POST",
-                "/api/v1/agent/requirements/batch-parse",
+                "/api/v1/agent/requirements/batch-parse-jobs",
                 payload,
                 None,
                 ctx.request_id.as_deref(),
@@ -1746,7 +1800,8 @@ fn requirements_parse(cli: &Cli, args: &RequirementsParseArgs) -> CliResult<(Val
             json!({ "command": "requirements parse" }),
         ));
     }
-    let data = ApiClient::new(ctx)?.post("/api/v1/agent/requirements/batch-parse", payload)?;
+    let client = ApiClient::new(ctx)?;
+    let data = submit_and_wait_for_parse_job(&client, payload)?;
     validate_response_payload(&capability, &data)?;
     write_output_if_needed(&data, args.output.as_deref())?;
     Ok((
@@ -1825,7 +1880,7 @@ fn requirements_import_raw(
     validate_request_payload(&parse_capability, &parse_payload)?;
 
     let client = ApiClient::new(ctx.clone())?;
-    let parse_data = client.post("/api/v1/agent/requirements/batch-parse", parse_payload)?;
+    let parse_data = submit_and_wait_for_parse_job(&client, parse_payload)?;
     validate_response_payload(&parse_capability, &parse_data)?;
 
     let (confirmed_rows, skipped_rows) = split_import_raw_rows(&parse_data)?;
@@ -1995,7 +2050,7 @@ fn completion_command(shell: &str) -> CliResult<()> {
     Ok(())
 }
 
-/// Convert user update flags or JSON input into the backend profile update payload.
+/// Convert user update flags or credential-free JSON into the backend profile payload.
 fn build_user_update_payload(args: &UserUpdateArgs) -> CliResult<Value> {
     let mut payload = if let Some(data) = &args.data {
         read_json_arg(data)?
@@ -2005,8 +2060,6 @@ fn build_user_update_payload(args: &UserUpdateArgs) -> CliResult<Value> {
     ensure_json_object(&payload, "user update payload")?;
 
     set_optional_string(&mut payload, &["display_name"], &args.display_name)?;
-    set_optional_string(&mut payload, &["email"], &args.email)?;
-    set_optional_string(&mut payload, &["phone"], &args.phone)?;
     set_optional_string(&mut payload, &["profile", "gender"], &args.gender)?;
     set_optional_string(&mut payload, &["profile", "birth_date"], &args.birth_date)?;
     set_optional_string(&mut payload, &["profile", "bio"], &args.bio)?;
@@ -2072,6 +2125,13 @@ fn build_user_update_payload(args: &UserUpdateArgs) -> CliResult<Value> {
     let object = payload
         .as_object()
         .ok_or_else(|| CliError::validation("user update payload must be an object"))?;
+    for field in ["email", "phone", "password"] {
+        if object.contains_key(field) {
+            return Err(CliError::validation(format!(
+                "user update does not accept login credential field `{field}`"
+            )));
+        }
+    }
     if object.is_empty() {
         return Err(CliError::validation(
             "no user update fields provided; pass --data or at least one update flag",
@@ -2205,9 +2265,7 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
         "preset_contact_phone": args.preset_contact_phone,
         "preset_contact_wechat": args.preset_contact_wechat,
         "preset_city": args.preset_city,
-        "force_ai": args.force_ai,
-        "enable_ai_fallback": args.enable_ai_fallback,
-        "skip_geocode": args.skip_geocode
+        "advanced_matching": args.advanced_matching
     });
     if let Some(resolved_instance_id) = instance_id {
         payload["instance_id"] = json!(resolved_instance_id);
@@ -2373,14 +2431,92 @@ fn build_import_raw_parse_payload(
         "preset_contact_phone": args.preset_contact_phone,
         "preset_contact_wechat": args.preset_contact_wechat,
         "preset_city": args.preset_city,
-        "force_ai": args.force_ai,
-        "enable_ai_fallback": args.enable_ai_fallback,
-        "skip_geocode": args.skip_geocode
+        "advanced_matching": args.advanced_matching
     });
     if let Some(resolved_instance_id) = instance_id {
         payload["instance_id"] = json!(resolved_instance_id);
     }
     Ok(payload)
+}
+
+/// Submit one parse job and poll until the backend returns its final parse result.
+fn submit_and_wait_for_parse_job(client: &ApiClient, payload: Value) -> CliResult<Value> {
+    let instance_id = payload.get("instance_id").and_then(Value::as_i64);
+    let job = client.post("/api/v1/agent/requirements/batch-parse-jobs", payload)?;
+    let job_id = job
+        .get("job_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CliError::api(
+                "parse job response is missing job_id",
+                None,
+                Some(job.clone()),
+            )
+        })?
+        .to_string();
+    client::validate_path_identifier(&job_id, "job_id", 128)?;
+    let query = instance_id
+        .map(|value| format!("?instance_id={value}"))
+        .unwrap_or_default();
+    let path = format!("/api/v1/agent/requirements/batch-parse-jobs/{job_id}{query}");
+
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let mut poll_delay = Duration::from_millis(500);
+    loop {
+        if Instant::now() >= deadline {
+            break;
+        }
+        let state = client.get(&path)?;
+        match state.get("status").and_then(Value::as_str) {
+            Some("succeeded") => {
+                return state.get("result").cloned().ok_or_else(|| {
+                    CliError::api("completed parse job is missing result", None, Some(state))
+                });
+            }
+            Some("failed") => {
+                let error = state.get("error").cloned().unwrap_or(Value::Null);
+                let message = error
+                    .get("detail")
+                    .and_then(Value::as_str)
+                    .unwrap_or("requirement parse job failed")
+                    .to_string();
+                let code = error
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                return Err(CliError::api(message, code, Some(state)));
+            }
+            Some("cancelled") => {
+                let error = state.get("error").cloned().unwrap_or(Value::Null);
+                let message = error
+                    .get("detail")
+                    .and_then(Value::as_str)
+                    .unwrap_or("requirement parse job was cancelled")
+                    .to_string();
+                let code = error
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("REQUIREMENT_PARSE_JOB_CANCELLED")
+                    .to_string();
+                return Err(CliError::api(message, Some(code), Some(state)));
+            }
+            Some("queued" | "retry_wait" | "running") => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                thread::sleep(poll_delay.min(remaining));
+                poll_delay = poll_delay.saturating_mul(2).min(Duration::from_secs(5));
+            }
+            _ => {
+                return Err(CliError::api(
+                    "parse job returned an unknown status",
+                    None,
+                    Some(state),
+                ));
+            }
+        }
+    }
+    Err(CliError::network(
+        "requirement parse job did not finish within 300 seconds",
+    ))
 }
 
 /// Split parse output into importable payloads and concise review-only rows.
@@ -2676,6 +2812,7 @@ fn ensure_scopes(ctx: &crate::config::RuntimeContext, required: &[String]) -> Cl
                 "missing_scopes": missing,
                 "required_scopes": required,
                 "session_id": session.session_id,
+                "device_code": session.device_code,
                 "authorize_url": session.authorize_url,
                 "qr_code_text": session.qr_code_text,
                 "user_code": session.user_code,
@@ -2801,8 +2938,7 @@ fn read_json_arg(input: &str) -> CliResult<Value> {
     let text = if input == "-" {
         config::read_stdin_string()?
     } else if let Some(path) = input.strip_prefix('@') {
-        fs::read_to_string(path)
-            .map_err(|err| CliError::validation(format!("failed to read {path}: {err}")))?
+        config::read_input_file(std::path::Path::new(path))?
     } else {
         input.to_string()
     };
@@ -2815,8 +2951,7 @@ fn read_text_arg(input: &str) -> CliResult<String> {
     if input == "-" {
         config::read_stdin_string()
     } else {
-        fs::read_to_string(input)
-            .map_err(|err| CliError::validation(format!("failed to read {input}: {err}")))
+        config::read_input_file(std::path::Path::new(input))
     }
 }
 

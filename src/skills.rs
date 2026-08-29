@@ -1,9 +1,10 @@
-// 改动说明：内置 Agent skill 导出与校验逻辑补充中文元数据。
+// 改动说明：已安装 skill 与 manifest 检查改用统一有界文件读取，避免异常文件占用过量内存。
 use std::fs;
 use std::path::Path;
 
 use serde::Serialize;
 
+use crate::config;
 use crate::output::{CliError, CliResult};
 
 const SHARED_SKILL_DESCRIPTION: &str =
@@ -243,24 +244,32 @@ fn full_skills() -> Vec<Skill> {
 
 /// Compare one installed skill file with the embedded version.
 fn check_skill_file(path: &Path, expected: &str) -> (&'static str, String) {
-    match fs::read_to_string(path) {
+    if !path.exists() {
+        return ("fail", "skill file is missing".to_string());
+    }
+    match config::read_input_file(path) {
         Ok(content) if content == expected => ("pass", "current".to_string()),
         Ok(_) => ("fail", "content differs from bundled skill".to_string()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            ("fail", "skill file is missing".to_string())
-        }
-        Err(err) => ("fail", format!("failed to read skill file: {err}")),
+        Err(err) => (
+            "fail",
+            format!("failed to read skill file: {}", err.message),
+        ),
     }
 }
 
 /// Validate the exported skills manifest version and included skill names.
 fn check_manifest(path: &Path) -> (&'static str, String) {
-    let text = match fs::read_to_string(path) {
+    if !path.exists() {
+        return ("fail", "skills manifest is missing".to_string());
+    }
+    let text = match config::read_input_file(path) {
         Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return ("fail", "skills manifest is missing".to_string());
+        Err(err) => {
+            return (
+                "fail",
+                format!("failed to read skills manifest: {}", err.message),
+            )
         }
-        Err(err) => return ("fail", format!("failed to read skills manifest: {err}")),
     };
     let value = match serde_json::from_str::<serde_json::Value>(&text) {
         Ok(value) => value,

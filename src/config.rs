@@ -1,8 +1,8 @@
-// 改动说明：配置解析避免临时命令写入缺失 profile，并加固 token 配置文件权限。
+// 改动说明：配置与输入改为有界读取、原子私有写入，并将已保存凭据绑定到 profile 的后端来源。
 use std::collections::BTreeMap;
 use std::env;
-use std::fs;
-use std::io::{self, Read};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,13 @@ use uuid::Uuid;
 
 use crate::cli::OutputFormat;
 use crate::output::{CliError, CliResult};
+
+/// Maximum serialized CLI configuration size accepted from disk.
+const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+/// Maximum JSON or text payload accepted from stdin or an input file.
+pub const MAX_INPUT_BYTES: u64 = 8 * 1024 * 1024;
+/// Maximum Agent token size accepted from environment, argv, stdin, or config.
+const MAX_TOKEN_BYTES: usize = 16 * 1024;
 
 /// Agent client types accepted by backend authorization and profile identity.
 pub const SUPPORTED_CLIENT_TYPES: &[&str] = &[
@@ -99,12 +106,33 @@ pub fn config_path() -> CliResult<PathBuf> {
 /// Load CLI configuration, returning an empty config when no file exists.
 pub fn load_config() -> CliResult<ConfigFile> {
     let path = config_path()?;
-    if !path.exists() {
-        return Ok(ConfigFile::default());
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(ConfigFile::default()),
+        Err(err) => {
+            return Err(CliError::validation(format!(
+                "failed to inspect config {}: {err}",
+                path.display()
+            )))
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(CliError::validation(format!(
+            "config file must not be a symbolic link: {}",
+            path.display()
+        )));
     }
-    let text = fs::read_to_string(&path).map_err(|err| {
+    if metadata.len() > MAX_CONFIG_BYTES {
+        return Err(CliError::validation(format!(
+            "config {} exceeds the {} byte limit",
+            path.display(),
+            MAX_CONFIG_BYTES
+        )));
+    }
+    let file = OpenOptions::new().read(true).open(&path).map_err(|err| {
         CliError::validation(format!("failed to read config {}: {err}", path.display()))
     })?;
+    let text = read_bounded_string(file, MAX_CONFIG_BYTES, "config file")?;
     serde_json::from_str(&text).map_err(|err| {
         CliError::validation(format!("failed to parse config {}: {err}", path.display()))
     })
@@ -123,11 +151,57 @@ pub fn save_config(config: &ConfigFile) -> CliResult<()> {
     }
     let text = serde_json::to_string_pretty(config)
         .map_err(|err| CliError::internal(format!("failed to serialize config: {err}")))?;
-    fs::write(&path, text).map_err(|err| {
-        CliError::validation(format!("failed to write config {}: {err}", path.display()))
-    })?;
-    secure_config_permissions(&path)?;
-    Ok(())
+    write_config_atomically(&path, text.as_bytes())
+}
+
+/// Write a same-directory private temporary file and atomically publish it as config.
+fn write_config_atomically(path: &Path, bytes: &[u8]) -> CliResult<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| CliError::validation("config path has no parent directory"))?;
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("config.json");
+    let temp_path = parent.join(format!(".{file_name}.{}.tmp", Uuid::new_v4()));
+    let result = (|| -> CliResult<()> {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp_path).map_err(|err| {
+            CliError::validation(format!(
+                "failed to create private config temporary file {}: {err}",
+                temp_path.display()
+            ))
+        })?;
+        file.write_all(bytes).map_err(|err| {
+            CliError::validation(format!(
+                "failed to write config temporary file {}: {err}",
+                temp_path.display()
+            ))
+        })?;
+        file.sync_all().map_err(|err| {
+            CliError::validation(format!(
+                "failed to sync config temporary file {}: {err}",
+                temp_path.display()
+            ))
+        })?;
+        fs::rename(&temp_path, path).map_err(|err| {
+            CliError::validation(format!(
+                "failed to publish config {}: {err}",
+                path.display()
+            ))
+        })?;
+        secure_config_permissions(path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
 }
 
 /// Restrict the config file so saved Agent tokens are not world-readable.
@@ -160,6 +234,7 @@ pub fn save_agent_credentials(
     scopes: Vec<String>,
 ) -> CliResult<()> {
     // Auth wait uses this path to persist the token under the exact Agent instance identity.
+    let token = normalize_token(&token)?;
     let mut config = load_config()?;
     let profile = config
         .profiles
@@ -190,13 +265,58 @@ pub fn save_agent_credentials(
 
 /// Normalize and validate a backend base URL.
 pub fn normalize_base_url(raw: &str) -> CliResult<String> {
-    let trimmed = raw.trim().trim_end_matches('/');
-    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+    let trimmed = raw.trim();
+    let mut url = reqwest::Url::parse(trimmed)
+        .map_err(|err| CliError::validation(format!("invalid base_url: {err}")))?;
+    if !matches!(url.scheme(), "http" | "https") {
         return Err(CliError::validation(
-            "base_url must start with http:// or https://",
+            "base_url scheme must be http or https",
         ));
     }
-    Ok(trimmed.to_string())
+    if url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        return Err(CliError::validation(
+            "base_url must contain only an HTTP(S) origin without credentials, path, query, or fragment",
+        ));
+    }
+    url.set_path("");
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+/// Return whether saved credentials still match the effective backend and Agent identity.
+fn profile_credentials_match(
+    profile: &Profile,
+    base_url: &str,
+    client_instance_id: &str,
+    client_type: &str,
+) -> bool {
+    normalize_base_url(&profile.base_url).is_ok_and(|value| value == base_url)
+        && profile.client_instance_id.as_deref() == Some(client_instance_id)
+        && profile.client_type.as_deref() == Some(client_type)
+}
+
+/// Normalize a token and reject values that cannot safely become an HTTP header.
+pub fn normalize_token(raw: &str) -> CliResult<String> {
+    let token = raw.trim();
+    if token.is_empty() {
+        return Err(CliError::validation("agent token is empty"));
+    }
+    if token.len() > MAX_TOKEN_BYTES {
+        return Err(CliError::validation(format!(
+            "agent token exceeds {MAX_TOKEN_BYTES} bytes"
+        )));
+    }
+    if token.chars().any(char::is_whitespace) || !token.is_ascii() {
+        return Err(CliError::validation(
+            "agent token must be a single ASCII value without whitespace",
+        ));
+    }
+    Ok(token.to_string())
 }
 
 /// Resolve base URL precedence: flag, env, profile, then production default.
@@ -293,11 +413,23 @@ pub fn resolve_context(
         .map(ToOwned::to_owned)
         .or_else(|| env::var("HYACINTHUS_REQUEST_ID").ok())
         .filter(|value| !value.trim().is_empty());
+    let saved_credentials_match = profile.as_ref().is_some_and(|profile| {
+        profile_credentials_match(
+            profile,
+            &normalized_base_url,
+            &client_instance_id,
+            &client_type,
+        )
+    });
     let env_token = env::var("HYACINTHUS_AGENT_TOKEN").ok();
     let token = if let Some(token) = env_token {
-        Some(token)
-    } else if let Some(profile) = profile.as_ref() {
-        profile.token.clone()
+        Some(normalize_token(&token)?)
+    } else if saved_credentials_match {
+        profile
+            .as_ref()
+            .and_then(|profile| profile.token.as_deref())
+            .map(normalize_token)
+            .transpose()?
     } else {
         None
     };
@@ -310,13 +442,16 @@ pub fn resolve_context(
         .ok()
         .map(|value| parse_scope_list(&value))
         .or_else(|| {
-            profile.as_ref().and_then(|profile| {
-                if profile.scopes.is_empty() {
-                    None
-                } else {
-                    Some(profile.scopes.clone())
-                }
-            })
+            profile
+                .as_ref()
+                .filter(|_| saved_credentials_match)
+                .and_then(|profile| {
+                    if profile.scopes.is_empty() {
+                        None
+                    } else {
+                        Some(profile.scopes.clone())
+                    }
+                })
         });
     Ok(RuntimeContext {
         profile_name,
@@ -409,10 +544,27 @@ pub fn resolve_auth_status_context(
         .map(ToOwned::to_owned)
         .or_else(|| env::var("HYACINTHUS_REQUEST_ID").ok())
         .filter(|value| !value.trim().is_empty());
+    let saved_credentials_match = profile.is_some_and(|profile| {
+        client_instance_id
+            .as_deref()
+            .is_some_and(|client_instance_id| {
+                client_type.as_deref().is_some_and(|client_type| {
+                    profile_credentials_match(
+                        profile,
+                        base_url.as_deref().unwrap_or_default(),
+                        client_instance_id,
+                        client_type,
+                    )
+                })
+            })
+    });
     let env_token = env::var("HYACINTHUS_AGENT_TOKEN").ok();
-    let (token_present, token_source) = if env_token.is_some() {
+    let (token_present, token_source) = if env_token
+        .as_deref()
+        .is_some_and(|token| normalize_token(token).is_ok())
+    {
         (true, Some("env".to_string()))
-    } else if let Some(profile) = profile {
+    } else if let Some(profile) = profile.filter(|_| saved_credentials_match) {
         (
             profile.token.is_some(),
             profile.token.as_ref().map(|_| "config".to_string()),
@@ -428,13 +580,15 @@ pub fn resolve_auth_status_context(
         .ok()
         .map(|value| parse_scope_list(&value))
         .or_else(|| {
-            profile.and_then(|profile| {
-                if profile.scopes.is_empty() {
-                    None
-                } else {
-                    Some(profile.scopes.clone())
-                }
-            })
+            profile
+                .filter(|_| saved_credentials_match)
+                .and_then(|profile| {
+                    if profile.scopes.is_empty() {
+                        None
+                    } else {
+                        Some(profile.scopes.clone())
+                    }
+                })
         });
     Ok(AuthStatusContext {
         profile_name,
@@ -617,6 +771,10 @@ fn upsert_profile_identity(
     existing: Option<&Profile>,
 ) {
     // Keep generated profile identity durable so future auth checks use the same instance.
+    let credentials_changed = existing.is_some_and(|profile| {
+        profile.token.is_some()
+            && !profile_credentials_match(profile, &base_url, client_instance_id, client_type)
+    });
     let profile = config
         .profiles
         .entry(profile_name.to_string())
@@ -642,6 +800,10 @@ fn upsert_profile_identity(
     profile.client_instance_id = Some(client_instance_id.to_string());
     profile.client_display_name = Some(client_display_name.to_string());
     profile.client_type = Some(client_type.to_string());
+    if credentials_changed {
+        profile.token = None;
+        profile.scopes.clear();
+    }
 }
 
 pub fn resolve_output_format(
@@ -663,20 +825,80 @@ pub fn resolve_output_format(
     Ok(OutputFormat::Json)
 }
 
-/// Read all stdin into a UTF-8 string for JSON, token, or text input.
+/// Read a bounded UTF-8 stream and reject input that exceeds its declared policy.
+fn read_bounded_string(reader: impl Read, max_bytes: u64, description: &str) -> CliResult<String> {
+    let mut bytes = Vec::new();
+    reader
+        .take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| CliError::validation(format!("failed to read {description}: {err}")))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(CliError::validation(format!(
+            "{description} exceeds the {max_bytes} byte limit"
+        )));
+    }
+    String::from_utf8(bytes)
+        .map_err(|err| CliError::validation(format!("{description} is not valid UTF-8: {err}")))
+}
+
+/// Read one bounded UTF-8 input file for JSON or plain-text commands.
+pub fn read_input_file(path: &Path) -> CliResult<String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(|err| CliError::validation(format!("failed to read {}: {err}", path.display())))?;
+    read_bounded_string(file, MAX_INPUT_BYTES, "input file")
+}
+
+/// Read bounded UTF-8 stdin for JSON, token, or text input.
 pub fn read_stdin_string() -> CliResult<String> {
-    let mut buf = String::new();
-    io::stdin()
-        .read_to_string(&mut buf)
-        .map_err(|err| CliError::validation(format!("failed to read stdin: {err}")))?;
-    Ok(buf)
+    read_bounded_string(io::stdin().lock(), MAX_INPUT_BYTES, "stdin")
 }
 
 /// Read a non-empty token from stdin, trimming surrounding whitespace.
 pub fn read_token_from_stdin() -> CliResult<String> {
-    let token = read_stdin_string()?.trim().to_string();
-    if token.is_empty() {
-        return Err(CliError::validation("token read from stdin is empty"));
+    normalize_token(&read_stdin_string()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::{normalize_base_url, normalize_token, read_bounded_string};
+
+    #[test]
+    fn base_url_accepts_only_an_http_origin() {
+        assert_eq!(
+            normalize_base_url(" https://example.com/ ").expect("valid origin"),
+            "https://example.com"
+        );
+        for invalid in [
+            "file:///tmp/api",
+            "https://user:pass@example.com",
+            "https://example.com/api",
+            "https://example.com?target=api",
+            "https://example.com/#fragment",
+        ] {
+            assert!(normalize_base_url(invalid).is_err(), "accepted {invalid}");
+        }
     }
-    Ok(token)
+
+    #[test]
+    fn token_rejects_whitespace_and_non_ascii_values() {
+        assert_eq!(
+            normalize_token(" token-123\n").expect("valid token"),
+            "token-123"
+        );
+        assert!(normalize_token("two tokens").is_err());
+        assert!(normalize_token("令牌").is_err());
+    }
+
+    #[test]
+    fn bounded_reader_rejects_one_byte_over_limit() {
+        assert_eq!(
+            read_bounded_string(Cursor::new(b"1234"), 4, "test").expect("bounded text"),
+            "1234"
+        );
+        assert!(read_bounded_string(Cursor::new(b"12345"), 4, "test").is_err());
+    }
 }

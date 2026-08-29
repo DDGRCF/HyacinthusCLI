@@ -1,14 +1,14 @@
-# 改动说明：Agent 需求能力清单新增按编号延期能力。
+# 改动说明：需求解析能力切换到严格模板默认、先进匹配可选的异步任务接口。
 version: "2026-05-10"
 backend_min_version: "0.1.0"
 capabilities:
   - id: requirements.batch_parse
     title: 批量解析需求
-    description: Agent 专用需求批量解析能力，返回候选记录、置信度、自动提交提示和确认原因。
+    description: Agent 专用异步需求批量解析能力；CLI 自动轮询任务并返回最终候选记录。
     domain: requirements
     command: hyacinthus requirements parse
     method: POST
-    path: /api/v1/agent/requirements/batch-parse
+    path: /api/v1/agent/requirements/batch-parse-jobs
     required_scopes:
       - requirements:parse
     risk_level: read
@@ -18,9 +18,9 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
+      additionalProperties: false
       required:
         - raw_text
       properties:
@@ -47,18 +47,10 @@ capabilities:
             - string
             - "null"
           description: 默认城市。
-        force_ai:
+        advanced_matching:
           type: boolean
           default: false
-          description: 是否强制使用 AI 解析。
-        enable_ai_fallback:
-          type: boolean
-          default: false
-          description: 是否允许 AI fallback。
-        skip_geocode:
-          type: boolean
-          default: false
-          description: 是否跳过地理编码。
+          description: 是否启用先进匹配；默认使用固定字段严格解析。
     response_schema:
       type: object
       required:
@@ -118,8 +110,8 @@ capabilities:
     examples:
       - title: 从文本文件解析需求
         command: hyacinthus requirements parse --file input.txt
-      - title: 跳过地理编码解析
-        command: hyacinthus requirements parse --file input.txt --skip-geocode
+      - title: 启用先进匹配
+        command: hyacinthus requirements parse --file input.txt --advanced-matching
 
   - id: requirements.batch_import
     title: 批量导入需求
@@ -137,7 +129,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -482,7 +473,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -541,7 +531,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -666,7 +655,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       properties: {}
@@ -721,7 +709,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -798,7 +785,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -877,7 +863,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -921,7 +906,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -984,7 +968,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -1047,7 +1030,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       properties: {}
@@ -1105,7 +1087,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -1176,7 +1157,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -1229,7 +1209,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -1318,7 +1297,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       properties: {}
@@ -1329,7 +1307,6 @@ capabilities:
         - subjects
         - grades
         - preferred_modes
-        - batch_force_ai_text_limit
       properties:
         target_roles:
           type: array
@@ -1393,8 +1370,6 @@ capabilities:
                 type: string
               label:
                 type: string
-        batch_force_ai_text_limit:
-          type: integer
     examples:
       - title: 查询需求元数据选项
         command: hyacinthus requirements options
@@ -1415,7 +1390,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       properties:
@@ -1547,7 +1521,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       required:
@@ -1621,7 +1594,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       properties: {}
@@ -1761,7 +1733,7 @@ capabilities:
 
   - id: users.me_update
     title: 更新个人资料
-    description: Agent CLI 更新当前授权用户的显示名、手机号、邮箱、完整 profile、联系微信和教育经历。
+    description: Agent CLI 只更新当前授权用户的显示名、非凭据 profile、联系微信和教育经历；不接受邮箱、手机号或密码等登录凭据。
     domain: users
     command: hyacinthus user update
     method: PUT
@@ -1776,23 +1748,11 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
+      additionalProperties: false
       properties:
         display_name:
-          type:
-            - string
-            - "null"
-        password:
-          type:
-            - string
-            - "null"
-        email:
-          type:
-            - string
-            - "null"
-        phone:
           type:
             - string
             - "null"
@@ -1962,7 +1922,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       properties: {}
@@ -2009,7 +1968,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       properties: {}
@@ -2062,7 +2020,6 @@ capabilities:
     supports_file_upload: false
     min_backend_version: "0.1.0"
     introduced_in: "0.1.0"
-    deprecated: false
     request_schema:
       type: object
       properties:

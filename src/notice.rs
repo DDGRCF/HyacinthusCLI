@@ -1,11 +1,13 @@
-// 改动说明：CLI 版本提醒新增 GitHub Release 检查与每日缓存。
+// 改动说明：版本提醒禁用重定向、限制响应体，并只向官方 GitHub API 发送通用 GitHub token。
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
+use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -15,6 +17,8 @@ const CACHE_FILE_NAME: &str = "notice-cache.json";
 const DEFAULT_REPO: &str = "DDGRCF/HyacinthusCLI";
 const CHECK_INTERVAL_HOURS: i64 = 24;
 const REQUEST_TIMEOUT_SECS: u64 = 2;
+const MAX_RELEASE_RESPONSE_BYTES: u64 = 256 * 1024;
+const MAX_NOTICE_CACHE_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Cached release check result used to avoid contacting GitHub on every command.
@@ -115,25 +119,43 @@ fn env_flag(name: &str) -> bool {
 
 /// Fetch the latest GitHub release and convert it into a cache entry.
 fn fetch_release_cache() -> Option<NoticeCache> {
+    let release_url = reqwest::Url::parse(&release_api_url()).ok()?;
     let client = Client::builder()
+        .redirect(Policy::none())
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .build()
         .ok()?;
     let mut request = client
-        .get(release_api_url())
+        .get(release_url.clone())
         .header(
             "User-Agent",
             concat!("HyacinthusCLI/", env!("CARGO_PKG_VERSION")),
         )
         .header("Accept", "application/vnd.github+json");
-    if let Some(token) = github_token() {
-        request = request.bearer_auth(token);
+    if release_url.scheme() == "https" && release_url.host_str() == Some("api.github.com") {
+        if let Some(token) = github_token() {
+            request = request.bearer_auth(token);
+        }
     }
     let response = request.send().ok()?;
     if !response.status().is_success() {
         return None;
     }
-    let release = response.json::<GithubRelease>().ok()?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_RELEASE_RESPONSE_BYTES)
+    {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    response
+        .take(MAX_RELEASE_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_RELEASE_RESPONSE_BYTES {
+        return None;
+    }
+    let release = serde_json::from_slice::<GithubRelease>(&bytes).ok()?;
     let raw_tag = release.tag_name?;
     let latest = normalize_version(&raw_tag)?;
     Some(NoticeCache {
@@ -209,7 +231,19 @@ fn normalize_version(value: &str) -> Option<String> {
 /// Read a cache entry that is still inside the refresh interval.
 fn read_fresh_cache() -> Option<NoticeCache> {
     let path = cache_path()?;
-    let text = fs::read_to_string(path).ok()?;
+    let metadata = fs::symlink_metadata(&path).ok()?;
+    if metadata.file_type().is_symlink() || metadata.len() > MAX_NOTICE_CACHE_BYTES {
+        return None;
+    }
+    let file = fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(MAX_NOTICE_CACHE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_NOTICE_CACHE_BYTES {
+        return None;
+    }
+    let text = String::from_utf8(bytes).ok()?;
     let cache = serde_json::from_str::<NoticeCache>(&text).ok()?;
     let age = Utc::now().signed_duration_since(cache.checked_at);
     if age.num_hours() < CHECK_INTERVAL_HOURS {

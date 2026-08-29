@@ -3,16 +3,14 @@
     "dry_run": true,
     "request": {
       "body": {
-        "enable_ai_fallback": false,
-        "force_ai": false,
+        "advanced_matching": false,
         "preset_city": null,
         "preset_contact_phone": null,
         "preset_contact_wechat": null,
-        "raw_text": "高一数学，瓯海区，周末上课",
-        "skip_geocode": false
+        "raw_text": "高一数学，瓯海区，周末上课"
       },
       "method": "POST",
-      "path": "/api/v1/agent/requirements/batch-parse"
+      "path": "/api/v1/agent/requirements/batch-parse-jobs"
     }
   },
   "meta": {

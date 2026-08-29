@@ -1,4 +1,4 @@
-// 改动说明：统一输出信封、错误类型和表格格式化补充职责注释。
+// 改动说明：授权错误提示要求本地设备密钥参与安全轮询。
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -135,7 +135,7 @@ impl CliError {
             code: Some("AUTH_REQUIRED".to_string()),
             message: message.into(),
             hint: Some(
-                "open authorize_url or send qr_code_text to the user, then run auth wait --session-id <session_id>"
+                "open authorize_url or send qr_code_text to the user, then run auth wait --session-id <session_id> --device-code <device_code>"
                     .to_string(),
             ),
             detail: Some(detail),
@@ -157,7 +157,7 @@ impl CliError {
             code: Some(code.into()),
             message: message.into(),
             hint: Some(
-                "open authorize_url or send qr_code_text to the user, then retry auth wait --session-id <session_id>"
+                "open authorize_url or send qr_code_text to the user, then retry auth wait --session-id <session_id> --device-code <device_code>"
                     .to_string(),
             ),
             detail: Some(detail),

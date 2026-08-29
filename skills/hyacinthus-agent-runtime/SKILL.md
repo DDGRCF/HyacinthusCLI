@@ -35,9 +35,10 @@ hyacinthus auth status
 - `nullclaw`：NullClaw
 - `hyacinthus-cli`：直接终端 CLI
 
-2. 如果当前 profile 没有 token，或业务命令返回 `AUTH_REQUIRED`，把以下字段转交给用户：
+2. 如果当前 profile 没有 token，或业务命令返回 `AUTH_REQUIRED`，读取以下字段；`device_code` 仅由本地 Agent 保存，其余浏览器授权字段才可转交给用户：
 
 - `session_id`
+- `device_code`（仅保留在本地 Agent，不得转交给用户或放入浏览器 URL）
 - `authorize_url`
 - `qr_code_text`
 - `user_code`
@@ -51,7 +52,7 @@ hyacinthus auth status
 4. 用户确认已授权后，等待同一个 session 并保存凭据：
 
 ```bash
-hyacinthus auth wait --session-id "<session_id>"
+hyacinthus auth wait --session-id "<session_id>" --device-code "<device_code>"
 ```
 
 5. 只有 `token_saved` 为 `true` 后，才能重试原业务命令。
