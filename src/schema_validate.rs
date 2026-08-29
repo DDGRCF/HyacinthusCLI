@@ -1,4 +1,4 @@
-// 改动说明：轻量 JSON Schema 校验器补齐 enum 与 uniqueItems 约束。
+// 改动说明：轻量 JSON Schema 校验器补齐数组 maxItems 约束与嵌套校验。
 use serde_json::Value;
 
 /// JSON Schema primitive types supported by the CLI validator.
@@ -88,6 +88,11 @@ fn validate_schema_at(path: &str, schema: &Value, errors: &mut Vec<String>) {
             errors.push(format!("{path}.uniqueItems must be a boolean"));
         }
     }
+    if let Some(max_items) = object.get("maxItems") {
+        if max_items.as_u64().is_none() {
+            errors.push(format!("{path}.maxItems must be a non-negative integer"));
+        }
+    }
     if let Some(properties) = object.get("properties") {
         match properties.as_object() {
             Some(items) => {
@@ -141,7 +146,7 @@ fn validate_object(path: &str, schema: &Value, value: &Value, errors: &mut Vec<S
     }
 }
 
-/// Validate minItems and item schemas for an array value.
+/// Validate array size, uniqueness, and nested item schemas.
 fn validate_array(path: &str, schema: &Value, value: &Value, errors: &mut Vec<String>) {
     let Some(items) = value.as_array() else {
         return;
@@ -149,6 +154,11 @@ fn validate_array(path: &str, schema: &Value, value: &Value, errors: &mut Vec<St
     if let Some(min_items) = schema.get("minItems").and_then(Value::as_u64) {
         if items.len() < min_items as usize {
             errors.push(format!("{path} item count must be >= {min_items}"));
+        }
+    }
+    if let Some(max_items) = schema.get("maxItems").and_then(Value::as_u64) {
+        if u64::try_from(items.len()).is_ok_and(|item_count| item_count > max_items) {
+            errors.push(format!("{path} item count must be <= {max_items}"));
         }
     }
     if schema.get("uniqueItems").and_then(Value::as_bool) == Some(true) {
@@ -290,6 +300,67 @@ mod tests {
                 "$.ordered_ids items must be unique",
                 "$.target must be one of [\"subjects\", \"grades\"]"
             ]
+        );
+    }
+
+    /// Accepts arrays at the maximum and rejects the first oversized value.
+    #[test]
+    fn validates_max_items_boundaries() {
+        let schema = json!({
+            "type": "array",
+            "maxItems": 2,
+            "items": { "type": "integer" }
+        });
+
+        assert!(validate(&schema, &json!([1, 2])).is_empty());
+        assert_eq!(
+            validate(&schema, &json!([1, 2, 3])),
+            vec!["$ item count must be <= 2"]
+        );
+    }
+
+    /// Applies maxItems recursively to arrays nested inside object-array items.
+    #[test]
+    fn validates_max_items_in_nested_arrays() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "batches": {
+                    "type": "array",
+                    "maxItems": 2,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "rows": {
+                                "type": "array",
+                                "maxItems": 1,
+                                "items": { "type": "integer" }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        assert_eq!(
+            validate(
+                &schema,
+                &json!({"batches": [{"rows": [1, 2]}, {"rows": [3]}]})
+            ),
+            vec!["$.batches[0].rows item count must be <= 1"]
+        );
+    }
+
+    /// Rejects maxItems definitions that are negative or non-integral.
+    #[test]
+    fn rejects_invalid_max_items_schema_definitions() {
+        assert_eq!(
+            validate_schema_definition(&json!({"type": "array", "maxItems": -1})),
+            vec!["$.maxItems must be a non-negative integer"]
+        );
+        assert_eq!(
+            validate_schema_definition(&json!({"type": "array", "maxItems": 1.5})),
+            vec!["$.maxItems must be a non-negative integer"]
         );
     }
 }
