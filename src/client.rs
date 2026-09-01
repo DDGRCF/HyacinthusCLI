@@ -1,4 +1,4 @@
-// 改动说明：HTTP 客户端绑定 API 来源、禁用重定向并限制响应体，避免凭据泄漏和无界内存占用。
+// 改动说明：Agent device flow 使用精确 session 路径与冻结 DTO，命令失败只读顶层 error_code。
 use std::io::Read;
 use std::time::Duration;
 
@@ -21,6 +21,8 @@ const REQUEST_TIMEOUT_SECS: u64 = 60;
 const CONNECT_TIMEOUT_SECS: u64 = 10;
 /// Maximum URL path and query length accepted from built-in or raw commands.
 const MAX_API_PATH_BYTES: usize = 8 * 1024;
+/// Maximum accepted length of the backend's closed machine-readable error code.
+const MAX_ERROR_CODE_BYTES: usize = 128;
 
 #[derive(Debug, Clone)]
 /// Authenticated backend client that injects Agent identity headers.
@@ -29,14 +31,56 @@ pub struct ApiClient {
     context: RuntimeContext,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+/// Agent authorization 支持的封闭 client family。
+pub enum AgentClientType {
+    Claude,
+    Codex,
+    Hermes,
+    #[serde(rename = "hyacinthus-cli")]
+    HyacinthusCli,
+    Nullclaw,
+    Picoclaw,
+}
+
+impl AgentClientType {
+    /// 返回传输与配置比较共用的 canonical client type。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Hermes => "hermes",
+            Self::HyacinthusCli => "hyacinthus-cli",
+            Self::Nullclaw => "nullclaw",
+            Self::Picoclaw => "picoclaw",
+        }
+    }
+}
+
+impl std::fmt::Display for AgentClientType {
+    /// 以 canonical wire value 格式化，拒绝业务层裸字符串分支。
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+/// Device flow 完成后唯一允许的 token type。
+pub enum AgentTokenType {
+    Agent,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 /// Public authorization-session payload returned when a user must approve access.
 pub struct AuthSessionCreated {
     pub session_id: String,
     pub device_code: String,
     pub client_instance_id: String,
     pub client_display_name: String,
-    pub client_type: String,
+    pub client_type: AgentClientType,
     pub user_code: String,
     pub verification_uri: String,
     pub authorize_url: String,
@@ -45,16 +89,18 @@ pub struct AuthSessionCreated {
     pub expires_at: String,
     pub expires_in_seconds: u64,
     pub poll_interval_seconds: u64,
+    pub revision: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 /// Authorization-session status returned while polling or after approval.
 pub struct AuthSessionStatus {
     pub session_id: String,
     pub client_instance_id: String,
     pub client_display_name: String,
-    pub client_type: String,
-    pub status: String,
+    pub client_type: AgentClientType,
+    pub status: AgentAuthSessionState,
     #[serde(default)]
     pub user_code: Option<String>,
     #[serde(default)]
@@ -69,19 +115,141 @@ pub struct AuthSessionStatus {
     pub expires_in_seconds: Option<u64>,
     pub poll_interval_seconds: u64,
     pub access_token: Option<String>,
-    pub token_type: Option<String>,
+    pub token_type: Option<AgentTokenType>,
     pub scopes: Vec<String>,
+    pub revision: u64,
+}
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+/// Agent device authorization 的封闭生命周期状态。
+pub enum AgentAuthSessionState {
+    Approved,
+    Acknowledged,
+    Denied,
+    DeliveryCancelled,
+    DeliveryExpired,
+    Expired,
+    Pending,
+}
+
+impl AgentAuthSessionState {
+    /// 返回后端 JSON 与 CLI 输出共用的 canonical snake_case 值。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Acknowledged => "acknowledged",
+            Self::Denied => "denied",
+            Self::DeliveryCancelled => "delivery_cancelled",
+            Self::DeliveryExpired => "delivery_expired",
+            Self::Expired => "expired",
+            Self::Pending => "pending",
+        }
+    }
+}
+
+impl std::fmt::Display for AgentAuthSessionState {
+    /// 以 canonical 值格式化，避免业务层重新拼接裸字符串。
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// Agent token 落盘后清除服务端可恢复明文的回执。
+pub struct AuthSessionAcknowledged {
+    pub session_id: String,
+    pub revision: u64,
+    pub status: AgentAuthSessionState,
+    pub result: AgentAuthAcknowledgementResult,
+}
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// 区分首次持久 ACK 与同一幂等命令的精确重放。
+pub enum AgentAuthAcknowledgementResult {
+    Acknowledged,
+    AlreadyAcknowledged,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+/// Owner/current Agent grant 的封闭生命周期状态。
+enum AgentGrantState {
+    Active,
+    Expired,
+    Revoked,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+/// Agent grant 撤销主体的封闭类型。
+enum AgentGrantRevocationActorKind {
+    Administrator,
+    Agent,
+    Owner,
+    System,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+/// Agent grant 撤销原因的封闭类型。
+enum AgentGrantRevocationReason {
+    AdministratorRevoked,
+    AgentDeliveryExpired,
+    AgentSelfRevoked,
+    OwnerRevoked,
+    SystemRevoked,
+    UserInvalidated,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+/// Current Agent token 的无 secret 投影。
+struct CurrentAgentGrant {
+    token_id: String,
+    client_instance_id: String,
+    client_type: AgentClientType,
+    scopes: Vec<String>,
+    state: AgentGrantState,
+    expires_at: String,
+    created_at: String,
+    updated_at: String,
+    revoked_at: Option<String>,
+    revocation_actor_kind: Option<AgentGrantRevocationActorKind>,
+    revocation_reason: Option<AgentGrantRevocationReason>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+/// Current Agent token 撤销命令的封闭结果。
+enum AgentGrantRevocationOutcome {
+    AlreadyRevoked,
+    Revoked,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+/// Current Agent token 首次或重复撤销的 typed 结果。
+struct CurrentAgentGrantRevocation {
+    token_id: String,
+    outcome: AgentGrantRevocationOutcome,
+    revoked_at: String,
+    actor_kind: AgentGrantRevocationActorKind,
+    reason: AgentGrantRevocationReason,
 }
 
 /// Validated Rust HTTP response envelope shared by authenticated and public calls.
 struct BackendEnvelope {
     code: i64,
+    error_code: Option<String>,
     data: Value,
     message: String,
     raw: Value,
 }
 
-/// Decode the exact Rust `{ code, message, data }` response shape without permissive defaults.
+/// Decode the exact Rust envelope while keeping optional top-level error_code explicit.
 fn decode_backend_envelope(value: Value) -> CliResult<BackendEnvelope> {
     let object = value.as_object().ok_or_else(|| {
         CliError::api(
@@ -109,6 +277,23 @@ fn decode_backend_envelope(value: Value) -> CliResult<BackendEnvelope> {
             )
         })?
         .to_owned();
+    let error_code = match object.get("error_code") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(error_code))
+            if !error_code.is_empty()
+                && error_code.trim() == error_code
+                && error_code.len() <= MAX_ERROR_CODE_BYTES =>
+        {
+            Some(error_code.clone())
+        }
+        Some(_) => {
+            return Err(CliError::api(
+                "invalid backend response envelope: error_code must be a non-empty bounded string",
+                Some("BACKEND_PROTOCOL_ERROR".to_string()),
+                Some(redacted_detail(value.clone())),
+            ));
+        }
+    };
     let data = object.get("data").cloned().ok_or_else(|| {
         CliError::api(
             "invalid backend response envelope: data field is required",
@@ -118,6 +303,7 @@ fn decode_backend_envelope(value: Value) -> CliResult<BackendEnvelope> {
     })?;
     Ok(BackendEnvelope {
         code,
+        error_code,
         data,
         message,
         raw: value,
@@ -241,18 +427,52 @@ pub fn validate_path_identifier(value: &str, field: &str, max_len: usize) -> Cli
     Ok(())
 }
 
-/// Prefer a structured business code from `data.code`, then use the numeric envelope code.
-fn backend_error_code(envelope: &BackendEnvelope) -> String {
-    envelope
-        .data
-        .get("code")
-        .and_then(|code| {
-            code.as_str()
-                .map(ToOwned::to_owned)
-                .or_else(|| code.as_i64().map(|value| value.to_string()))
-                .or_else(|| code.as_u64().map(|value| value.to_string()))
-        })
-        .unwrap_or_else(|| envelope.code.to_string())
+/// Require the sole machine-readable code on a non-success HTTP response.
+fn required_error_code(envelope: &BackendEnvelope) -> CliResult<String> {
+    envelope.error_code.clone().ok_or_else(|| {
+        CliError::api(
+            "invalid backend error envelope: top-level error_code is required",
+            Some("BACKEND_PROTOCOL_ERROR".to_string()),
+            Some(redacted_detail(envelope.raw.clone())),
+        )
+    })
+}
+
+/// Identify the closed authentication failures that use the CLI authentication exit class.
+fn is_auth_error_code(error_code: &str) -> bool {
+    matches!(
+        error_code,
+        "AUTH_AGENT_INVALID"
+            | "PERMISSION_DENIED"
+            | "AGENT_INSTANCE_MISMATCH"
+            | "MISSING_AGENT_SCOPE"
+    )
+}
+
+/// Convert one non-success HTTP envelope using error_code as the only semantic branch.
+fn backend_failure(envelope: BackendEnvelope) -> CliError {
+    let error_code = match required_error_code(&envelope) {
+        Ok(error_code) => error_code,
+        Err(error) => return error,
+    };
+    let message = envelope.message.clone();
+    let detail = Some(redacted_detail(envelope.raw));
+    if is_auth_error_code(&error_code) {
+        return CliError::backend_auth(message, error_code, detail);
+    }
+    CliError::api(message, Some(error_code), detail)
+}
+
+/// Enforce the success-only half of the envelope contract.
+fn success_data(envelope: BackendEnvelope) -> CliResult<Value> {
+    if envelope.code != 0 || envelope.error_code.is_some() {
+        return Err(CliError::api(
+            "invalid backend success envelope",
+            Some("BACKEND_PROTOCOL_ERROR".to_string()),
+            Some(redacted_detail(envelope.raw)),
+        ));
+    }
+    Ok(envelope.data)
 }
 
 impl ApiClient {
@@ -275,6 +495,27 @@ impl ApiClient {
     /// Run an authenticated PUT request with a JSON body.
     pub fn put(&self, path: &str, body: Value) -> CliResult<Value> {
         self.request("PUT", path, Some(body))
+    }
+
+    /// Run an authenticated DELETE request without a request body.
+    pub fn delete(&self, path: &str) -> CliResult<Value> {
+        self.request("DELETE", path, None)
+    }
+
+    /// 读取并严格验证 canonical current Agent grant。
+    pub fn current_agent_grant(&self) -> CliResult<Value> {
+        strict_contract_value::<CurrentAgentGrant>(
+            self.get("/api/v1/agent/auth/tokens/current")?,
+            "current Agent grant",
+        )
+    }
+
+    /// 撤销 current Agent grant 并验证 revoked/already_revoked 结果。
+    pub fn revoke_current_agent_grant(&self) -> CliResult<Value> {
+        strict_contract_value::<CurrentAgentGrantRevocation>(
+            self.delete("/api/v1/agent/auth/tokens/current")?,
+            "current Agent grant revocation",
+        )
     }
 
     /// Run an authenticated request for the guarded raw API command.
@@ -328,25 +569,26 @@ impl ApiClient {
             .map_err(|err| CliError::network(format!("request failed: {err}")))?;
         let (status, envelope) = decode_response(response)?;
         if !(200..300).contains(&status) {
-            let message = envelope.message.clone();
-            if status == 401 || status == 403 {
-                return Err(CliError::auth(message));
-            }
-            return Err(CliError::api(
-                message,
-                Some(backend_error_code(&envelope)),
-                Some(redacted_detail(envelope.raw)),
-            ));
+            return Err(backend_failure(envelope));
         }
-        if envelope.code != 0 {
-            return Err(CliError::api(
-                envelope.message.clone(),
-                Some(backend_error_code(&envelope)),
-                Some(redacted_detail(envelope.raw)),
-            ));
-        }
-        Ok(envelope.data)
+        success_data(envelope)
     }
+}
+
+/// 将后端 data 按 deny_unknown_fields DTO 验证后重新转为输出 JSON。
+fn strict_contract_value<T>(value: Value, label: &str) -> CliResult<Value>
+where
+    T: for<'de> Deserialize<'de> + Serialize,
+{
+    let decoded = serde_json::from_value::<T>(value).map_err(|error| {
+        CliError::api(
+            format!("invalid {label} response: {error}"),
+            Some("BACKEND_PROTOCOL_ERROR".to_string()),
+            None,
+        )
+    })?;
+    serde_json::to_value(decoded)
+        .map_err(|error| CliError::internal(format!("failed to encode {label}: {error}")))
 }
 
 /// Create a public authorization session before an Agent token exists.
@@ -356,6 +598,7 @@ pub fn create_auth_session(
     client_instance_id: &str,
     client_display_name: &str,
     client_type: &str,
+    request_id: &str,
 ) -> CliResult<AuthSessionCreated> {
     let body = json!({
         "scopes": scopes,
@@ -363,10 +606,16 @@ pub fn create_auth_session(
         "client_display_name": client_display_name,
         "client_type": client_type
     });
-    public_request(base_url, "POST", "/api/v1/agent/auth/sessions", Some(body))
+    public_request(
+        base_url,
+        "POST",
+        "/api/v1/agent/auth/sessions",
+        Some(body),
+        Some(request_id),
+    )
 }
 
-/// Poll the current authorization-session state with its device-only secret.
+/// Poll the exact authorization-session state with its path identity and device-only secret.
 pub fn poll_auth_session(
     base_url: &str,
     session_id: &str,
@@ -378,6 +627,7 @@ pub fn poll_auth_session(
         "POST",
         &format!("/api/v1/agent/auth/sessions/{session_id}/poll"),
         Some(json!({ "device_code": device_code })),
+        None,
     )
 }
 
@@ -386,13 +636,19 @@ pub fn acknowledge_auth_session(
     base_url: &str,
     session_id: &str,
     device_code: &str,
-) -> CliResult<Value> {
+    expected_revision: u64,
+    request_id: &str,
+) -> CliResult<AuthSessionAcknowledged> {
     validate_path_identifier(session_id, "session_id", 128)?;
     public_request(
         base_url,
         "POST",
         &format!("/api/v1/agent/auth/sessions/{session_id}/ack"),
-        Some(json!({ "device_code": device_code })),
+        Some(json!({
+            "device_code": device_code,
+            "expected_revision": expected_revision
+        })),
+        Some(request_id),
     )
 }
 
@@ -401,6 +657,7 @@ fn public_request<T: for<'de> Deserialize<'de>>(
     method: &str,
     path: &str,
     body: Option<Value>,
+    request_id: Option<&str>,
 ) -> CliResult<T> {
     // Authorization session endpoints are public because no Agent token exists yet.
     let client = build_http_client()?;
@@ -418,6 +675,14 @@ fn public_request<T: for<'de> Deserialize<'de>>(
         "User-Agent",
         concat!("HyacinthusCLI/", env!("CARGO_PKG_VERSION")),
     );
+    let builder = if let Some(request_id) = request_id {
+        let request_id = Uuid::parse_str(request_id)
+            .map_err(|_| CliError::validation("auth command request id must be a UUID"))?
+            .to_string();
+        builder.header("Idempotency-Key", request_id)
+    } else {
+        builder
+    };
     let builder = if let Some(body) = body {
         builder.json(&body)
     } else {
@@ -428,20 +693,9 @@ fn public_request<T: for<'de> Deserialize<'de>>(
         .map_err(|err| CliError::network(format!("request failed: {err}")))?;
     let (status, envelope) = decode_response(response)?;
     if !(200..300).contains(&status) {
-        return Err(CliError::api(
-            envelope.message.clone(),
-            Some(backend_error_code(&envelope)),
-            Some(redacted_detail(envelope.raw)),
-        ));
+        return Err(backend_failure(envelope));
     }
-    if envelope.code != 0 {
-        return Err(CliError::api(
-            envelope.message.clone(),
-            Some(backend_error_code(&envelope)),
-            Some(redacted_detail(envelope.raw)),
-        ));
-    }
-    serde_json::from_value(envelope.data)
+    serde_json::from_value(success_data(envelope)?)
         .map_err(|err| CliError::api(format!("invalid auth session response: {err}"), None, None))
 }
 
@@ -449,7 +703,7 @@ fn public_request<T: for<'de> Deserialize<'de>>(
 mod tests {
     use serde_json::json;
 
-    use super::{backend_error_code, decode_backend_envelope, validate_api_path};
+    use super::{decode_backend_envelope, required_error_code, success_data, validate_api_path};
 
     /// Ensures a success response cannot silently omit canonical envelope fields.
     #[test]
@@ -466,19 +720,47 @@ mod tests {
         }
     }
 
-    /// Ensures structured data codes replace scalar detail as the business error contract.
+    /// Ensures only the top-level error_code is accepted as the backend error contract.
     #[test]
-    fn reads_structured_business_error_code() {
+    fn reads_only_top_level_error_code() {
         let envelope = decode_backend_envelope(json!({
             "code": 4290,
+            "error_code": "REQUIREMENT_COPY_LIMIT_EXCEEDED",
             "message": "quota exceeded",
-            "data": {"code": "REQUIREMENT_COPY_LIMIT_EXCEEDED"}
+            "data": {"code": "LEGACY_CODE"}
         }))
         .expect("canonical envelope");
         assert_eq!(
-            backend_error_code(&envelope),
+            required_error_code(&envelope).expect("top-level error code"),
             "REQUIREMENT_COPY_LIMIT_EXCEEDED"
         );
+    }
+
+    /// Ensures numeric code, message, and data.code cannot act as compatibility fallbacks.
+    #[test]
+    fn rejects_legacy_error_code_fallbacks() {
+        let envelope = decode_backend_envelope(json!({
+            "code": 4010,
+            "message": "AUTH_SESSION_REVOKED",
+            "data": {"code": "AUTH_SESSION_REVOKED"}
+        }))
+        .expect("shape remains decodable");
+
+        let error = required_error_code(&envelope).expect_err("error_code must be required");
+        assert_eq!(error.code.as_deref(), Some("BACKEND_PROTOCOL_ERROR"));
+    }
+
+    /// Ensures 2xx responses cannot smuggle an error code or nonzero numeric code.
+    #[test]
+    fn rejects_ambiguous_success_envelopes() {
+        for envelope in [
+            json!({"code": 1, "message": "failure", "data": null}),
+            json!({"code": 0, "error_code": "SHOULD_NOT_EXIST", "message": "success", "data": {}}),
+        ] {
+            let error = success_data(decode_backend_envelope(envelope).expect("envelope"))
+                .expect_err("must reject ambiguous success");
+            assert_eq!(error.code.as_deref(), Some("BACKEND_PROTOCOL_ERROR"));
+        }
     }
 
     #[test]

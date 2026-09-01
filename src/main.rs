@@ -1,6 +1,7 @@
-// 改动说明：CLI 入口补充启动流程注释。
+// 改动说明：CLI 入口注册隐藏的 pointer-fenced Claw runtime guard。
 #![allow(clippy::result_large_err)]
 
+mod claw_guard;
 mod cli;
 mod client;
 mod commands;

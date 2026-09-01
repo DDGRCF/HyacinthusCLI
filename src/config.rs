@@ -1,4 +1,4 @@
-// 改动说明：配置与输入改为有界读取、原子私有写入，并将已保存凭据绑定到 profile 的后端来源。
+// 改动说明：0600 Agent pending-auth 持久化 create/ack 命令键与 poll 返回的最新 revision。
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -18,6 +18,10 @@ const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 pub const MAX_INPUT_BYTES: u64 = 8 * 1024 * 1024;
 /// Maximum Agent token size accepted from environment, argv, stdin, or config.
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
+/// Maximum private pending-auth document size accepted from disk.
+const MAX_PENDING_AUTH_BYTES: u64 = 64 * 1024;
+/// Maximum one-time Agent device secret accepted from stdin/backend.
+const MAX_DEVICE_SECRET_BYTES: usize = 1024;
 
 /// Agent client types accepted by backend authorization and profile identity.
 pub const SUPPORTED_CLIENT_TYPES: &[&str] = &[
@@ -91,6 +95,42 @@ pub struct AuthStatusContext {
     pub raw_api_enabled: bool,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+/// Private handoff state used to poll and acknowledge one Agent authorization session.
+pub struct PendingAgentAuth {
+    pub version: u8,
+    pub profile_name: String,
+    pub base_url: String,
+    pub client_instance_id: String,
+    pub client_display_name: String,
+    pub client_type: String,
+    pub session_id: String,
+    pub device_code: String,
+    pub expires_at: String,
+    pub revision: u64,
+    pub pending_ack: Option<PendingAgentAuthAck>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+/// 在 ack 网络请求前持久化的幂等命令。
+pub struct PendingAgentAuthAck {
+    pub request_id: String,
+    pub expected_revision: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+/// 服务端尚未返回 session 时的可恢复 create 命令。
+pub struct PendingAgentAuthCreate {
+    pub version: u8,
+    pub profile_name: String,
+    pub base_url: String,
+    pub client_instance_id: String,
+    pub client_display_name: String,
+    pub client_type: String,
+    pub scopes: Vec<String>,
+    pub request_id: String,
+}
+
 /// Resolve the config file path from `HYACINTHUS_CONFIG_DIR` or `$HOME/.config`.
 pub fn config_path() -> CliResult<PathBuf> {
     if let Ok(dir) = env::var("HYACINTHUS_CONFIG_DIR") {
@@ -152,6 +192,264 @@ pub fn save_config(config: &ConfigFile) -> CliResult<()> {
     let text = serde_json::to_string_pretty(config)
         .map_err(|err| CliError::internal(format!("failed to serialize config: {err}")))?;
     write_config_atomically(&path, text.as_bytes())
+}
+
+/// Resolve the default or explicitly selected private pending-auth path for a profile.
+pub fn pending_auth_path(profile_name: &str, override_path: Option<&Path>) -> CliResult<PathBuf> {
+    if let Some(path) = override_path {
+        if path.as_os_str().is_empty() {
+            return Err(CliError::validation("pending-state path must not be empty"));
+        }
+        return Ok(path.to_path_buf());
+    }
+    let config = config_path()?;
+    let parent = config
+        .parent()
+        .ok_or_else(|| CliError::validation("config path has no parent directory"))?;
+    Ok(parent
+        .join("pending-auth")
+        .join(format!("{}.json", sanitize_profile_part(profile_name))))
+}
+
+/// 将 create 恢复文件放在 session pending 文件旁，避免覆盖已签发的 device secret。
+pub fn pending_auth_create_path(session_path: &Path) -> CliResult<PathBuf> {
+    let parent = session_path
+        .parent()
+        .ok_or_else(|| CliError::validation("pending auth path has no parent directory"))?;
+    let name = session_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| CliError::validation("pending auth path has no valid file name"))?;
+    Ok(parent.join(format!("{name}.create")))
+}
+
+/// 在首次 create HTTP 前原子持久化完整 payload 与幂等键。
+pub fn save_pending_agent_auth_create(
+    pending: &PendingAgentAuthCreate,
+    path: &Path,
+) -> CliResult<()> {
+    validate_pending_agent_auth_create(pending)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            CliError::validation(format!(
+                "failed to create pending-auth directory {}: {err}",
+                parent.display()
+            ))
+        })?;
+    }
+    let bytes = serde_json::to_vec(pending)
+        .map_err(|err| CliError::internal(format!("failed to serialize pending create: {err}")))?;
+    write_config_atomically(path, &bytes)
+}
+
+/// 读取并校验一个 0600 create 恢复命令。
+pub fn load_pending_agent_auth_create(path: &Path) -> CliResult<PendingAgentAuthCreate> {
+    let metadata = fs::symlink_metadata(path).map_err(|err| {
+        CliError::validation(format!(
+            "failed to inspect pending create {}: {err}",
+            path.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CliError::validation(format!(
+            "pending create must be a regular file: {}",
+            path.display()
+        )));
+    }
+    validate_private_file_permissions(path, &metadata)?;
+    if metadata.len() > MAX_PENDING_AUTH_BYTES {
+        return Err(CliError::validation("pending create exceeds size limit"));
+    }
+    let file = OpenOptions::new().read(true).open(path).map_err(|err| {
+        CliError::validation(format!(
+            "failed to read pending create {}: {err}",
+            path.display()
+        ))
+    })?;
+    let text = read_bounded_string(file, MAX_PENDING_AUTH_BYTES, "pending auth create")?;
+    let pending = serde_json::from_str::<PendingAgentAuthCreate>(&text).map_err(|err| {
+        CliError::validation(format!(
+            "failed to parse pending create {}: {err}",
+            path.display()
+        ))
+    })?;
+    validate_pending_agent_auth_create(&pending)?;
+    Ok(pending)
+}
+
+/// 成功获得 session 后删除 create 恢复文件。
+pub fn remove_pending_agent_auth_create(path: &Path) -> CliResult<()> {
+    remove_private_pending_file(path, "pending create")
+}
+
+/// Persist one device secret in a private, atomically published pending-auth file.
+pub fn save_pending_agent_auth(
+    pending: &PendingAgentAuth,
+    override_path: Option<&Path>,
+) -> CliResult<PathBuf> {
+    validate_pending_agent_auth(pending)?;
+    let path = pending_auth_path(&pending.profile_name, override_path)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            CliError::validation(format!(
+                "failed to create pending-auth directory {}: {err}",
+                parent.display()
+            ))
+        })?;
+    }
+    let bytes = serde_json::to_vec(pending)
+        .map_err(|err| CliError::internal(format!("failed to serialize pending auth: {err}")))?;
+    write_config_atomically(&path, &bytes)?;
+    Ok(path)
+}
+
+/// Load and validate one regular 0600 pending-auth file without following symlinks.
+pub fn load_pending_agent_auth(path: &Path) -> CliResult<PendingAgentAuth> {
+    let metadata = fs::symlink_metadata(path).map_err(|err| {
+        CliError::validation(format!(
+            "failed to inspect pending state {}: {err}",
+            path.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CliError::validation(format!(
+            "pending state must be a regular file: {}",
+            path.display()
+        )));
+    }
+    validate_private_file_permissions(path, &metadata)?;
+    if metadata.len() > MAX_PENDING_AUTH_BYTES {
+        return Err(CliError::validation(format!(
+            "pending state exceeds {MAX_PENDING_AUTH_BYTES} bytes"
+        )));
+    }
+    let file = OpenOptions::new().read(true).open(path).map_err(|err| {
+        CliError::validation(format!(
+            "failed to read pending state {}: {err}",
+            path.display()
+        ))
+    })?;
+    let text = read_bounded_string(file, MAX_PENDING_AUTH_BYTES, "pending auth state")?;
+    let pending: PendingAgentAuth = serde_json::from_str(&text).map_err(|err| {
+        CliError::validation(format!(
+            "failed to parse pending state {}: {err}",
+            path.display()
+        ))
+    })?;
+    validate_pending_agent_auth(&pending)?;
+    Ok(pending)
+}
+
+/// Remove a consumed pending-auth file while refusing a substituted symlink.
+pub fn remove_pending_agent_auth(path: &Path) -> CliResult<()> {
+    remove_private_pending_file(path, "pending state")
+}
+
+/// 删除一个不跟随符号链接的私有 pending 文件。
+fn remove_private_pending_file(path: &Path, label: &str) -> CliResult<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(CliError::validation(format!(
+                "failed to inspect pending state {}: {err}",
+                path.display()
+            )))
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CliError::validation(format!(
+            "{label} must be a regular file: {}",
+            path.display()
+        )));
+    }
+    fs::remove_file(path).map_err(|err| {
+        CliError::validation(format!(
+            "failed to remove pending state {}: {err}",
+            path.display()
+        ))
+    })
+}
+
+/// Validate pending state version, identities, URL, session and secret before network use.
+fn validate_pending_agent_auth(pending: &PendingAgentAuth) -> CliResult<()> {
+    if pending.version != 2 {
+        return Err(CliError::validation(
+            "unsupported pending auth state version",
+        ));
+    }
+    if pending.profile_name.trim().is_empty()
+        || pending.client_instance_id.trim().is_empty()
+        || pending.client_display_name.trim().is_empty()
+    {
+        return Err(CliError::validation(
+            "pending auth state is missing profile or client identity",
+        ));
+    }
+    normalize_base_url(&pending.base_url)?;
+    normalize_client_type(&pending.client_type)?;
+    normalize_device_secret(&pending.device_code)?;
+    if pending.revision == 0 {
+        return Err(CliError::validation(
+            "pending auth revision must be positive",
+        ));
+    }
+    if let Some(command) = &pending.pending_ack {
+        if command.expected_revision != pending.revision
+            || Uuid::parse_str(&command.request_id).is_err()
+        {
+            return Err(CliError::validation(
+                "pending auth command must match revision and contain a UUID request id",
+            ));
+        }
+    }
+    if pending.session_id.is_empty()
+        || pending.session_id.len() > 128
+        || !pending
+            .session_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(CliError::validation(
+            "session_id must be 1-128 ASCII letters, digits, hyphens, or underscores",
+        ));
+    }
+    Ok(())
+}
+
+/// 校验 create 命令与当前 Agent 安装身份绑定。
+fn validate_pending_agent_auth_create(pending: &PendingAgentAuthCreate) -> CliResult<()> {
+    if pending.version != 2
+        || pending.profile_name.trim().is_empty()
+        || pending.client_instance_id.trim().is_empty()
+        || pending.client_display_name.trim().is_empty()
+        || Uuid::parse_str(&pending.request_id).is_err()
+    {
+        return Err(CliError::validation("invalid pending auth create command"));
+    }
+    normalize_base_url(&pending.base_url)?;
+    normalize_client_type(&pending.client_type)?;
+    Ok(())
+}
+
+/// Enforce owner-only permissions for private pending state on Unix.
+#[cfg(unix)]
+fn validate_private_file_permissions(path: &Path, metadata: &fs::Metadata) -> CliResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if metadata.permissions().mode() & 0o077 != 0 {
+        return Err(CliError::validation(format!(
+            "pending state must have 0600 permissions: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Keep the private-file validation hook portable on non-Unix systems.
+#[cfg(not(unix))]
+fn validate_private_file_permissions(_path: &Path, _metadata: &fs::Metadata) -> CliResult<()> {
+    Ok(())
 }
 
 /// Write a same-directory private temporary file and atomically publish it as config.
@@ -317,6 +615,22 @@ pub fn normalize_token(raw: &str) -> CliResult<String> {
         ));
     }
     Ok(token.to_string())
+}
+
+/// Normalize the one-time Agent device secret without ever rendering it in output.
+pub fn normalize_device_secret(raw: &str) -> CliResult<String> {
+    let secret = raw.trim();
+    if secret.is_empty() || secret.len() > MAX_DEVICE_SECRET_BYTES {
+        return Err(CliError::validation(format!(
+            "device secret must be 1-{MAX_DEVICE_SECRET_BYTES} bytes"
+        )));
+    }
+    if !secret.is_ascii() || secret.chars().any(char::is_whitespace) {
+        return Err(CliError::validation(
+            "device secret must be one ASCII value without whitespace",
+        ));
+    }
+    Ok(secret.to_string())
 }
 
 /// Resolve base URL precedence: flag, env, profile, then production default.
@@ -858,6 +1172,11 @@ pub fn read_stdin_string() -> CliResult<String> {
 /// Read a non-empty token from stdin, trimming surrounding whitespace.
 pub fn read_token_from_stdin() -> CliResult<String> {
     normalize_token(&read_stdin_string()?)
+}
+
+/// Read one bounded Agent device secret from stdin so it never appears in argv.
+pub fn read_device_secret_from_stdin() -> CliResult<String> {
+    normalize_device_secret(&read_stdin_string()?)
 }
 
 #[cfg(test)]

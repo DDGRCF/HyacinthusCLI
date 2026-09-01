@@ -1,4 +1,4 @@
-// 改动说明：授权错误提示要求本地设备密钥参与安全轮询。
+// 改动说明：认证错误保留后端顶层 error_code，供 Agent token 命令稳定分类。
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -78,6 +78,26 @@ impl CliError {
         }
     }
 
+    /// Create an authentication error carrying the canonical backend error_code.
+    pub fn backend_auth(
+        message: impl Into<String>,
+        code: impl Into<String>,
+        detail: Option<Value>,
+    ) -> Self {
+        Self {
+            exit_code: EXIT_AUTH,
+            error_type: "auth",
+            code: Some(code.into()),
+            message: message.into(),
+            hint: Some(
+                "configure HYACINTHUS_AGENT_TOKEN or run `hyacinthus config set-token`".to_string(),
+            ),
+            detail,
+            risk: None,
+            retryable: false,
+        }
+    }
+
     /// Create a retryable network error.
     pub fn network(message: impl Into<String>) -> Self {
         Self {
@@ -135,7 +155,7 @@ impl CliError {
             code: Some("AUTH_REQUIRED".to_string()),
             message: message.into(),
             hint: Some(
-                "open authorize_url or send qr_code_text to the user, then run auth wait --session-id <session_id> --device-code <device_code>"
+                "open authorize_url or send qr_code_text to the user, then run `hyacinthus auth wait` using the saved private pending state"
                     .to_string(),
             ),
             detail: Some(detail),
@@ -157,7 +177,7 @@ impl CliError {
             code: Some(code.into()),
             message: message.into(),
             hint: Some(
-                "open authorize_url or send qr_code_text to the user, then retry auth wait --session-id <session_id> --device-code <device_code>"
+                "open authorize_url or send qr_code_text to the user, then retry `hyacinthus auth wait`; use --device-secret-stdin only for an explicit handoff"
                     .to_string(),
             ),
             detail: Some(detail),

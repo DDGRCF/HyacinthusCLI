@@ -1,4 +1,4 @@
-// 改动说明：敏感字段脱敏工具补充职责注释。
+// 改动说明：敏感字段脱敏覆盖 Agent device code/secret 与 token 凭据。
 use serde_json::Value;
 
 /// Key fragments treated as sensitive when rendering dry-run or config output.
@@ -11,6 +11,8 @@ const SENSITIVE_MARKERS: &[&str] = &[
     "agent_key",
     "access_key",
     "x-agent-key",
+    "device_code",
+    "device_secret",
 ];
 
 /// Redact sensitive values recursively in JSON objects and arrays.

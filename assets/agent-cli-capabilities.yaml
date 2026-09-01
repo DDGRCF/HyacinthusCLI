@@ -1952,7 +1952,7 @@ capabilities:
 
   - id: claw.status
     title: Claw 运行状态
-    description: Agent 专用 Claw 只读状态查询能力，返回非敏感 host 与 provider profile 摘要。
+    description: Agent 专用 Claw 只读状态查询能力，返回非敏感 Broker activation/observation 汇总。
     domain: claw
     command: hyacinthus claw status
     method: GET
@@ -1972,32 +1972,34 @@ capabilities:
     response_schema:
       type: object
       required:
-        - host
+        - provider
+        - control_plane
+        - activated_instance_count
+        - current_observation_count
+        - attention_instance_count
+        - unobserved_instance_count
         - provider_profile_count
       properties:
-        host:
-          type: object
-          required:
-            - provider
-            - running
-            - instance_count
-          properties:
-            provider:
-              type: string
-            running:
-              type: boolean
-            status:
-              type:
-                - string
-                - "null"
-            image:
-              type:
-                - string
-                - "null"
-            instance_count:
-              type: integer
+        provider:
+          type: string
+        control_plane:
+          type: string
+          enum: [broker]
+        activated_instance_count:
+          type: integer
+          minimum: 0
+        current_observation_count:
+          type: integer
+          minimum: 0
+        attention_instance_count:
+          type: integer
+          minimum: 0
+        unobserved_instance_count:
+          type: integer
+          minimum: 0
         provider_profile_count:
           type: integer
+          minimum: 0
     examples:
       - title: 查询 Claw 运行状态
         command: hyacinthus claw status

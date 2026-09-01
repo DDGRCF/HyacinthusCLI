@@ -1,4 +1,4 @@
-// 改动说明：CLI doctor 仅验证当前闭合能力清单，不再维护 deprecated 兼容摘要。
+// 改动说明：Agent create/poll/ack 持久化 session、幂等键与 revision，确保跨进程断链恢复。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -11,8 +11,8 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::cli::{
-    AdminSubcommand, AuthLoginArgs, AuthSubcommand, AuthWaitArgs, CapabilitySubcommand,
-    ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand,
+    AdminSubcommand, AuthLoginArgs, AuthSubcommand, AuthTokenSubcommand, AuthWaitArgs,
+    CapabilitySubcommand, ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand,
     RequirementsCatalogCreateMissingArgs, RequirementsCatalogReorderArgs,
     RequirementsCatalogSubcommand, RequirementsExtendArgs, RequirementsImportArgs,
     RequirementsImportRawArgs, RequirementsParseArgs, RequirementsPriorityRuleAddArgs,
@@ -34,6 +34,12 @@ use crate::skills;
 
 /// Execute the parsed CLI command and print the standard success or error envelope.
 pub fn run(cli: Cli) -> i32 {
+    if let Command::ClawRuntimeGuard(args) = &cli.command {
+        return crate::claw_guard::run(args);
+    }
+    if let Command::ClawRuntimeProbe(args) = &cli.command {
+        return crate::claw_guard::run_probe(args);
+    }
     if let Command::Completion(args) = &cli.command {
         if let Err(err) = completion_command(&args.shell) {
             return output::print_error(
@@ -102,6 +108,12 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
         },
         Command::Skills(command) => skills_command(&command.command),
         Command::Completion(_) => unreachable!("completion is handled before envelope output"),
+        Command::ClawRuntimeGuard(_) => {
+            unreachable!("runtime guard command is handled before user configuration")
+        }
+        Command::ClawRuntimeProbe(_) => {
+            unreachable!("runtime probe command is handled before user configuration")
+        }
     }
 }
 
@@ -436,26 +448,110 @@ fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)
                 json!({ "command": "auth scopes" }),
             ))
         }
-        AuthSubcommand::Logout => {
-            let mut config = config::load_config()?;
-            let profile_name = cli
-                .profile
-                .clone()
-                .or(config.active_profile.clone())
-                .ok_or_else(|| CliError::validation("no profile selected"))?;
-            let profile = config
-                .profiles
-                .get_mut(&profile_name)
-                .ok_or_else(|| CliError::validation(format!("unknown profile: {profile_name}")))?;
-            profile.token = None;
-            profile.scopes.clear();
-            config::save_config(&config)?;
-            Ok((
-                json!({ "profile": profile_name, "token_present": false, "scope_count": 0 }),
-                json!({ "command": "auth logout" }),
-            ))
+        AuthSubcommand::Token(command) => auth_token_command(cli, &command.command),
+        AuthSubcommand::Logout(args) => logout_agent_token(cli, args.local_only, "auth logout"),
+    }
+}
+
+/// Query or revoke the current bound Agent token through its canonical endpoint.
+fn auth_token_command(cli: &Cli, command: &AuthTokenSubcommand) -> CliResult<(Value, Value)> {
+    match command {
+        AuthTokenSubcommand::Status => {
+            let ctx = config::resolve_context(
+                cli.profile.as_deref(),
+                cli.base_url.as_deref(),
+                cli.instance_id,
+                cli.request_id.as_deref(),
+            )?;
+            match ApiClient::new(ctx)?.current_agent_grant() {
+                Ok(data) => Ok((data, json!({ "command": "auth token status" }))),
+                Err(mut error) if error.code.as_deref() == Some("AUTH_AGENT_INVALID") => {
+                    let profile_name = clear_local_agent_credentials(cli)?;
+                    error.detail = Some(json!({
+                        "profile": profile_name,
+                        "credentials_cleared": true,
+                        "token_present": false
+                    }));
+                    error.hint = Some(
+                        "the Agent credential is terminal and was removed; run `hyacinthus auth login` to authorize again"
+                            .to_string(),
+                    );
+                    Err(error)
+                }
+                Err(error) => Err(error),
+            }
+        }
+        AuthTokenSubcommand::Revoke => logout_agent_token(cli, false, "auth token revoke"),
+    }
+}
+
+/// Revoke the current remote Agent token before clearing profile credentials unless local-only.
+fn logout_agent_token(
+    cli: &Cli,
+    local_only: bool,
+    command_name: &str,
+) -> CliResult<(Value, Value)> {
+    let mut remote_terminal = false;
+    if !local_only {
+        let ctx = config::resolve_context(
+            cli.profile.as_deref(),
+            cli.base_url.as_deref(),
+            cli.instance_id,
+            cli.request_id.as_deref(),
+        )?;
+        if let Err(mut error) = ApiClient::new(ctx)?.revoke_current_agent_grant() {
+            if error.code.as_deref() == Some("AUTH_AGENT_INVALID") {
+                remote_terminal = true;
+            } else {
+                if error.exit_code == output::EXIT_NETWORK {
+                    error.detail = Some(json!({
+                        "authenticated": true,
+                        "acknowledgement_pending": true,
+                        "remote_revocation_pending": true,
+                        "local_credentials_retained": true
+                    }));
+                    error.hint = Some(
+                        "remote revocation was not acknowledged; retry logout or use --local-only explicitly"
+                            .to_string(),
+                    );
+                }
+                return Err(error);
+            }
         }
     }
+    let profile_name = clear_local_agent_credentials(cli)?;
+    Ok((
+        json!({
+            "profile": profile_name,
+            "authenticated": false,
+            "token_present": false,
+            "scope_count": 0,
+            "remote_revoked": !local_only && !remote_terminal,
+            "remote_terminal": remote_terminal,
+            "local_only": local_only
+        }),
+        json!({ "command": command_name }),
+    ))
+}
+
+/// Clear one selected profile only after remote revocation succeeds or local-only is explicit.
+fn clear_local_agent_credentials(cli: &Cli) -> CliResult<String> {
+    let mut file = config::load_config()?;
+    let profile_name = cli
+        .profile
+        .clone()
+        .or(file.active_profile.clone())
+        .ok_or_else(|| CliError::validation("no profile selected"))?;
+    let profile = file
+        .profiles
+        .get_mut(&profile_name)
+        .ok_or_else(|| CliError::validation(format!("unknown profile: {profile_name}")))?;
+    profile.token = None;
+    profile.scopes.clear();
+    config::save_config(&file)?;
+    let pending_path = config::pending_auth_path(&profile_name, None)?;
+    config::remove_pending_agent_auth(&pending_path)?;
+    Ok(profile_name)
 }
 
 /// Start an authorization session and optionally wait until approval saves the token.
@@ -471,39 +567,44 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
         .as_deref()
         .map(config::parse_scope_list)
         .unwrap_or_default();
-    let session = client::create_auth_session(
-        &ctx.base_url,
-        &requested_scopes,
-        &ctx.client_instance_id,
-        &ctx.client_display_name,
-        &ctx.client_type,
-    )?;
-    let mut status = None;
-    if args.wait {
-        status = Some(wait_for_auth_session(
+    let (session, mut pending, pending_path) =
+        create_persisted_auth_session(&ctx, &requested_scopes, args.pending_state.as_deref())?;
+    let outcome = if args.wait {
+        Some(wait_for_auth_session(
             &ctx,
-            &session.session_id,
-            &session.device_code,
+            &mut pending,
+            &pending_path,
             args.poll_limit,
             Some(&session),
-        )?);
-    }
-    let data = if let Some(status) = status {
+        )?)
+    } else {
+        None
+    };
+    let data = if let Some(outcome) = outcome {
+        let status = outcome.status;
         json!({
             "session_id": session.session_id,
             "status": status.status,
+            "authenticated": true,
+            "acknowledgement_pending": outcome.acknowledgement_pending,
             "authorize_url": session.authorize_url,
             "qr_code_text": session.qr_code_text,
             "user_code": session.user_code,
             "required_scopes": session.required_scopes,
-            "token_saved": status.access_token.is_some(),
-            "scopes": status.scopes
+            "token_saved": outcome.token_saved,
+            "scopes": status.scopes,
+            "pending_state": if outcome.acknowledgement_pending {
+                Some(pending_path.display().to_string())
+            } else {
+                None
+            }
         })
     } else {
         json!({
             "session_id": session.session_id,
-            "device_code": session.device_code,
             "status": "pending",
+            "authenticated": false,
+            "acknowledgement_pending": false,
             "authorize_url": session.authorize_url,
             "qr_code_text": session.qr_code_text,
             "user_code": session.user_code,
@@ -512,7 +613,8 @@ fn auth_login(cli: &Cli, args: &AuthLoginArgs, command_name: &str) -> CliResult<
             "expires_at": session.expires_at,
             "expires_in_seconds": session.expires_in_seconds,
             "poll_interval_seconds": session.poll_interval_seconds,
-            "token_saved": false
+            "token_saved": false,
+            "pending_state": pending_path.display().to_string()
         })
     };
     Ok((
@@ -533,20 +635,59 @@ fn auth_wait(cli: &Cli, args: &AuthWaitArgs) -> CliResult<(Value, Value)> {
         cli.instance_id,
         cli.request_id.as_deref(),
     )?;
-    let status = wait_for_auth_session(
-        &ctx,
-        &args.session_id,
-        &args.device_code,
-        args.poll_limit,
-        None,
-    )?;
+    let pending_path = config::pending_auth_path(&ctx.profile_name, args.pending_state.as_deref())?;
+    let pending = if args.device_secret_stdin {
+        let session_id = args.session_id.as_deref().ok_or_else(|| {
+            CliError::validation("--session-id is required with --device-secret-stdin")
+        })?;
+        let revision = args.expected_revision.ok_or_else(|| {
+            CliError::validation("--expected-revision is required with --device-secret-stdin")
+        })?;
+        let pending = config::PendingAgentAuth {
+            version: 2,
+            profile_name: ctx.profile_name.clone(),
+            base_url: ctx.base_url.clone(),
+            client_instance_id: ctx.client_instance_id.clone(),
+            client_display_name: ctx.client_display_name.clone(),
+            client_type: ctx.client_type.clone(),
+            session_id: session_id.to_string(),
+            device_code: config::read_device_secret_from_stdin()?,
+            expires_at: String::new(),
+            revision,
+            pending_ack: None,
+        };
+        config::save_pending_agent_auth(&pending, Some(&pending_path))?;
+        pending
+    } else {
+        config::load_pending_agent_auth(&pending_path)?
+    };
+    validate_pending_auth_context(&ctx, &pending)?;
+    if args
+        .session_id
+        .as_deref()
+        .is_some_and(|session_id| session_id != pending.session_id)
+    {
+        return Err(CliError::validation(
+            "--session-id does not match the private pending state",
+        ));
+    }
+    let mut pending = pending;
+    let outcome = wait_for_auth_session(&ctx, &mut pending, &pending_path, args.poll_limit, None)?;
+    let status = outcome.status;
     Ok((
         json!({
             "session_id": status.session_id,
             "status": status.status,
+            "authenticated": true,
+            "acknowledgement_pending": outcome.acknowledgement_pending,
             "required_scopes": status.required_scopes,
-            "token_saved": status.access_token.is_some(),
-            "scopes": status.scopes
+            "token_saved": outcome.token_saved,
+            "scopes": status.scopes,
+            "pending_state": if outcome.acknowledgement_pending {
+                Some(pending_path.display().to_string())
+            } else {
+                None
+            }
         }),
         json!({
             "command": "auth wait",
@@ -556,14 +697,21 @@ fn auth_wait(cli: &Cli, args: &AuthWaitArgs) -> CliResult<(Value, Value)> {
     ))
 }
 
+/// Captures an approved local authentication and whether backend acknowledgement remains pending.
+struct AuthWaitOutcome {
+    status: client::AuthSessionStatus,
+    acknowledgement_pending: bool,
+    token_saved: bool,
+}
+
 /// Poll an existing authorization session and save its token once approved.
 fn wait_for_auth_session(
     ctx: &RuntimeContext,
-    session_id: &str,
-    device_code: &str,
+    pending: &mut config::PendingAgentAuth,
+    pending_path: &std::path::Path,
     poll_limit: u64,
     created: Option<&client::AuthSessionCreated>,
-) -> CliResult<client::AuthSessionStatus> {
+) -> CliResult<AuthWaitOutcome> {
     if !(1..=600).contains(&poll_limit) {
         return Err(CliError::validation(
             "--poll-limit must be between 1 and 600",
@@ -571,9 +719,30 @@ fn wait_for_auth_session(
     }
     let mut last_status = None;
     for _ in 0..poll_limit {
-        let current = client::poll_auth_session(&ctx.base_url, session_id, device_code)?;
+        let current =
+            client::poll_auth_session(&ctx.base_url, &pending.session_id, &pending.device_code)?;
         ensure_auth_session_belongs_to_context(ctx, &current)?;
-        if current.status == "approved" {
+        if current.status == client::AgentAuthSessionState::Acknowledged
+            && pending.pending_ack.is_some()
+            && ctx.token.is_some()
+        {
+            config::remove_pending_agent_auth(pending_path)?;
+            return Ok(AuthWaitOutcome {
+                status: current,
+                acknowledgement_pending: false,
+                token_saved: true,
+            });
+        }
+        pending.revision = current.revision;
+        config::save_pending_agent_auth(pending, Some(pending_path))?;
+        if current.status == client::AgentAuthSessionState::Approved {
+            if current.token_type != Some(crate::client::AgentTokenType::Agent) {
+                return Err(CliError::api(
+                    "approved auth session did not return canonical agent token_type",
+                    None,
+                    None,
+                ));
+            }
             let token = current.access_token.clone().ok_or_else(|| {
                 CliError::api(
                     "approved auth session did not return access_token",
@@ -590,10 +759,18 @@ fn wait_for_auth_session(
                 token,
                 current.scopes.clone(),
             )?;
-            acknowledge_saved_auth_session(&ctx.base_url, session_id, device_code)?;
-            return Ok(current);
+            let acknowledged = acknowledge_saved_auth_session(&ctx.base_url, pending, pending_path);
+            if acknowledged {
+                config::remove_pending_agent_auth(pending_path)?;
+            }
+            return Ok(AuthWaitOutcome {
+                status: current,
+                acknowledgement_pending: !acknowledged,
+                token_saved: true,
+            });
         }
-        if current.status != "pending" {
+        if current.status != client::AgentAuthSessionState::Pending {
+            config::remove_pending_agent_auth(pending_path)?;
             return Err(auth_session_error(created, &current));
         }
         let interval = if current.poll_interval_seconds == 0 {
@@ -606,27 +783,176 @@ fn wait_for_auth_session(
     }
     Err(auth_session_timeout_error(
         created,
-        session_id,
+        &pending.session_id,
         last_status.as_ref(),
+        pending_path,
     ))
+}
+
+/// Prevent accepting a newly created session for a different Agent installation identity.
+fn ensure_created_auth_session_belongs_to_context(
+    ctx: &RuntimeContext,
+    session: &client::AuthSessionCreated,
+) -> CliResult<()> {
+    if session.client_instance_id != ctx.client_instance_id
+        || session.client_display_name != ctx.client_display_name
+        || session.client_type.as_str() != ctx.client_type
+    {
+        return Err(CliError::validation(
+            "created auth session does not belong to the selected Agent client identity",
+        ));
+    }
+    Ok(())
 }
 
 /// Retry the idempotent delivery acknowledgement after credentials are durably saved.
 fn acknowledge_saved_auth_session(
     base_url: &str,
-    session_id: &str,
-    device_code: &str,
-) -> CliResult<()> {
-    let mut last_error = None;
+    pending: &mut config::PendingAgentAuth,
+    pending_path: &std::path::Path,
+) -> bool {
     for _ in 0..3 {
-        match client::acknowledge_auth_session(base_url, session_id, device_code) {
-            Ok(_) => return Ok(()),
-            Err(error) => last_error = Some(error),
+        let command = match ensure_pending_auth_ack(pending, pending_path) {
+            Ok(command) => command,
+            Err(_) => return false,
+        };
+        if let Ok(result) = client::acknowledge_auth_session(
+            base_url,
+            &pending.session_id,
+            &pending.device_code,
+            command.expected_revision,
+            &command.request_id,
+        ) {
+            if result.session_id != pending.session_id
+                || result.status != client::AgentAuthSessionState::Acknowledged
+                || !matches!(
+                    result.result,
+                    client::AgentAuthAcknowledgementResult::Acknowledged
+                        | client::AgentAuthAcknowledgementResult::AlreadyAcknowledged
+                )
+            {
+                return false;
+            }
+            pending.revision = result.revision;
+            pending.pending_ack = None;
+            return config::save_pending_agent_auth(pending, Some(pending_path)).is_ok();
         }
     }
-    Err(last_error.unwrap_or_else(|| {
-        CliError::internal("authorization acknowledgement retry produced no result")
-    }))
+    false
+}
+
+/// Build private pending state from a newly created authorization session.
+fn pending_auth_from_created(
+    ctx: &RuntimeContext,
+    session: &client::AuthSessionCreated,
+) -> config::PendingAgentAuth {
+    config::PendingAgentAuth {
+        version: 2,
+        profile_name: ctx.profile_name.clone(),
+        base_url: ctx.base_url.clone(),
+        client_instance_id: ctx.client_instance_id.clone(),
+        client_display_name: ctx.client_display_name.clone(),
+        client_type: ctx.client_type.clone(),
+        session_id: session.session_id.clone(),
+        device_code: session.device_code.clone(),
+        expires_at: session.expires_at.clone(),
+        revision: session.revision,
+        pending_ack: None,
+    }
+}
+
+/// 在发 ack 前持久化或复用稳定命令。
+fn ensure_pending_auth_ack(
+    pending: &mut config::PendingAgentAuth,
+    pending_path: &std::path::Path,
+) -> CliResult<config::PendingAgentAuthAck> {
+    if let Some(command) = &pending.pending_ack {
+        return Ok(command.clone());
+    }
+    let command = config::PendingAgentAuthAck {
+        request_id: Uuid::new_v4().to_string(),
+        expected_revision: pending.revision,
+    };
+    pending.pending_ack = Some(command.clone());
+    config::save_pending_agent_auth(pending, Some(pending_path))?;
+    Ok(command)
+}
+
+/// 在 create HTTP 前写入恢复文件，成功后原子切换为 session pending 状态。
+fn create_persisted_auth_session(
+    ctx: &RuntimeContext,
+    scopes: &[String],
+    override_path: Option<&std::path::Path>,
+) -> CliResult<(
+    client::AuthSessionCreated,
+    config::PendingAgentAuth,
+    std::path::PathBuf,
+)> {
+    let pending_path = config::pending_auth_path(&ctx.profile_name, override_path)?;
+    let create_path = config::pending_auth_create_path(&pending_path)?;
+    let expected = config::PendingAgentAuthCreate {
+        version: 2,
+        profile_name: ctx.profile_name.clone(),
+        base_url: ctx.base_url.clone(),
+        client_instance_id: ctx.client_instance_id.clone(),
+        client_display_name: ctx.client_display_name.clone(),
+        client_type: ctx.client_type.clone(),
+        scopes: scopes.to_vec(),
+        request_id: Uuid::new_v4().to_string(),
+    };
+    let create = if create_path.exists() {
+        let existing = config::load_pending_agent_auth_create(&create_path)?;
+        if existing.profile_name != expected.profile_name
+            || existing.base_url != expected.base_url
+            || existing.client_instance_id != expected.client_instance_id
+            || existing.client_display_name != expected.client_display_name
+            || existing.client_type != expected.client_type
+            || existing.scopes != expected.scopes
+        {
+            return Err(CliError::validation(
+                "unfinished Agent auth create belongs to a different payload",
+            ));
+        }
+        existing
+    } else {
+        if pending_path.exists() {
+            return Err(CliError::validation(
+                "an Agent authorization session is already pending; resume it with auth wait",
+            ));
+        }
+        config::save_pending_agent_auth_create(&expected, &create_path)?;
+        expected
+    };
+    let session = client::create_auth_session(
+        &ctx.base_url,
+        &create.scopes,
+        &ctx.client_instance_id,
+        &ctx.client_display_name,
+        &ctx.client_type,
+        &create.request_id,
+    )?;
+    ensure_created_auth_session_belongs_to_context(ctx, &session)?;
+    let pending = pending_auth_from_created(ctx, &session);
+    config::save_pending_agent_auth(&pending, Some(&pending_path))?;
+    config::remove_pending_agent_auth_create(&create_path)?;
+    Ok((session, pending, pending_path))
+}
+
+/// Reject a private pending state copied across profile, backend, or Agent installation.
+fn validate_pending_auth_context(
+    ctx: &RuntimeContext,
+    pending: &config::PendingAgentAuth,
+) -> CliResult<()> {
+    if pending.profile_name != ctx.profile_name
+        || pending.base_url != ctx.base_url
+        || pending.client_instance_id != ctx.client_instance_id
+        || pending.client_type != ctx.client_type
+    {
+        return Err(CliError::validation(
+            "pending auth state does not belong to the selected profile/backend/client",
+        ));
+    }
+    Ok(())
 }
 
 /// Prevent saving a token from a session created for another local Agent identity.
@@ -640,10 +966,16 @@ fn ensure_auth_session_belongs_to_context(
             status.client_instance_id, ctx.client_instance_id
         )));
     }
-    if status.client_type != ctx.client_type {
+    if status.client_type.as_str() != ctx.client_type {
         return Err(CliError::validation(format!(
             "auth session belongs to client_type {}, current profile uses {}",
             status.client_type, ctx.client_type
+        )));
+    }
+    if status.client_display_name != ctx.client_display_name {
+        return Err(CliError::validation(format!(
+            "auth session belongs to client_display_name {}, current profile uses {}",
+            status.client_display_name, ctx.client_display_name
         )));
     }
     Ok(())
@@ -654,15 +986,18 @@ fn auth_session_timeout_error(
     created: Option<&client::AuthSessionCreated>,
     session_id: &str,
     status: Option<&client::AuthSessionStatus>,
+    pending_path: &std::path::Path,
 ) -> CliError {
     let mut detail = json!({
         "session_id": session_id,
-        "status": "pending"
+        "status": "pending",
+        "pending_state": pending_path.display().to_string()
     });
     if let Some(status) = status {
         detail = json!({
             "session_id": status.session_id,
             "status": status.status,
+            "pending_state": pending_path.display().to_string(),
             "required_scopes": status.required_scopes,
             "expires_at": status.expires_at,
             "poll_interval_seconds": status.poll_interval_seconds,
@@ -673,8 +1008,8 @@ fn auth_session_timeout_error(
     if let Some(session) = created {
         detail = json!({
             "session_id": session.session_id,
-            "device_code": session.device_code,
             "status": "pending",
+            "pending_state": pending_path.display().to_string(),
             "authorize_url": session.authorize_url,
             "qr_code_text": session.qr_code_text,
             "user_code": session.user_code,
@@ -717,7 +1052,7 @@ fn auth_session_error(
     created: Option<&client::AuthSessionCreated>,
     status: &client::AuthSessionStatus,
 ) -> CliError {
-    let normalized = status.status.trim().to_ascii_uppercase();
+    let normalized = status.status.as_str().to_ascii_uppercase();
     let mut detail = json!({
         "session_id": status.session_id,
         "status": status.status,
@@ -2799,20 +3134,14 @@ fn ensure_scopes(ctx: &crate::config::RuntimeContext, required: &[String]) -> Cl
     };
     let missing = missing_scopes(required, available.as_slice());
     if !missing.is_empty() {
-        let session = client::create_auth_session(
-            &ctx.base_url,
-            required,
-            &ctx.client_instance_id,
-            &ctx.client_display_name,
-            &ctx.client_type,
-        )?;
+        let (session, _pending, pending_path) = create_persisted_auth_session(ctx, required, None)?;
         Err(CliError::auth_required(
             format!("authorization required for scope: {}", missing.join(", ")),
             json!({
                 "missing_scopes": missing,
                 "required_scopes": required,
                 "session_id": session.session_id,
-                "device_code": session.device_code,
+                "pending_state": pending_path.display().to_string(),
                 "authorize_url": session.authorize_url,
                 "qr_code_text": session.qr_code_text,
                 "user_code": session.user_code,

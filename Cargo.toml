@@ -1,4 +1,4 @@
-# Change note: forbid unsafe code across the CLI binary and integration-test targets.
+# Change note: keep the hidden Claw guard resident with signal-safe readiness supervision.
 [package]
 name = "hyacinthus"
 version = "0.1.10"
@@ -13,9 +13,12 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+nix = { version = "0.31", default-features = false, features = ["process", "signal"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
+sha2 = "0.10"
+signal-hook = "0.3"
 uuid = { version = "1.11", features = ["v4"] }
 
 [dev-dependencies]

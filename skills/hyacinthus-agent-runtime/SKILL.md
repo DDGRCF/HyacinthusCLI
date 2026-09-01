@@ -35,10 +35,10 @@ hyacinthus auth status
 - `nullclaw`：NullClaw
 - `hyacinthus-cli`：直接终端 CLI
 
-2. 如果当前 profile 没有 token，或业务命令返回 `AUTH_REQUIRED`，读取以下字段；`device_code` 仅由本地 Agent 保存，其余浏览器授权字段才可转交给用户：
+2. 如果当前 profile 没有 token，或业务命令返回 `AUTH_REQUIRED`，读取以下字段；CLI 会自动把设备密钥保存在 `0600` 的 pending state，不在正常输出中暴露：
 
 - `session_id`
-- `device_code`（仅保留在本地 Agent，不得转交给用户或放入浏览器 URL）
+- `pending_state`（只是本地私有文件路径，不得转交给用户）
 - `authorize_url`
 - `qr_code_text`
 - `user_code`
@@ -52,10 +52,10 @@ hyacinthus auth status
 4. 用户确认已授权后，等待同一个 session 并保存凭据：
 
 ```bash
-hyacinthus auth wait --session-id "<session_id>" --device-code "<device_code>"
+hyacinthus auth wait
 ```
 
-5. 只有 `token_saved` 为 `true` 后，才能重试原业务命令。
+5. 只有 `token_saved` 为 `true` 后，才能重试原业务命令。如果同时有 `acknowledgement_pending: true`，本地已经认证成功，再次运行 `hyacinthus auth wait` 恢复 ACK。
 
 发送授权链接给用户后，不要再运行 `hyacinthus auth login --scope ... --wait`。这会创建新的授权 session，无法观察已经发给用户的链接是否完成授权。
 

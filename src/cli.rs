@@ -1,9 +1,11 @@
-// 改动说明：分页与授权轮询参数在命令行解析阶段限制范围，避免异常请求量和长时间挂起。
+// 改动说明：保留 Claw guard，并将 Agent 设备密钥收口到 stdin/私有 pending state 与远程 token 生命周期命令。
 use std::fmt;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Parser)]
 #[command(
@@ -48,6 +50,40 @@ pub enum Command {
     Requirements(RequirementsCommand),
     Skills(SkillsCommand),
     Completion(CompletionArgs),
+    #[command(name = "__claw-runtime-guard", hide = true)]
+    ClawRuntimeGuard(ClawRuntimeGuardArgs),
+    #[command(name = "__claw-runtime-probe", hide = true)]
+    ClawRuntimeProbe(ClawRuntimeProbeArgs),
+}
+
+/// Carries the exact canonical activation identity required while PicoClaw is supervised.
+#[derive(Clone, Debug, Args)]
+pub struct ClawRuntimeGuardArgs {
+    #[arg(long)]
+    pub authority_path: PathBuf,
+    #[arg(long)]
+    pub pointer_digest: String,
+    #[arg(long)]
+    pub instance: String,
+    #[arg(long)]
+    pub release_digest: String,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub activation_fence: u64,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    pub runtime_epoch: u64,
+    #[arg(long)]
+    pub program_name: String,
+    #[arg(long)]
+    pub guard_nonce: Uuid,
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
+    pub health_port: u16,
+}
+
+/// Carries the sole loopback endpoint accepted by the container-local readiness probe.
+#[derive(Clone, Debug, Args)]
+pub struct ClawRuntimeProbeArgs {
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
+    pub health_port: u16,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -179,7 +215,8 @@ pub enum AuthSubcommand {
     Wait(AuthWaitArgs),
     Check(AuthCheckArgs),
     Scopes(AuthScopesArgs),
-    Logout,
+    Token(AuthTokenCommand),
+    Logout(AuthLogoutArgs),
 }
 
 #[derive(Clone, Debug, Args)]
@@ -191,17 +228,44 @@ pub struct AuthLoginArgs {
     pub wait: bool,
     #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=600))]
     pub poll_limit: u64,
+    #[arg(long)]
+    pub pending_state: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Args)]
-/// Arguments for waiting on an existing authorization session.
+/// Arguments for waiting on an existing revision-bound authorization session.
 pub struct AuthWaitArgs {
     #[arg(long)]
-    pub session_id: String,
+    pub session_id: Option<String>,
+    #[arg(long, requires = "session_id")]
+    pub device_secret_stdin: bool,
+    #[arg(long, requires = "device_secret_stdin")]
+    pub expected_revision: Option<u64>,
     #[arg(long)]
-    pub device_code: String,
+    pub pending_state: Option<PathBuf>,
     #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=600))]
     pub poll_limit: u64,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Wrapper for durable Agent token status and revocation operations.
+pub struct AuthTokenCommand {
+    #[command(subcommand)]
+    pub command: AuthTokenSubcommand,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+/// Operations for the current bound Agent token.
+pub enum AuthTokenSubcommand {
+    Status,
+    Revoke,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for revoking the current Agent token and clearing local credentials.
+pub struct AuthLogoutArgs {
+    #[arg(long)]
+    pub local_only: bool,
 }
 
 #[derive(Clone, Debug, Args)]

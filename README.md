@@ -175,11 +175,14 @@ Interactive Agent authorization is supported for hermes, Claw, and other automat
 hyacinthus auth login --scope requirements:parse
 hyacinthus auth login --scope requirements:read
 hyacinthus auth login --scope requirements:parse --wait
-hyacinthus auth wait --session-id sess_abc123 --device-code '<device_code>'
+hyacinthus auth wait
 hyacinthus auth grant --scope "requirements:parse requirements:write" --wait
+hyacinthus auth token status
+hyacinthus auth token revoke
+hyacinthus auth logout
 ```
 
-`auth login` creates a backend authorization session and prints a device-only `device_code` alongside `session_id`, `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. Send only the URL, QR text, and user code to the user; never send or embed `device_code` in a browser URL. After approval, reuse both local values with `auth wait --session-id <session_id> --device-code <device_code>`. Polling is retryable until the CLI saves the token and acknowledges delivery. With `--wait`, the CLI performs the same sequence in one process. Timeout errors preserve the device code for a local retry, while terminal non-`pending` states still exit non-zero.
+`auth login` creates a backend authorization session, stores its device-only secret in an atomically written `0600` pending-state file, and prints only `session_id`, the private file path, `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. After approval, `auth wait` resumes from that file without placing the secret in argv, process listings, or normal output. An external trusted broker can instead pass the secret through stdin with `auth wait --session-id <session_id> --device-secret-stdin`. Polling is retryable until the CLI saves the token and acknowledges delivery. If acknowledgement fails after the token is saved, the command reports `authenticated: true` plus `acknowledgement_pending: true`; rerun `auth wait` to finish. Terminal non-`pending` states remove the pending file and exit non-zero.
 
 The CLI automatically binds each profile to a stable Agent identity. Supported `client_type` values are `hermes`, `codex`, `claude`, `picoclaw`, `nullclaw`, and `hyacinthus-cli`. Single-Agent setups can rely on default homes like `~/.hermes`; multi-instance setups should set a distinct `HYACINTHUS_PROFILE` or Agent home for each instance.
 
@@ -233,7 +236,7 @@ Successful output data:
 
 Common backend error codes are `REQUIREMENT_CODE_REQUIRED`, `REQUIREMENT_CODE_NOT_FOUND`, `REQUIREMENT_CODE_DUPLICATED`, and `REQUIREMENT_EXTEND_EXPIRES_AT_INVALID`.
 
-`config set-profile` is incremental for existing profiles: unspecified fields keep their current values. `auth logout` clears both the saved token and saved local scopes for the selected profile.
+`config set-profile` is incremental for existing profiles: unspecified fields keep their current values. `auth logout` and `auth token revoke` first revoke `DELETE /api/v1/agent/auth/tokens/current`, then clear the saved token, scopes, and pending state. A network failure keeps local credentials for retry. Use the explicit `auth logout --local-only` escape hatch only when the backend is permanently unavailable.
 
 ## Agent Skills
 
