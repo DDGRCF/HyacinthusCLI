@@ -1,4 +1,4 @@
-// 改动说明：保留 Claw guard，并将 Agent 设备密钥收口到 stdin/私有 pending state 与远程 token 生命周期命令。
+// 改动说明：需求解析使用严格默认和显式 --lenient，并移除重复的 auth grant 别名。
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -211,7 +211,6 @@ pub struct AuthCommand {
 pub enum AuthSubcommand {
     Status,
     Login(AuthLoginArgs),
-    Grant(AuthLoginArgs),
     Wait(AuthWaitArgs),
     Check(AuthCheckArgs),
     Scopes(AuthScopesArgs),
@@ -691,8 +690,9 @@ pub struct RequirementsParseArgs {
     pub preset_contact_phone: Option<String>,
     #[arg(long)]
     pub preset_contact_wechat: Option<String>,
+    /// Enables reviewed field aliases and noncanonical ordering without invoking AI.
     #[arg(long, default_value_t = false)]
-    pub advanced_matching: bool,
+    pub lenient: bool,
     #[arg(long)]
     pub dry_run: bool,
     #[arg(long, short = 'o')]
@@ -735,8 +735,9 @@ pub struct RequirementsImportRawArgs {
     pub preset_contact_phone: Option<String>,
     #[arg(long)]
     pub preset_contact_wechat: Option<String>,
+    /// Enables reviewed field aliases and noncanonical ordering without invoking AI.
     #[arg(long, default_value_t = false)]
-    pub advanced_matching: bool,
+    pub lenient: bool,
     #[arg(long)]
     pub idempotency_key: Option<String>,
     #[arg(long)]

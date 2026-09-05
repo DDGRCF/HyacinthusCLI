@@ -56,7 +56,6 @@ hyacinthus claw status
 hyacinthus claw skills list
 hyacinthus auth status
 hyacinthus auth login --scope requirements:read --wait
-hyacinthus auth grant --scope admin:read
 hyacinthus auth scopes
 hyacinthus auth check --scope requirements:read
 hyacinthus doctor
@@ -143,7 +142,7 @@ hyacinthus requirements search --keyword "高一数学" --scope active -q '.data
 hyacinthus requirements extend KKH347 --dry-run -q '.data.request.body'
 hyacinthus requirements extend KKH347 --yes -q '.data.expires_at'
 hyacinthus requirements parse --text "高一数学" --dry-run -q '.data.request.body'
-hyacinthus requirements parse --text "高一数学" --dry-run --advanced-matching
+hyacinthus requirements parse --text "高一数学" --dry-run --lenient
 hyacinthus --request-id trace-123 requirements parse --text "高一数学" --dry-run
 ```
 
@@ -176,7 +175,7 @@ hyacinthus auth login --scope requirements:parse
 hyacinthus auth login --scope requirements:read
 hyacinthus auth login --scope requirements:parse --wait
 hyacinthus auth wait
-hyacinthus auth grant --scope "requirements:parse requirements:write" --wait
+hyacinthus auth login --scope "requirements:parse requirements:write" --wait
 hyacinthus auth token status
 hyacinthus auth token revoke
 hyacinthus auth logout

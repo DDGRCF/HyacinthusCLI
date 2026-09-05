@@ -3,7 +3,7 @@
     "dry_run": true,
     "request": {
       "body": {
-        "advanced_matching": false,
+        "mode": "strict",
         "preset_city": null,
         "preset_contact_phone": null,
         "preset_contact_wechat": null,

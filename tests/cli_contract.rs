@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试冻结精确 Agent session 路径、私有状态和 token 生命周期合同。
+// 改动说明：CLI 契约测试冻结 strict/lenient 需求解析与去重后的认证命令合同。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -561,7 +561,7 @@ fn dry_run_snapshots_match_golden() {
 }
 
 #[test]
-fn requirements_parse_advanced_matching_flag_overrides_default() {
+fn requirements_parse_lenient_flag_overrides_strict_default() {
     let value = run_json(&[
         "--base-url",
         "http://localhost:8000",
@@ -571,11 +571,11 @@ fn requirements_parse_advanced_matching_flag_overrides_default() {
         "parse",
         "--text",
         "高一数学，瓯海区，周末上课",
-        "--advanced-matching",
+        "--lenient",
         "--dry-run",
     ]);
 
-    assert_eq!(value["data"]["request"]["body"]["advanced_matching"], true);
+    assert_eq!(value["data"]["request"]["body"]["mode"], "lenient");
 }
 
 #[test]
@@ -599,7 +599,7 @@ fn capability_list_returns_embedded_manifest() {
     let value = run_json(&["capability", "list"]);
 
     assert_eq!(value["ok"], true);
-    assert_eq!(value["data"]["version"], "2026-05-10");
+    assert_eq!(value["data"]["version"], "2026-09-04");
     assert!(value["data"]["capabilities"]
         .as_array()
         .unwrap()
@@ -3621,7 +3621,7 @@ fn jq_filters_success_envelope() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value, "2026-05-10");
+    assert_eq!(value, "2026-09-04");
 }
 
 #[test]

@@ -1,4 +1,4 @@
-// 改动说明：Agent create/poll/ack 持久化 session、幂等键与 revision，确保跨进程断链恢复。
+// 改动说明：需求解析统一 strict/lenient 契约，并删除重复的 auth grant 分发入口。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -399,7 +399,6 @@ fn auth_command(cli: &Cli, command: &AuthSubcommand) -> CliResult<(Value, Value)
             ))
         }
         AuthSubcommand::Login(args) => auth_login(cli, args, "auth login"),
-        AuthSubcommand::Grant(args) => auth_login(cli, args, "auth grant"),
         AuthSubcommand::Wait(args) => auth_wait(cli, args),
         AuthSubcommand::Check(args) => {
             if let Some(scope) = args.scope.as_deref() {
@@ -2581,6 +2580,11 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
                 payload["instance_id"] = json!(instance_id);
             }
         }
+        if args.lenient {
+            payload["mode"] = json!("lenient");
+        } else if payload.get("mode").is_none() {
+            payload["mode"] = json!("strict");
+        }
         return Ok(payload);
     }
     let raw_text = if let Some(file) = &args.file {
@@ -2600,7 +2604,7 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
         "preset_contact_phone": args.preset_contact_phone,
         "preset_contact_wechat": args.preset_contact_wechat,
         "preset_city": args.preset_city,
-        "advanced_matching": args.advanced_matching
+        "mode": if args.lenient { "lenient" } else { "strict" }
     });
     if let Some(resolved_instance_id) = instance_id {
         payload["instance_id"] = json!(resolved_instance_id);
@@ -2747,6 +2751,11 @@ fn build_import_raw_parse_payload(
                 payload["instance_id"] = json!(instance_id);
             }
         }
+        if args.lenient {
+            payload["mode"] = json!("lenient");
+        } else if payload.get("mode").is_none() {
+            payload["mode"] = json!("strict");
+        }
         return Ok(payload);
     }
     let raw_text = if let Some(file) = &args.file {
@@ -2766,7 +2775,7 @@ fn build_import_raw_parse_payload(
         "preset_contact_phone": args.preset_contact_phone,
         "preset_contact_wechat": args.preset_contact_wechat,
         "preset_city": args.preset_city,
-        "advanced_matching": args.advanced_matching
+        "mode": if args.lenient { "lenient" } else { "strict" }
     });
     if let Some(resolved_instance_id) = instance_id {
         payload["instance_id"] = json!(resolved_instance_id);
