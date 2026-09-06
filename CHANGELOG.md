@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11
+
+- Persist Agent identity before authorization so a separate auth wait process can resume a new profile.
+- Harden authorization polling, token revocation, credential storage, and Claw guard supervision.
+- Align bundled Agent capabilities, skills, schema validation, and requirement import lifecycle with backend contracts.
+- Add explicit lenient requirement parsing and preserve request IDs through parse requests.
+
 ## 0.1.10
 
 - Clarified that release binaries default to the production API at `https://www.fxzjjzx.cn`.

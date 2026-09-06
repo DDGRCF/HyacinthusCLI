@@ -1,7 +1,7 @@
-# Change note: keep the hidden Claw guard resident with signal-safe readiness supervision.
+# Change note: release CLI v0.1.11 with hardened authorization and updated Agent contracts.
 [package]
 name = "hyacinthus"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 description = "Agent-oriented CLI for Hyacinthus backend operations"
 license = "MIT"
