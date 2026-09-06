@@ -2,7 +2,7 @@
   "data": {
     "checks": [
       {
-        "message": "0.1.11",
+        "message": "0.1.12",
         "name": "cli_version",
         "status": "pass"
       },

@@ -1,4 +1,4 @@
-// Change note: supervise pointer-fenced PicoClaw and perform bounded live HTTP readiness probes.
+// Change note: bundle the Claw activation fixture so standalone CLI release checks can compile.
 
 use std::{
     env, fs,
@@ -400,12 +400,12 @@ mod tests {
 
     /// Builds one exact running pointer and the arguments expected by the guard.
     fn fixture() -> (ClawRuntimeGuardArgs, Vec<u8>) {
-        let bytes = include_bytes!("../../backend/tests/fixtures/claw-activation-v2.json")
+        let bytes = include_bytes!("../tests/fixtures/claw-activation-v2.json")
             .strip_suffix(b"\n")
             .expect("fixture newline")
             .to_vec();
         let document: ActivationAuthorityDocument =
-            serde_json::from_slice(&bytes).expect("shared backend fixture must decode");
+            serde_json::from_slice(&bytes).expect("bundled activation fixture must decode");
         let args = ClawRuntimeGuardArgs {
             authority_path: PathBuf::from(ARTIFACT_ROOT)
                 .join(&document.instance)

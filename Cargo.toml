@@ -1,7 +1,7 @@
-# Change note: release CLI v0.1.11 with hardened authorization and updated Agent contracts.
+# Change note: release CLI v0.1.12 with hardened authorization and updated Agent contracts.
 [package]
 name = "hyacinthus"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2021"
 description = "Agent-oriented CLI for Hyacinthus backend operations"
 license = "MIT"
