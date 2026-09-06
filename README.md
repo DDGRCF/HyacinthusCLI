@@ -185,6 +185,8 @@ hyacinthus auth logout
 
 The CLI automatically binds each profile to a stable Agent identity. Supported `client_type` values are `hermes`, `codex`, `claude`, `picoclaw`, `nullclaw`, and `hyacinthus-cli`. Single-Agent setups can rely on default homes like `~/.hermes`; multi-instance setups should set a distinct `HYACINTHUS_PROFILE` or Agent home for each instance.
 
+The first `auth login` persists that identity before sending the authorization request, so a separate `auth wait` process resumes the same session even with a brand-new configuration directory. Use the same profile for both commands. `auth token status` reads the actual server grant; `auth logout` revokes it remotely before removing local credentials.
+
 Commands that return backend data can write the successful `data` payload to a file:
 
 ```bash

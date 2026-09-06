@@ -1,4 +1,4 @@
-// 改动说明：0600 Agent pending-auth 持久化 create/ack 命令键与 poll 返回的最新 revision。
+// 改动说明：首次授权前持久化实例身份，使独立 auth wait 进程恢复同一授权上下文。
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -520,6 +520,22 @@ fn secure_config_permissions(path: &Path) -> CliResult<()> {
 #[cfg(not(unix))]
 fn secure_config_permissions(_path: &Path) -> CliResult<()> {
     Ok(())
+}
+
+/// Persists the exact authorization identity before a create request can leave this process.
+pub fn save_auth_identity(context: &RuntimeContext) -> CliResult<()> {
+    let mut config = load_config()?;
+    let existing = config.profiles.get(&context.profile_name).cloned();
+    upsert_profile_identity(
+        &mut config,
+        &context.profile_name,
+        context.base_url.clone(),
+        &context.client_instance_id,
+        &context.client_display_name,
+        &context.client_type,
+        existing.as_ref(),
+    );
+    save_config(&config)
 }
 
 pub fn save_agent_credentials(

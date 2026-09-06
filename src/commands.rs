@@ -1,4 +1,4 @@
-// 改动说明：需求解析统一 strict/lenient 契约，并删除重复的 auth grant 分发入口。
+// 改动说明：发起授权前保存首次生成的身份，使 login 与 wait 跨进程保持一致。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -889,6 +889,7 @@ fn create_persisted_auth_session(
 )> {
     let pending_path = config::pending_auth_path(&ctx.profile_name, override_path)?;
     let create_path = config::pending_auth_create_path(&pending_path)?;
+    config::save_auth_identity(ctx)?;
     let expected = config::PendingAgentAuthCreate {
         version: 2,
         profile_name: ctx.profile_name.clone(),

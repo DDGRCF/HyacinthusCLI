@@ -1,4 +1,4 @@
-// 改动说明：CLI 契约测试冻结 strict/lenient 需求解析与去重后的认证命令合同。
+// 改动说明：验证全新配置的授权身份在 login 和独立 wait 进程之间保持一致。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -1835,6 +1835,50 @@ fn auth_login_wait_saves_agent_token_and_scopes() {
         config_value["profiles"]["local"]["scopes"][0],
         "requirements:parse"
     );
+}
+
+/// A fresh CLI must persist its generated identity before another process resumes authorization.
+#[test]
+fn fresh_auth_login_persists_identity_for_separate_wait() {
+    let base_url = mock_auth_session_echo_identity();
+    let config_dir = tempfile::tempdir().unwrap();
+    let login = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "auth",
+            "login",
+            "--scope",
+            "requirements:parse",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
+        .output()
+        .expect("fresh auth login");
+    assert!(login.status.success());
+    let response: serde_json::Value = serde_json::from_slice(&login.stdout).unwrap();
+    let pending: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(response["data"]["pending_state"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+    let config: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(config_dir.path().join("config.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        config["profiles"]["local"]["client_instance_id"],
+        pending["client_instance_id"]
+    );
+    assert_eq!(config["profiles"]["local"]["base_url"], base_url);
+    let wait = cli()
+        .args(["auth", "wait", "--poll-limit", "1"])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", config_dir.path())
+        .output()
+        .expect("separate auth wait");
+    let response: serde_json::Value = serde_json::from_slice(&wait.stdout).unwrap();
+    // The one-request mock is now closed: reaching the network proves identity validation passed.
+    assert_eq!(response["error"]["type"], "network");
+    assert!(config["profiles"]["local"]["token"].is_null());
 }
 
 /// ACK failure must not turn a durably saved credential into a false login failure.
