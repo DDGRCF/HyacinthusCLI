@@ -1,4 +1,4 @@
-// Change note: exercise real parser drafts, closed import contracts and RFC 3339 deadlines.
+// Change note: cover unsupported and remote pagination plus closed education request contracts.
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -4979,4 +4979,150 @@ fn revoked_access_grant_maps_to_auth_error() {
         3,
     );
     assert_eq!(value["error"]["code"], "AUTH_ACCESS_INVALID");
+}
+
+/// Refuses unsupported aggregate paging before any network request can be sent.
+#[test]
+fn capability_page_all_requires_declared_pagination_support() {
+    let value = run_json_expect_code(
+        &[
+            "capability",
+            "run",
+            "requirements.search",
+            "--params",
+            r#"{"keyword":"audit"}"#,
+            "--page-all",
+        ],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:read"),
+        ],
+        2,
+    );
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("does not support --page-all"));
+}
+
+/// Validates supported remote response pages individually, not their aggregation wrapper.
+#[test]
+fn remote_capability_page_all_validates_each_page() {
+    let base_url = mock_sequence(vec![
+        r#"{"code":0,"message":"success","data":{"id":"requirements.search","title":"paged audit","description":"audit","domain":"requirements","command":"audit","method":"GET","path":"/api/v1/agent/paged-audit","required_scopes":["requirements:read"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":true,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","request_schema":{"type":"object"},"response_schema":{"type":"object","required":["items"],"properties":{"items":{"type":"array","items":{"type":"integer"}}}},"examples":[]}}"#,
+        r#"{"code":0,"message":"success","data":{"items":[1],"has_more":true,"next_page_token":"next"}}"#,
+        r#"{"code":0,"message":"success","data":{"items":[2],"has_more":false}}"#,
+    ]);
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base_url,
+            "capability",
+            "run",
+            "requirements.search",
+            "--remote",
+            "--page-all",
+        ],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:read"),
+        ],
+        0,
+    );
+    assert_eq!(value["data"]["page_count"], 2);
+    assert_eq!(value["data"]["pages"][1]["items"][0], 2);
+}
+
+/// Rejects education values that the backend's closed typed DTO cannot deserialize.
+#[test]
+fn user_update_rejects_invalid_education_and_nested_fields_locally() {
+    for payload in [
+        r#"{"education_items":[{"education_level":"not-a-level"}]}"#,
+        r#"{"education_items":[{"start_date":"2027-02-30"}]}"#,
+        r#"{"education_items":[{"sort_order":2147483648}]}"#,
+        r#"{"profile":{"educations":[{"end_date":"bad"}]}}"#,
+        r#"{"profile":{"unexpected":true}}"#,
+        r#"{"profile":{"ext":{"unexpected":true}}}"#,
+    ] {
+        let value = run_json_expect_code(
+            &["user", "update", "--data", payload, "--dry-run"],
+            &[
+                ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+                ("HYACINTHUS_AGENT_SCOPES", "users:read,users:write"),
+            ],
+            2,
+        );
+        assert_eq!(value["error"]["code"], "VALIDATION_FAILED");
+    }
+}
+
+/// Allows both supported education locations and nullable dates with valid closed enums.
+#[test]
+fn user_update_accepts_complete_education_contract() {
+    for payload in [
+        r#"{"education_items":[{"education_level":"bachelor","school_name":"Audit","start_date":"2024-02-29","end_date":null,"is_current":true,"sort_order":0}]}"#,
+        r#"{"profile":{"educations":[{"education_level":null,"start_date":null}],"ext":{"contact_wechat":null}}}"#,
+    ] {
+        let value = run_json_expect_code(
+            &["user", "update", "--data", payload, "--dry-run"],
+            &[
+                ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+                ("HYACINTHUS_AGENT_SCOPES", "users:read,users:write"),
+            ],
+            0,
+        );
+        assert_eq!(value["ok"], true);
+    }
+}
+
+/// Accepts the backend's successful null key when generic import omits optional replay protection.
+#[test]
+fn capability_import_accepts_nullable_idempotency_key_after_write() {
+    let base_url = mock_once_expect_request(
+        r#"{"code":0,"message":"success","data":{"created":1,"updated":0,"failed":0,"created_ids":[1],"updated_ids":[],"failed_rows":[],"idempotency_key":null,"idempotent_replay":false}}"#,
+        "POST /api/v1/agent/requirements/batch-import HTTP/1.1",
+    );
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base_url,
+            "capability",
+            "run",
+            "requirements.batch_import",
+            "--data",
+            r#"{"confirmed_rows":[{"description":"audit"}]}"#,
+            "--yes",
+        ],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:write"),
+        ],
+        0,
+    );
+    assert_eq!(value["data"]["created"], 1);
+    assert_eq!(value["data"]["idempotency_key"], serde_json::Value::Null);
+}
+
+/// Refuses a match page beyond the backend's documented maximum before HTTP.
+#[test]
+fn priority_rule_matches_enforces_page_limit_locally() {
+    let value = run_json_expect_code(
+        &[
+            "requirements",
+            "priority-rules",
+            "matches",
+            "1",
+            "--page-size",
+            "101",
+        ],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:priority_rules"),
+        ],
+        2,
+    );
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("must be <= 100"));
 }

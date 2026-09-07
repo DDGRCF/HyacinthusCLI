@@ -1,7 +1,7 @@
-# Change note: release CLI v0.1.14 with canonical parser imports and strict request validation.
+# Change note: release CLI v0.1.15 with accurate pagination and nested profile contracts.
 [package]
 name = "hyacinthus"
-version = "0.1.14"
+version = "0.1.15"
 edition = "2021"
 description = "Agent-oriented CLI for Hyacinthus backend operations"
 license = "MIT"

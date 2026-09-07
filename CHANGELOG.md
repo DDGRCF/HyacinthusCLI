@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.15
+
+- Reject page-all for capabilities without continuation-token support and validate supported paginated results per page.
+- Validate education dates, enums, integer bounds and closed nested profile fields before HTTP requests.
+- Apply the documented priority-rule match page-size limit locally.
+- Accept a null idempotency key in successful generic batch-import responses.
+
 ## 0.1.14
 
 - Preserve decimal compensation strings without floating-point conversion and align condition arrays with the backend.

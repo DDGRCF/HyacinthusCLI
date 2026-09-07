@@ -1,4 +1,4 @@
-// Change note: project parser drafts onto import fields and normalize RFC 3339 deadlines.
+// Change note: gate capability pagination and validate each returned page against its wire schema.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -1482,6 +1482,11 @@ fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<
     if args.pagination.page_all && capability.method != "GET" {
         return Err(CliError::validation("--page-all is only supported for GET"));
     }
+    if args.pagination.page_all && !capability.supports_pagination {
+        return Err(CliError::validation(
+            "this capability does not support --page-all; use its explicit pagination parameters",
+        ));
+    }
     let path = query::append_json_params(&capability.path, params.as_ref())?;
     if args.dry_run {
         let pagination = pagination::dry_run(&capability.path, params, &args.pagination)?;
@@ -1517,7 +1522,16 @@ fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<
             )))
         }
     };
-    validate_response_payload(&capability, &data)?;
+    if args.pagination.page_all {
+        for page in data["pages"]
+            .as_array()
+            .ok_or_else(|| CliError::internal("pagination result is missing pages"))?
+        {
+            validate_response_payload(&capability, page)?;
+        }
+    } else {
+        validate_response_payload(&capability, &data)?;
+    }
     write_output_if_needed(&data, args.output.as_deref())?;
     Ok((
         data,

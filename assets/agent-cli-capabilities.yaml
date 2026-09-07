@@ -449,7 +449,7 @@ capabilities:
           items:
             type: object
         idempotency_key:
-          type: string
+          type: [string, "null"]
         idempotent_replay:
           type: boolean
           description: true 表示后端返回的是同一幂等 key 的历史结果。
@@ -1104,6 +1104,7 @@ capabilities:
         page_size:
           type: integer
           minimum: 1
+          maximum: 100
     response_schema:
       type: object
       required:
@@ -1765,10 +1766,43 @@ capabilities:
             - string
             - "null"
         profile:
+          additionalProperties: false
           type:
             - object
             - "null"
           properties:
+            educations:
+              type: [array, "null"]
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  education_level:
+                    type: [string, "null"]
+                    enum: [high_school, associate, bachelor, master, phd, other, null]
+                  degree_name:
+                    type: [string, "null"]
+                    maxLength: 100
+                  school_name:
+                    type: [string, "null"]
+                    maxLength: 200
+                  major:
+                    type: [string, "null"]
+                    maxLength: 100
+                  start_date:
+                    type: [string, "null"]
+                    format: date
+                  end_date:
+                    type: [string, "null"]
+                    format: date
+                  is_current:
+                    type: boolean
+                  description:
+                    type: [string, "null"]
+                  sort_order:
+                    type: integer
+                    minimum: -2147483648
+                    maximum: 2147483647
             gender:
               enum: [male, female, other, unknown, null]
               type:
@@ -1814,6 +1848,7 @@ capabilities:
                     - string
                     - "null"
             ext:
+              additionalProperties: false
               type:
                 - object
                 - "null"
@@ -1857,6 +1892,34 @@ capabilities:
             - "null"
           items:
             type: object
+            additionalProperties: false
+            properties:
+              education_level:
+                type: [string, "null"]
+                enum: [high_school, associate, bachelor, master, phd, other, null]
+              degree_name:
+                type: [string, "null"]
+                maxLength: 100
+              school_name:
+                type: [string, "null"]
+                maxLength: 200
+              major:
+                type: [string, "null"]
+                maxLength: 100
+              start_date:
+                type: [string, "null"]
+                format: date
+              end_date:
+                type: [string, "null"]
+                format: date
+              is_current:
+                type: boolean
+              description:
+                type: [string, "null"]
+              sort_order:
+                type: integer
+                minimum: -2147483648
+                maximum: 2147483647
     response_schema:
       type: object
       required:
