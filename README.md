@@ -76,7 +76,7 @@ hyacinthus skills check --dir ./.tmp/agent-skills
 hyacinthus requirements options
 hyacinthus requirements search --keyword 高一数学
 hyacinthus requirements extend KKH347 --yes
-hyacinthus requirements extend KKH347 --expires-at 2026-07-10T12:00:00 --yes
+hyacinthus requirements extend KKH347 --expires-at 2027-07-10T12:00:00+08:00 --yes
 hyacinthus requirements parse --file input.txt
 hyacinthus requirements catalog create-missing --file parsed.json --dry-run
 hyacinthus requirements catalog create-missing --file parsed.json --yes
@@ -85,6 +85,8 @@ hyacinthus requirements import --file confirmed.json --idempotency-key cli-demo 
 ```
 
 The complete Agent API and capability index is maintained in `docs/requirements/agent-cli/08-agent-api-index.md` in the main repository. Use `hyacinthus capability list` or `hyacinthus schema <id>` for the runtime schema actually exposed by the backend.
+
+`requirements extend --expires-at` accepts RFC 3339 timestamps. A time without an offset is interpreted as +08:00; omit the option to use the server’s default extension period.
 
 ## Environment Variables
 
@@ -220,7 +222,7 @@ hyacinthus config set-profile dev --base-url http://localhost:8000 --scopes requ
 ```bash
 hyacinthus requirements extend KKH347 --dry-run
 hyacinthus requirements extend KKH347 --yes
-hyacinthus requirements extend KKH347 --expires-at 2026-07-10T12:00:00 --yes
+hyacinthus requirements extend KKH347 --expires-at 2027-07-10T12:00:00+08:00 --yes
 ```
 
 Without `--expires-at`, the backend uses the same default extension rule as the admin requirement list: it refreshes `expires_at` from the configured default validity window and reactivates expired requirements. With `--expires-at`, the backend sets the deadline to that future datetime.
@@ -231,7 +233,7 @@ Successful output data:
 {
   "requirement_id": 123,
   "requirement_code": "KKH347",
-  "expires_at": "2026-07-10T12:00:00"
+  "expires_at": "2027-07-10T12:00:00+08:00"
 }
 ```
 

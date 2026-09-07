@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.13
+
+- Normalize requirement extension deadlines to RFC 3339; business times without an offset use +08:00 and invalid dates fail locally.
+
+- Start Claw directly as the container's unprivileged user without requiring setgroups/setuid capabilities.
+- Verify sealed configuration and load bounded environment overrides before launching the runtime.
+
 ## 0.1.12
 
 - Bundle the Claw activation test fixture so standalone release builds do not require the backend repository.

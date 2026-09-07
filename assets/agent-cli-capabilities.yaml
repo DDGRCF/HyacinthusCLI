@@ -490,7 +490,7 @@ capabilities:
             - string
             - "null"
           format: date-time
-          description: 手动指定延期到的时间；为空时使用系统默认延期时间。
+          description: RFC 3339 延期时间；CLI 输入未带时区时按 +08:00 解释；为空时使用系统默认延期时间。
     response_schema:
       type: object
       required:
@@ -509,7 +509,7 @@ capabilities:
       - title: 使用默认延期时间
         command: hyacinthus requirements extend KKH347 --yes
       - title: 手动设置延期到指定时间
-        command: hyacinthus requirements extend KKH347 --expires-at 2026-07-10T12:00:00 --yes
+        command: hyacinthus requirements extend KKH347 --expires-at 2027-07-10T12:00:00+08:00 --yes
 
   - id: requirements.search
     title: 搜索需求

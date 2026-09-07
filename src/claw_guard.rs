@@ -1,4 +1,4 @@
-// Change note: bundle the Claw activation fixture so standalone CLI release checks can compile.
+// Change note: launch unprivileged PicoClaw with a private boot configuration copied from verified sealed bytes.
 
 use std::{
     env, fs,
@@ -175,6 +175,29 @@ fn validate_authority(bytes: &[u8], args: &ClawRuntimeGuardArgs) -> Result<(), (
 /// Keeps the guard resident, waits for PicoClaw readiness, and terminates on authority drift.
 #[cfg(unix)]
 fn supervise_picoclaw(args: &ClawRuntimeGuardArgs, authority: &[u8]) -> i32 {
+    let release_root = Path::new(ARTIFACT_ROOT)
+        .join(&args.instance)
+        .join("releases")
+        .join(&args.release_digest);
+    let inputs = match crate::claw_release::inputs(&release_root, &args.release_digest) {
+        Ok(environment) => environment,
+        Err(()) => {
+            eprintln!("Claw runtime guard rejected sealed runtime inputs");
+            return EXIT_AUTHORITY_REJECTED;
+        }
+    };
+    let configuration = match RuntimeConfiguration::prepare(
+        Path::new("/tmp"),
+        args.guard_nonce,
+        &inputs.configuration,
+    ) {
+        Ok(configuration) => configuration,
+        Err(()) => {
+            eprintln!("Claw runtime guard could not prepare private configuration");
+            return EXIT_RUNTIME_FAILED;
+        }
+    };
+    drop(inputs.configuration);
     let shutdown = Arc::new(AtomicBool::new(false));
     if signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&shutdown)).is_err()
         || signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&shutdown)).is_err()
@@ -189,8 +212,10 @@ fn supervise_picoclaw(args: &ClawRuntimeGuardArgs, authority: &[u8]) -> i32 {
             return EXIT_RUNTIME_FAILED;
         }
     };
-    let mut child = match Command::new("/sbin/su-exec")
-        .args(["10001:10001", "/usr/local/bin/picoclaw", "gateway", "-E"])
+    let mut child = match picoclaw_command()
+        .envs(inputs.environment)
+        .env("PICOCLAW_CONFIG", configuration.0.join("config.json"))
+        .env("PICOCLAW_BUILTIN_SKILLS", release_root.join("artifacts"))
         .spawn()
     {
         Ok(child) => child,
@@ -245,6 +270,14 @@ fn supervise_picoclaw(args: &ClawRuntimeGuardArgs, authority: &[u8]) -> i32 {
     }
 }
 
+/// Inherits the container's unprivileged identity without requiring setuid/setgroups capabilities.
+#[cfg(unix)]
+fn picoclaw_command() -> Command {
+    let mut command = Command::new("/usr/local/bin/picoclaw");
+    command.args(["gateway", "-E"]);
+    command
+}
+
 /// Requires one bounded HTTP 2xx response from the exact container-local health endpoint.
 fn probe_health(address: SocketAddr) -> bool {
     let Ok(mut stream) = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) else {
@@ -277,6 +310,37 @@ fn probe_health(address: SocketAddr) -> bool {
 fn supervise_picoclaw(_args: &ClawRuntimeGuardArgs, _authority: &[u8]) -> i32 {
     eprintln!("Claw runtime guard requires Unix supervision");
     EXIT_RUNTIME_FAILED
+}
+
+/// Owns an isolated writable configuration directory for exactly one supervised boot.
+struct RuntimeConfiguration(PathBuf);
+
+impl RuntimeConfiguration {
+    /// Copies verified bytes into a fresh private directory, rejecting reuse and symlinks.
+    fn prepare(root: &Path, nonce: Uuid, bytes: &[u8]) -> Result<Self, ()> {
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let path = root.join(format!("hyacinthus-claw-runtime-{nonce}"));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&path)
+            .map_err(|_| ())?;
+        let owned = Self(path);
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(owned.0.join("config.json"))
+            .map_err(|_| ())?;
+        file.write_all(bytes).map_err(|_| ())?;
+        file.sync_all().map_err(|_| ())?;
+        Ok(owned)
+    }
+}
+
+impl Drop for RuntimeConfiguration {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 /// Owns one boot-specific readiness marker and removes it whenever supervision exits.
@@ -394,9 +458,50 @@ fn valid_digest(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// Keeps vendor writes private, rejects reused boot paths, and cleans all boot artifacts.
+    #[test]
+    fn private_runtime_configuration_is_isolated_and_owned() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let nonce = uuid::Uuid::new_v4();
+        let original = b"{\"version\":3}";
+        let config = super::RuntimeConfiguration::prepare(root.path(), nonce, original).unwrap();
+        let path = config.0.clone();
+        assert_eq!(std::fs::read(path.join("config.json")).unwrap(), original);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::metadata(path.join("config.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(super::RuntimeConfiguration::prepare(root.path(), nonce, original).is_err());
+        std::fs::write(path.join("config.json"), b"vendor normalized").unwrap();
+        std::fs::write(path.join(".security.yml"), b"fixture").unwrap();
+        drop(config);
+        assert!(!path.exists());
+        std::os::unix::fs::symlink(root.path(), &path).unwrap();
+        assert!(super::RuntimeConfiguration::prepare(root.path(), nonce, original).is_err());
+        assert!(root.path().exists());
+    }
+
     use std::{net::TcpListener, path::PathBuf};
 
     use super::*;
+
+    /// Keeps the runtime child independent of privilege-changing helper programs.
+    #[cfg(unix)]
+    #[test]
+    fn child_launch_needs_no_privilege_switch() {
+        let command = picoclaw_command();
+        assert_eq!(command.get_program(), "/usr/local/bin/picoclaw");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["gateway", "-E"]);
+    }
 
     /// Builds one exact running pointer and the arguments expected by the guard.
     fn fixture() -> (ClawRuntimeGuardArgs, Vec<u8>) {
