@@ -1,4 +1,4 @@
-// Change note: cover unsupported and remote pagination plus closed education request contracts.
+// Change note: read complete mock HTTP requests and declare closed connections with failure diagnostics.
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -148,14 +148,71 @@ fn assert_golden(name: &str, value: serde_json::Value) {
     );
 }
 
+/// Reads a complete bounded HTTP request despite arbitrary TCP header/body fragmentation.
+fn read_mock_request(reader: &mut impl Read) -> String {
+    const MAX_MOCK_REQUEST_BYTES: usize = 1024 * 1024;
+    let mut request = Vec::new();
+    let mut target_length = None;
+    loop {
+        let mut chunk = [0_u8; 4096];
+        let size = reader.read(&mut chunk).expect("read mock HTTP request");
+        assert!(size > 0, "mock request ended before headers/body completed");
+        request.extend_from_slice(&chunk[..size]);
+        assert!(
+            request.len() <= MAX_MOCK_REQUEST_BYTES,
+            "mock request is too large"
+        );
+        if target_length.is_none() {
+            if let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n") {
+                let headers = std::str::from_utf8(&request[..header_end])
+                    .expect("UTF-8 mock request headers");
+                let content_length = headers
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                    .map_or(0, |(_, length)| {
+                        length.trim().parse::<usize>().expect("mock content length")
+                    });
+                let length = (header_end + 4)
+                    .checked_add(content_length)
+                    .expect("bounded mock content length");
+                assert!(
+                    length <= MAX_MOCK_REQUEST_BYTES,
+                    "mock request is too large"
+                );
+                target_length = Some(length);
+            }
+        }
+        if target_length.is_some_and(|length| request.len() >= length) {
+            return String::from_utf8(request).expect("UTF-8 mock request");
+        }
+    }
+}
+
+/// Demonstrates why one read cannot represent a request, then verifies fragmented headers and body.
+#[test]
+fn mock_request_reader_handles_fragmented_http() {
+    let first = b"POST /api/v1/audit HTTP/1.1\r\n";
+    let second = b"X-Agent-Key: test-token\r\nContent-Length: 11\r\n\r\n{\"rows\":";
+    let third = b"[]}";
+    let mut old_reader = std::io::Cursor::new(first).chain(std::io::Cursor::new(second));
+    let mut once = [0_u8; 4096];
+    let count = old_reader.read(&mut once).expect("legacy single read");
+    assert!(!String::from_utf8_lossy(&once[..count]).contains("X-Agent-Key"));
+    let mut complete_reader = std::io::Cursor::new(first)
+        .chain(std::io::Cursor::new(second))
+        .chain(std::io::Cursor::new(third));
+    let request = read_mock_request(&mut complete_reader);
+    assert!(request.contains("X-Agent-Key: test-token"));
+    assert!(request.ends_with("{\"rows\":[]}"));
+}
+
 fn mock_once(body: &'static str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("mock addr");
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept mock request");
-        let mut request = [0_u8; 4096];
-        let size = stream.read(&mut request).expect("read request");
-        let request_text = String::from_utf8_lossy(&request[..size]);
+        let request_text = read_mock_request(&mut stream);
         assert!(request_text
             .to_ascii_lowercase()
             .contains("x-agent-key: test-token"));
@@ -166,7 +223,7 @@ fn mock_once(body: &'static str) -> String {
             .to_ascii_lowercase()
             .contains("x-agent-client-type: hermes"));
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             body.len(),
             body
         );
@@ -183,9 +240,7 @@ fn mock_once_expect_request(body: &'static str, expected_request_fragment: &'sta
     let addr = listener.local_addr().expect("mock addr");
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept mock request");
-        let mut request = [0_u8; 4096];
-        let size = stream.read(&mut request).expect("read request");
-        let request_text = String::from_utf8_lossy(&request[..size]);
+        let request_text = read_mock_request(&mut stream);
         assert!(request_text
             .to_ascii_lowercase()
             .contains("x-agent-key: test-token"));
@@ -202,7 +257,7 @@ fn mock_once_expect_request(body: &'static str, expected_request_fragment: &'sta
             request_text
         );
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             body.len(),
             body
         );
@@ -218,15 +273,13 @@ fn mock_once_with_request_id(body: &'static str, request_id: &'static str) -> St
     let addr = listener.local_addr().expect("mock addr");
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept mock request");
-        let mut request = [0_u8; 4096];
-        let size = stream.read(&mut request).expect("read request");
-        let request_text = String::from_utf8_lossy(&request[..size]).to_ascii_lowercase();
+        let request_text = read_mock_request(&mut stream).to_ascii_lowercase();
         assert!(request_text.contains("x-agent-key: test-token"));
         assert!(request_text.contains("x-agent-client-instance: hermes-wechat-a"));
         assert!(request_text.contains("x-agent-client-type: hermes"));
         assert!(request_text.contains(&format!("x-request-id: {request_id}")));
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             body.len(),
             body
         );
@@ -242,9 +295,7 @@ fn mock_once_status(status: u16, body: &'static str) -> String {
     let addr = listener.local_addr().expect("mock addr");
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept mock request");
-        let mut request = [0_u8; 4096];
-        let size = stream.read(&mut request).expect("read request");
-        let request_text = String::from_utf8_lossy(&request[..size]);
+        let request_text = read_mock_request(&mut stream);
         assert!(request_text
             .to_ascii_lowercase()
             .contains("x-agent-key: test-token"));
@@ -255,7 +306,7 @@ fn mock_once_status(status: u16, body: &'static str) -> String {
             .to_ascii_lowercase()
             .contains("x-agent-client-type: hermes"));
         let response = format!(
-            "HTTP/1.1 {} mock\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            "HTTP/1.1 {} mock\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             status,
             body.len(),
             body
@@ -272,11 +323,10 @@ fn mock_once_invalid_json() -> String {
     let addr = listener.local_addr().expect("mock addr");
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept mock request");
-        let mut request = [0_u8; 4096];
-        let _ = stream.read(&mut request).expect("read request");
+        let _ = read_mock_request(&mut stream);
         let body = "not-json";
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             body.len(),
             body
         );
@@ -292,14 +342,12 @@ fn mock_release_once(body: &'static str) -> String {
     let addr = listener.local_addr().expect("mock addr");
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept mock request");
-        let mut request = [0_u8; 4096];
-        let size = stream.read(&mut request).expect("read request");
-        let request_text = String::from_utf8_lossy(&request[..size]);
+        let request_text = read_mock_request(&mut stream);
         let request_text_lower = request_text.to_ascii_lowercase();
         assert!(request_text.contains("GET /"));
         assert!(request_text_lower.contains("user-agent: hyacinthuscli/"));
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             body.len(),
             body
         );
@@ -316,9 +364,7 @@ fn mock_sequence(bodies: Vec<&'static str>) -> String {
     thread::spawn(move || {
         for body in bodies {
             let (mut stream, _) = listener.accept().expect("accept mock request");
-            let mut request = [0_u8; 4096];
-            let size = stream.read(&mut request).expect("read request");
-            let request_text = String::from_utf8_lossy(&request[..size]);
+            let request_text = read_mock_request(&mut stream);
             assert!(request_text
                 .to_ascii_lowercase()
                 .contains("x-agent-key: test-token"));
@@ -329,7 +375,7 @@ fn mock_sequence(bodies: Vec<&'static str>) -> String {
                 .to_ascii_lowercase()
                 .contains("x-agent-client-type: hermes"));
             let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
                 body.len(),
                 body
             );
@@ -347,10 +393,9 @@ fn mock_public_sequence(bodies: Vec<&'static str>) -> String {
     thread::spawn(move || {
         for body in bodies {
             let (mut stream, _) = listener.accept().expect("accept mock request");
-            let mut request = [0_u8; 4096];
-            let _ = stream.read(&mut request).expect("read request");
+            let _ = read_mock_request(&mut stream);
             let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
                 body.len(),
                 body
             );
@@ -368,9 +413,7 @@ fn mock_auth_session_echo_identity() -> String {
     let addr = listener.local_addr().expect("mock addr");
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept mock request");
-        let mut request = [0_u8; 8192];
-        let size = stream.read(&mut request).expect("read request");
-        let request_text = String::from_utf8_lossy(&request[..size]);
+        let request_text = read_mock_request(&mut stream);
         let payload = request_text
             .split_once("\r\n\r\n")
             .map(|(_, body)| body)
@@ -399,7 +442,7 @@ fn mock_auth_session_echo_identity() -> String {
         })
         .to_string();
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
             response_json.len(),
             response_json,
         );
@@ -419,9 +462,7 @@ fn mock_public_sequence_expect_requests(
     thread::spawn(move || {
         for (body, expected_fragments) in exchanges {
             let (mut stream, _) = listener.accept().expect("accept mock request");
-            let mut request = [0_u8; 4096];
-            let size = stream.read(&mut request).expect("read request");
-            let request_text = String::from_utf8_lossy(&request[..size]);
+            let request_text = read_mock_request(&mut stream);
             for fragment in expected_fragments {
                 assert!(
                     request_text.contains(fragment),
@@ -429,7 +470,7 @@ fn mock_public_sequence_expect_requests(
                 );
             }
             let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
                 body.len(),
                 body
             );
@@ -4704,7 +4745,13 @@ fn page_all_rejects_a_repeated_continuation_token() {
         .output()
         .expect("page loop request");
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON stdout");
     assert_eq!(value["error"]["code"], "PAGINATION_TOKEN_LOOP");
 }
@@ -4758,7 +4805,7 @@ fn custom_release_api_does_not_receive_github_token() {
         let request = String::from_utf8_lossy(&request[..size]).to_string();
         let body = r#"{"tag_name":"v0.2.0","html_url":"https://example.invalid/release"}"#;
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
             body.len()
         );
         stream
@@ -4795,7 +4842,7 @@ fn oversized_backend_response_is_rejected() {
         let _ = stream.read(&mut request).expect("read oversized request");
         stream
             .write_all(
-                b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 16777217\r\nconnection: close\r\n\r\n",
+                b"HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: 16777217\r\nconnection: close\r\n\r\n",
             )
             .expect("write oversized header");
     });
