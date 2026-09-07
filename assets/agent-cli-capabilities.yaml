@@ -160,9 +160,10 @@ capabilities:
             properties:
               requirement_type:
                 type: string
+                enum: [tutoring, consulting, resource_exchange, general]
                 description: 需求类型，例如 tutoring。
               title:
-                type: string
+                type: [string, "null"]
                 minLength: 1
                 description: 需求标题。
               description:
@@ -190,12 +191,12 @@ capabilities:
                   - "null"
                 description: 关联用户 ID，用于代他人发布场景。
               subject_ids:
-                type: array
+                type: [array, "null"]
                 items:
                   type: integer
                 description: 科目 ID 列表。
               grade_ids:
-                type: array
+                type: [array, "null"]
                 items:
                   type: integer
                 description: 年级 ID 列表。
@@ -212,12 +213,12 @@ capabilities:
                     description: 薪资原文。
                   amount_min:
                     type:
-                      - number
+                      - string
                       - "null"
                     description: 最低金额。
                   amount_max:
                     type:
-                      - number
+                      - string
                       - "null"
                     description: 最高金额。
                   currency:
@@ -288,11 +289,8 @@ capabilities:
                       - "null"
                     description: 老师性别要求。
                   required_education_levels:
-                    type:
-                      - array
-                      - string
-                      - "null"
-                    description: 老师学历要求，可为数组或原始字符串。
+                    type: array
+                    description: 老师学历要求，使用字符串数组。
                     items:
                       type: string
                   required_education_note:
@@ -301,25 +299,17 @@ capabilities:
                       - "null"
                     description: 老师学历补充说明。
                   required_school_names:
-                    type:
-                      - array
-                      - string
-                      - "null"
-                    description: 老师学校要求，可为数组或原始字符串。
+                    type: array
+                    description: 老师学校要求，使用字符串数组。
                     items:
                       type: string
                   required_school_tiers:
-                    type:
-                      - array
-                      - string
-                      - "null"
-                    description: 老师学校层次要求，可为数组或原始字符串。
+                    type: array
+                    description: 老师学校层次要求，使用字符串数组。
                     items:
                       type: string
                   required_school_ids:
-                    type:
-                      - array
-                      - "null"
+                    type: array
                     description: 已确认的学校目录 ID 列表。
                     items:
                       type: integer
@@ -350,6 +340,22 @@ capabilities:
                   - offline
                   - hybrid
                 description: 授课方式，默认 hybrid。
+              weekly_frequency_min:
+                type: [integer, "null"]
+                minimum: 1
+                maximum: 65535
+              weekly_frequency_max:
+                type: [integer, "null"]
+                minimum: 1
+                maximum: 65535
+              session_duration_minutes_min:
+                type: [integer, "null"]
+                minimum: 1
+                maximum: 65535
+              session_duration_minutes_max:
+                type: [integer, "null"]
+                minimum: 1
+                maximum: 65535
               class_time_text:
                 type:
                   - string
@@ -551,6 +557,7 @@ capabilities:
         limit:
           type: integer
           minimum: 1
+          maximum: 100
           description: 返回的简表数量，后端最大 100。
     response_schema:
       type: object
@@ -1763,10 +1770,12 @@ capabilities:
             - "null"
           properties:
             gender:
+              enum: [male, female, other, unknown, null]
               type:
                 - string
                 - "null"
             birth_date:
+              format: date
               type:
                 - string
                 - "null"
@@ -1818,6 +1827,7 @@ capabilities:
                     - boolean
                     - "null"
                 current_role:
+                  enum: [teacher, parent, null]
                   type:
                     - string
                     - "null"

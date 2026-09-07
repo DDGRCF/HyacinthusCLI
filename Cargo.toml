@@ -1,7 +1,7 @@
-# Change note: release CLI v0.1.13 with capability-free Claw startup and sealed runtime inputs.
+# Change note: release CLI v0.1.14 with canonical parser imports and strict request validation.
 [package]
 name = "hyacinthus"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 description = "Agent-oriented CLI for Hyacinthus backend operations"
 license = "MIT"

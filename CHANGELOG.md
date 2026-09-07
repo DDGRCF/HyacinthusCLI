@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.14
+
+- Preserve decimal compensation strings without floating-point conversion and align condition arrays with the backend.
+- Map real parser drafts into closed import requests, excluding review diagnostics and preserving optional fields.
+- Enforce closed object schemas, bounds and RFC 3339 dates locally so dry-run detects rejected payloads.
+- Explain HTTP 413 failures, retain proxy status, and classify revoked grants as authentication errors.
+
 ## 0.1.13
 
 - Normalize requirement extension deadlines to RFC 3339; business times without an offset use +08:00 and invalid dates fail locally.

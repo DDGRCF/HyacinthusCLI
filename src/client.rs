@@ -1,4 +1,4 @@
-// 改动说明：Agent device flow 使用精确 session 路径与冻结 DTO，命令失败只读顶层 error_code。
+// Change note: preserve HTTP failures, explain oversized imports and classify revoked Agent grants.
 use std::io::Read;
 use std::time::Duration;
 
@@ -329,6 +329,15 @@ fn build_http_client() -> CliResult<Client> {
 /// Read and decode one bounded JSON response without trusting `Content-Length` alone.
 fn decode_response(response: reqwest::blocking::Response) -> CliResult<(u16, BackendEnvelope)> {
     let status = response.status().as_u16();
+    if status == 413 {
+        let mut error = CliError::api(
+            "HTTP 413: request body exceeds the server limit",
+            Some("REQUEST_TOO_LARGE".to_string()),
+            Some(serde_json::json!({"http_status": status})),
+        );
+        error.hint = Some("Reduce the import batch or input file size; use a distinct idempotency key for each new batch.".to_string());
+        return Err(error);
+    }
     if response
         .content_length()
         .is_some_and(|length| length > MAX_RESPONSE_BYTES)
@@ -358,7 +367,11 @@ fn decode_response(response: reqwest::blocking::Response) -> CliResult<(u16, Bac
         ));
     }
     let value = serde_json::from_slice::<Value>(&body).map_err(|err| {
-        CliError::api(format!("invalid backend JSON response: {err}"), None, None)
+        CliError::api(
+            format!("invalid backend JSON response (HTTP {status}): {err}"),
+            None,
+            Some(serde_json::json!({"http_status": status})),
+        )
     })?;
     Ok((status, decode_backend_envelope(value)?))
 }
@@ -443,6 +456,7 @@ fn is_auth_error_code(error_code: &str) -> bool {
     matches!(
         error_code,
         "AUTH_AGENT_INVALID"
+            | "AUTH_ACCESS_INVALID"
             | "PERMISSION_DENIED"
             | "AGENT_INSTANCE_MISMATCH"
             | "MISSING_AGENT_SCOPE"
