@@ -1,4 +1,4 @@
-// 改动说明：验证全新配置的授权身份在 login 和独立 wait 进程之间保持一致。
+// Change note: verify extension dates use RFC 3339 before sending real HTTP requests.
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -1191,7 +1191,7 @@ fn requirements_extend_dry_run_builds_request() {
     );
     assert_eq!(
         value["data"]["request"]["body"]["expires_at"],
-        "2026-07-10T12:00:00"
+        "2026-07-10T12:00:00+08:00"
     );
     assert_eq!(value["meta"]["capability"], "requirements.extend");
 }
@@ -4822,4 +4822,31 @@ fn oversized_backend_response_is_rejected() {
     assert_eq!(output.status.code(), Some(1));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON stdout");
     assert_eq!(value["error"]["code"], "RESPONSE_TOO_LARGE");
+}
+
+/// Rejects malformed deadlines locally instead of sending a request that the backend cannot parse.
+#[test]
+fn requirements_extend_rejects_invalid_deadline_locally() {
+    for deadline in ["", "not-a-date", "2027-02-30T12:00:00", "2027-07-10"] {
+        let output = cli()
+            .args([
+                "requirements",
+                "extend",
+                "TIME-CONTRACT",
+                "--expires-at",
+                deadline,
+                "--dry-run",
+            ])
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+            .env("HYACINTHUS_AGENT_SCOPES", "requirements:write")
+            .output()
+            .expect("CLI deadline validation");
+        assert!(!output.status.success());
+        let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("--expires-at"));
+    }
 }

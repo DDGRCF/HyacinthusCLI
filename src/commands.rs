@@ -1,4 +1,4 @@
-// 改动说明：发起授权前保存首次生成的身份，使 login 与 wait 跨进程保持一致。
+// 改动说明：延期时间统一为 RFC 3339，未指定时区的业务时间按东八区解释。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -1661,6 +1661,21 @@ fn requirements_search(cli: &Cli, args: &RequirementsSearchArgs) -> CliResult<(V
     ))
 }
 
+/// Converts explicit-offset or local business deadlines to one RFC 3339 wire representation.
+fn normalize_requirement_deadline(value: &str) -> CliResult<String> {
+    use chrono::{DateTime, FixedOffset, NaiveDateTime, SecondsFormat, TimeZone};
+    const BUSINESS_OFFSET: &str = "+08:00";
+    let value = value.trim();
+    let timestamp = DateTime::parse_from_rfc3339(value).or_else(|_| {
+        let local = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f")?;
+        let offset: FixedOffset = BUSINESS_OFFSET.parse()?;
+        Ok(offset.from_local_datetime(&local).single().expect("fixed offset"))
+    }).map_err(|_: chrono::ParseError| CliError::validation(
+        "--expires-at must be a valid ISO date-time, e.g. 2027-07-10T12:00:00+08:00; omitted timezone means +08:00"
+    ))?;
+    Ok(timestamp.to_rfc3339_opts(SecondsFormat::AutoSi, true))
+}
+
 /// Extend one requirement deadline through the Agent write endpoint.
 fn requirements_extend(cli: &Cli, args: &RequirementsExtendArgs) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
@@ -1681,11 +1696,7 @@ fn requirements_extend(cli: &Cli, args: &RequirementsExtendArgs) -> CliResult<(V
         "requirement_code": requirement_code,
     });
     if let Some(expires_at) = &args.expires_at {
-        let normalized = expires_at.trim();
-        if normalized.is_empty() {
-            return Err(CliError::validation("--expires-at must not be empty"));
-        }
-        payload["expires_at"] = json!(normalized);
+        payload["expires_at"] = json!(normalize_requirement_deadline(expires_at)?);
     }
     validate_request_payload(&capability, &payload)?;
     if args.dry_run {
