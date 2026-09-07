@@ -1,4 +1,4 @@
-// 改动说明：延期时间统一为 RFC 3339，未指定时区的业务时间按东八区解释。
+// Change note: project parser drafts onto import fields and normalize RFC 3339 deadlines.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -2713,33 +2713,17 @@ fn normalize_parsed_row_for_import(mut parsed: Value) -> Value {
     let Some(object) = parsed.as_object_mut() else {
         return parsed;
     };
+    // Parser diagnostics belong to review output, never the closed write contract.
+    object.remove("geo_diagnostic");
+    for key in ["requirement_type", "preferred_mode"] {
+        if object.get(key).is_some_and(Value::is_null) {
+            object.remove(key);
+        }
+    }
     if object.get("time_slots").is_some_and(Value::is_null) {
         object.insert("time_slots".to_string(), json!([]));
     }
-    if let Some(compensation) = object
-        .get_mut("compensation")
-        .and_then(Value::as_object_mut)
-    {
-        normalize_json_number_field(compensation, "amount_min");
-        normalize_json_number_field(compensation, "amount_max");
-    }
     parsed
-}
-
-/// Convert numeric strings emitted by parse responses into JSON numbers.
-fn normalize_json_number_field(object: &mut Map<String, Value>, key: &str) {
-    let Some(raw) = object.get(key).and_then(Value::as_str) else {
-        return;
-    };
-    let Ok(number) = raw.parse::<f64>() else {
-        return;
-    };
-    if !number.is_finite() {
-        return;
-    }
-    if let Some(value) = serde_json::Number::from_f64(number) {
-        object.insert(key.to_string(), Value::Number(value));
-    }
 }
 
 /// Convert import-raw flags into the existing backend batch-parse payload.

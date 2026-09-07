@@ -1,4 +1,4 @@
-// 改动说明：轻量 JSON Schema 校验器补齐数组 maxItems 约束与嵌套校验。
+// Change note: enforce closed objects, numeric/string bounds, and ISO date formats before HTTP.
 use serde_json::Value;
 
 /// JSON Schema primitive types supported by the CLI validator.
@@ -45,6 +45,34 @@ fn validate_at(path: &str, schema: &Value, value: &Value, errors: &mut Vec<Strin
         if let Some(number) = value.as_f64() {
             if number < minimum {
                 errors.push(format!("{path} must be >= {minimum}"));
+            }
+        }
+    }
+    if let Some(maximum) = schema.get("maximum").and_then(Value::as_f64) {
+        if let Some(number) = value.as_f64() {
+            if number > maximum {
+                errors.push(format!("{path} must be <= {maximum}"));
+            }
+        }
+    }
+    if let Some(max_length) = schema.get("maxLength").and_then(Value::as_u64) {
+        if let Some(text) = value.as_str() {
+            if text.chars().count() > max_length as usize {
+                errors.push(format!("{path} length must be <= {max_length}"));
+            }
+        }
+    }
+    if schema.get("format").and_then(Value::as_str) == Some("date-time") {
+        if let Some(text) = value.as_str() {
+            if chrono::DateTime::parse_from_rfc3339(text).is_err() {
+                errors.push(format!("{path} must be an RFC 3339 date-time"));
+            }
+        }
+    }
+    if schema.get("format").and_then(Value::as_str) == Some("date") {
+        if let Some(text) = value.as_str() {
+            if text.len() != 10 || chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d").is_err() {
+                errors.push(format!("{path} must be an ISO calendar date"));
             }
         }
     }
@@ -136,7 +164,15 @@ fn validate_object(path: &str, schema: &Value, value: &Value, errors: &mut Vec<S
             }
         }
     }
-    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+    let properties = schema.get("properties").and_then(Value::as_object);
+    if schema.get("additionalProperties").and_then(Value::as_bool) == Some(false) {
+        for name in object.keys() {
+            if !properties.is_some_and(|items| items.contains_key(name)) {
+                errors.push(format!("{path}.{name} is not allowed"));
+            }
+        }
+    }
+    let Some(properties) = properties else {
         return;
     };
     for (name, child_schema) in properties {
@@ -362,5 +398,35 @@ mod tests {
             validate_schema_definition(&json!({"type": "array", "maxItems": 1.5})),
             vec!["$.maxItems must be a non-negative integer"]
         );
+    }
+    /// Enforces closed input and both numeric and Unicode character limits.
+    #[test]
+    fn validates_closed_objects_and_upper_bounds() {
+        let schema = json!({"type":"object", "additionalProperties":false,
+            "properties":{"count":{"type":"integer","maximum":2},"label":{"type":"string","maxLength":2}}});
+        assert!(validate(&schema, &json!({"count":2,"label":"中文"})).is_empty());
+        assert_eq!(
+            validate(&schema, &json!({"count":3,"label":"三个字","unknown":1})).len(),
+            3
+        );
+        assert_eq!(
+            validate(
+                &json!({"type":"object","additionalProperties":false}),
+                &json!({"x":1})
+            )
+            .len(),
+            1
+        );
+    }
+
+    /// Rejects impossible dates and timestamps lacking the canonical timezone offset.
+    #[test]
+    fn validates_iso_dates_and_rfc3339_timezones() {
+        let date = json!({"type":"string", "format":"date"});
+        assert!(validate(&date, &json!("2024-02-29")).is_empty());
+        assert!(!validate(&date, &json!("2027-02-29")).is_empty());
+        let timestamp = json!({"type":"string", "format":"date-time"});
+        assert!(validate(&timestamp, &json!("2027-01-01T12:00:00+08:00")).is_empty());
+        assert!(!validate(&timestamp, &json!("2027-01-01T12:00:00")).is_empty());
     }
 }

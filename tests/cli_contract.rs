@@ -1,4 +1,4 @@
-// Change note: verify extension dates use RFC 3339 before sending real HTTP requests.
+// Change note: exercise real parser drafts, closed import contracts and RFC 3339 deadlines.
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -1228,7 +1228,7 @@ fn requirements_extend_real_execution_requires_yes() {
 #[test]
 fn requirements_extend_yes_posts_to_backend() {
     let base_url = mock_once_expect_request(
-        r#"{"code":0,"message":"success","data":{"requirement_id":123,"requirement_code":"KKH347","expires_at":"2026-07-10T12:00:00"}}"#,
+        r#"{"code":0,"message":"success","data":{"requirement_id":123,"requirement_code":"KKH347","expires_at":"2026-07-10T12:00:00+08:00"}}"#,
         "POST /api/v1/agent/requirements/extend HTTP/1.1",
     );
     let output = cli()
@@ -4013,7 +4013,7 @@ fn requirements_import_raw_dry_run_allows_session_token_without_instance_id() {
 fn requirements_import_raw_dry_run_preserves_catalog_ids_from_parse() {
     let base_url = mock_sequence(vec![
         r#"{"code":0,"message":"success","data":{"job_id":"job-2","status":"queued"}}"#,
-        r#"{"code":0,"message":"success","data":{"job_id":"job-2","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"初一-英语-男","description":"初一英语男生，需要辅导","subject_ids":[123],"grade_ids":[456],"compensation":{"amount_min":"160","amount_max":"200"}}}]}}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-2","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"初一-英语-男","description":"初一英语男生，需要辅导","subject_ids":[123],"grade_ids":[456],"geo_diagnostic":null,"weekly_frequency_min":1,"time_slots":null,"compensation":{"amount_min":"160","amount_max":"200"}}}]}}}"#,
     ]);
     let output = cli()
         .args([
@@ -4050,8 +4050,8 @@ fn requirements_import_raw_dry_run_preserves_catalog_ids_from_parse() {
     assert_eq!(row["title"], "初一-英语-男");
     assert_eq!(row["subject_ids"], serde_json::json!([123]));
     assert_eq!(row["grade_ids"], serde_json::json!([456]));
-    assert_eq!(row["compensation"]["amount_min"], 160.0);
-    assert_eq!(row["compensation"]["amount_max"], 200.0);
+    assert_eq!(row["compensation"]["amount_min"], "160");
+    assert_eq!(row["compensation"]["amount_max"], "200");
 }
 
 #[test]
@@ -4126,11 +4126,11 @@ fn requirements_import_accepts_data_only_parse_output() {
     assert_eq!(body["confirmed_rows"][0]["title"], "高一数学");
     assert_eq!(
         body["confirmed_rows"][0]["compensation"]["amount_min"],
-        90.0
+        "90"
     );
     assert_eq!(
         body["confirmed_rows"][0]["compensation"]["amount_max"],
-        120.0
+        "1.2E2"
     );
     assert_eq!(
         body["confirmed_rows"][0]["time_slots"],
@@ -4849,4 +4849,134 @@ fn requirements_extend_rejects_invalid_deadline_locally() {
             .unwrap()
             .contains("--expires-at"));
     }
+}
+
+/// Covers the complete nullable backend draft rather than a hand-trimmed mock row.
+#[test]
+fn requirements_import_projects_complete_backend_parser_draft() {
+    let draft = serde_json::json!({
+        "related_user_id": null, "requirement_code": "AUDIT-1", "target_role_id": null,
+        "requirement_type": null, "subject_ids": null, "grade_ids": null, "title": null,
+        "description": "audited parser row", "raw_text": null, "compensation": null,
+        "condition": null, "preferred_mode": null, "class_time_text": null,
+        "weekly_frequency_min": 1, "weekly_frequency_max": 2,
+        "session_duration_minutes_min": 60, "session_duration_minutes_max": 90,
+        "time_slots": null, "address_detail": null, "location": null,
+        "geo_diagnostic": {"quality": "precise"}, "tags": null,
+        "ext": {"source": "audit"}
+    });
+    let source = serde_json::json!({"rows": [{"can_auto_commit": true,
+        "needs_confirmation": false, "parsed": draft}]})
+    .to_string();
+    let value = run_json_expect_code(
+        &["requirements", "import", "--data", &source, "--dry-run"],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:write"),
+        ],
+        0,
+    );
+    let row = &value["data"]["request"]["body"]["confirmed_rows"][0];
+    assert!(row.get("geo_diagnostic").is_none());
+    assert!(row.get("requirement_type").is_none());
+    assert!(row.get("preferred_mode").is_none());
+    assert_eq!(row["time_slots"], serde_json::json!([]));
+    assert_eq!(row["weekly_frequency_max"], 2);
+    assert_eq!(row["ext"]["source"], "audit");
+}
+
+/// Prevents a successful dry-run for unknown fields and invalid import deadlines.
+#[test]
+fn requirements_import_rejects_invalid_closed_payload_before_http() {
+    for field in [
+        serde_json::json!({"geo_diagnostic": null}),
+        serde_json::json!({"expires_at": "2027-02-30T12:00:00Z"}),
+        serde_json::json!({"weekly_frequency_min": 65536}),
+    ] {
+        let mut row = serde_json::json!({"description": "audit"});
+        row.as_object_mut()
+            .unwrap()
+            .extend(field.as_object().unwrap().clone());
+        let source = serde_json::json!({"confirmed_rows": [row]}).to_string();
+        let value = run_json_expect_code(
+            &["requirements", "import", "--data", &source, "--dry-run"],
+            &[
+                ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+                ("HYACINTHUS_AGENT_SCOPES", "requirements:write"),
+            ],
+            2,
+        );
+        assert_eq!(value["ok"], false);
+    }
+}
+
+/// Reproduces the production search requests rejected for limit=1000 without network access.
+#[test]
+fn requirements_search_rejects_oversized_page_locally() {
+    let value = run_json_expect_code(
+        &[
+            "requirements",
+            "search",
+            "--keyword",
+            "audit",
+            "--limit",
+            "1000",
+        ],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:read"),
+        ],
+        2,
+    );
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("must be <= 100"));
+}
+
+/// Preserves exact decimal strings through parser output conversion into HTTP import payloads.
+#[test]
+fn requirements_import_preserves_decimal_precision() {
+    let source = r#"{"rows":[{"can_auto_commit":true,"needs_confirmation":false,"parsed":{"description":"audit","compensation":{"amount_min":"123456789012345.123456789"},"geo_diagnostic":null}}]}"#;
+    let value = run_json_expect_code(
+        &["requirements", "import", "--data", source, "--dry-run"],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:write"),
+        ],
+        0,
+    );
+    assert_eq!(
+        value["data"]["request"]["body"]["confirmed_rows"][0]["compensation"]["amount_min"],
+        "123456789012345.123456789"
+    );
+}
+
+/// Retains proxy status and gives a useful batch-size action even when the body is HTML.
+#[test]
+fn proxy_body_limit_returns_actionable_error() {
+    let base_url = mock_once_status(413, "<html>Request Entity Too Large</html>");
+    let value = run_json_expect_code(
+        &["--base-url", &base_url, "capability", "list", "--remote"],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        1,
+    );
+    assert_eq!(value["error"]["code"], "REQUEST_TOO_LARGE");
+    assert_eq!(value["error"]["detail"]["http_status"], 413);
+    assert!(value["error"]["hint"].as_str().unwrap().contains("batch"));
+}
+
+/// Uses the current backend's revoked-grant code for the authentication exit class.
+#[test]
+fn revoked_access_grant_maps_to_auth_error() {
+    let base_url = mock_once_status(
+        401,
+        r#"{"code":4010,"error_code":"AUTH_ACCESS_INVALID","message":"Authentication is no longer valid.","data":null}"#,
+    );
+    let value = run_json_expect_code(
+        &["--base-url", &base_url, "capability", "list", "--remote"],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        3,
+    );
+    assert_eq!(value["error"]["code"], "AUTH_ACCESS_INVALID");
 }
