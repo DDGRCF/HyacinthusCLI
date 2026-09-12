@@ -333,3 +333,9 @@ Local packaging:
 cargo build --locked --release --target x86_64-unknown-linux-gnu
 scripts/package.sh x86_64-unknown-linux-gnu
 ```
+
+### Address confidence
+
+Requirement geocoding is owned by the server. Complete-address geocoding runs first; lower-confidence results may use POI suggestions for additional evidence. A failed suggestion request does not erase an existing forward coordinate.
+
+`requirements import-raw` exposes `geocoding` with each parsed row's index, address, location and `geo_diagnostic`. Low address confidence alone does not exclude a row from import. The CLI follows server validation flags and retains diagnostics on rows skipped for other validation failures. Direct import stores available coordinates and their server-generated diagnostic; unchanged reliable coordinates can be reused on resubmission. No CLI loop guesses addresses or retries completed rows automatically.

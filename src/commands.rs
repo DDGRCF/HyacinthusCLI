@@ -1,4 +1,4 @@
-// Change note: gate capability pagination and validate each returned page against its wire schema.
+// Change note: expose address confidence diagnostics without adding a CLI coordinate-import gate.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -2254,6 +2254,7 @@ fn requirements_import_raw(
         .unwrap_or_else(|| format!("cli-import-raw-{}", Uuid::new_v4()));
     let mut result = json!({
         "parse_summary": parse_summary,
+        "geocoding": parse_geocoding_diagnostics(&parse_data),
         "import_summary": null,
         "auto_commit_rows": confirmed_rows.len(),
         "skipped_rows": skipped_rows,
@@ -2920,6 +2921,8 @@ fn import_raw_skip_summary(index: usize, row: &Value) -> Value {
         "requirement_code": parsed_text("requirement_code").or_else(|| raw_text("requirement_code")),
         "title": parsed_text("title"),
         "address_detail": parsed_text("address_detail"),
+        "location": parsed.and_then(|item| item.get("location")),
+        "geo_diagnostic": parsed.and_then(|item| item.get("geo_diagnostic")),
         "confirmation_reasons": row.get("confirmation_reasons").cloned().unwrap_or_else(|| json!([])),
         "errors": row.get("errors").cloned().unwrap_or_else(|| json!([])),
         "warnings": row.get("warnings").cloned().unwrap_or_else(|| json!([]))
@@ -3312,4 +3315,41 @@ fn write_output_if_needed(data: &Value, output: Option<&str>) -> CliResult<()> {
             .map_err(|err| CliError::validation(format!("failed to write {path}: {err}")))?;
     }
     Ok(())
+}
+
+/// Exposes coordinate confidence for all parsed rows without filtering the import candidates.
+fn parse_geocoding_diagnostics(data: &Value) -> Vec<Value> {
+    data.get("rows").and_then(Value::as_array).into_iter().flatten().enumerate().filter_map(|(index, row)| {
+        let parsed = row.get("parsed")?;
+        let diagnostic = parsed.get("geo_diagnostic")?;
+        Some(json!({"index":index + 1,"address_detail":parsed.get("address_detail"),"location":parsed.get("location"),"geo_diagnostic":diagnostic}))
+    }).collect()
+}
+
+#[cfg(test)]
+mod location_confidence_tests {
+    use super::*;
+    /// Low location confidence is displayed and does not override the server's import decision.
+    #[test]
+    fn low_geocode_confidence_does_not_block_cli_import() {
+        let data = json!({"rows":[{
+            "can_auto_commit":true,"needs_confirmation":false,
+            "parsed":{"title":"job","address_detail":"杭州市临平区万达附近","location":{"lng":120.1,"lat":30.2},"geo_diagnostic":{"quality":"low","warnings":["GEO_LOCALITY_CONFLICT"]}}
+        }]});
+        let (ready, skipped) = split_import_raw_rows(&data).expect("split");
+        assert_eq!(ready.len(), 1);
+        assert!(skipped.is_empty());
+        assert_eq!(ready[0]["location"]["lng"], 120.1);
+        let evidence = parse_geocoding_diagnostics(&data);
+        assert_eq!(evidence[0]["geo_diagnostic"]["quality"], "low");
+    }
+
+    /// Other real validation failures remain review-only and retain their coordinate evidence.
+    #[test]
+    fn unrelated_validation_failure_keeps_diagnostics() {
+        let data = json!({"rows":[{"can_auto_commit":false,"needs_confirmation":true,"parsed":{"location":{"lng":120.1,"lat":30.2},"geo_diagnostic":{"quality":"low"}}}]});
+        let (ready, skipped) = split_import_raw_rows(&data).expect("split");
+        assert!(ready.is_empty());
+        assert_eq!(skipped[0]["geo_diagnostic"]["quality"], "low");
+    }
 }
