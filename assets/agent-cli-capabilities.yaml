@@ -1,5 +1,5 @@
 # 改动说明：需求解析 schema 使用 strict/lenient 封闭模式并默认 strict。
-version: "2026-09-04"
+version: "2026-09-20"
 backend_min_version: "0.1.0"
 capabilities:
   - id: requirements.batch_parse
@@ -2145,3 +2145,293 @@ capabilities:
         command: hyacinthus claw skills list
       - title: 按来源查询 Claw Skills
         command: hyacinthus claw skills list --source builtin
+
+  - id: requirements.upload_run
+    title: 创建或续读岗位上传运行单
+    description: 最多100条的持久化写入通道；先提交岗位，再由后台异步解析地图，断线后以 client_run_id 续读相同结果。
+    domain: requirements
+    command: hyacinthus capability run requirements.upload_run
+    method: POST
+    path: /api/v1/agent/requirements/upload-runs
+    required_scopes: [requirements:write]
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: true
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    request_schema:
+      type: object
+      additionalProperties: false
+      required: [client_run_id, rows]
+      properties:
+        instance_id: {type: [integer, "null"], minimum: 1}
+        client_run_id: {type: string, minLength: 1, maxLength: 160}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [client_row_id, requirement]
+            properties:
+              client_row_id: {type: string, minLength: 1, maxLength: 160}
+              revision_key: {type: [string, "null"], maxLength: 160}
+              operation_key: {type: [string, "null"], maxLength: 200}
+              requirement: {type: object}
+    response_schema: &requirement_upload_run_response
+      type: object
+      required: [upload_run_id, client_run_id, status, stage, total, created, updated, extended, write_failed, geo_pending, geo_resolved, geo_needs_review, geo_unavailable, row_outcomes]
+      properties:
+        upload_run_id: {type: string}
+        client_run_id: {type: string}
+        status: {type: string}
+        stage: {type: string}
+        geo_run_id: {type: [string, "null"]}
+        geocode_job_id: {type: [string, "null"]}
+        total: {type: integer, minimum: 0}
+        created: {type: integer, minimum: 0}
+        updated: {type: integer, minimum: 0}
+        extended: {type: integer, minimum: 0}
+        write_failed: {type: integer, minimum: 0}
+        geo_pending: {type: integer, minimum: 0}
+        geo_resolved: {type: integer, minimum: 0}
+        geo_needs_review: {type: integer, minimum: 0}
+        geo_unavailable: {type: integer, minimum: 0}
+        created_at: {type: string}
+        updated_at: {type: string}
+        completed_at: {type: [string, "null"]}
+        row_outcomes:
+          type: array
+          items:
+            type: object
+            required: [row_id, row_index, client_row_id, write_status, geo_status, geocode_attempts]
+            properties:
+              row_id: {type: integer}
+              row_index: {type: integer, minimum: 1}
+              client_row_id: {type: string}
+              requirement_code: {type: [string, "null"]}
+              revision_key: {type: [string, "null"]}
+              requirement_id: {type: [integer, "null"]}
+              write_status: {type: string, enum: [pending, created, updated, extended, failed]}
+              geo_status: {type: string, enum: [pending, resolved, needs_review, invalid, unavailable, not_required]}
+              geo_reason: {type: [string, "null"]}
+              city_boundary_pass: {type: [boolean, "null"]}
+              geo_job_id: {type: [string, "null"]}
+              geocode_attempts: {type: integer, minimum: 0}
+              queue_wait_ms: {type: [integer, "null"], minimum: 0}
+    examples:
+      - title: 写入一批并取得运行单
+        command: hyacinthus capability run requirements.upload_run --data @upload-run.json --yes
+
+  - id: requirements.geocode_run
+    title: 查询岗位地图运行单
+    description: 按 geo_run_id 读取同一批逐编号地图状态、原因、尝试次数和排队时间。
+    domain: requirements
+    command: hyacinthus capability run requirements.geocode_run
+    method: POST
+    path: /api/v1/agent/requirements/geocode-runs/query
+    required_scopes: [requirements:read]
+    risk_level: read
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    request_schema:
+      type: object
+      additionalProperties: false
+      required: [geo_run_id]
+      properties:
+        geo_run_id: {type: string, minLength: 36, maxLength: 36}
+    response_schema: *requirement_upload_run_response
+    examples:
+      - title: 查询地图队列终态
+        command: hyacinthus capability run requirements.geocode_run --data '{"geo_run_id":"00000000-0000-0000-0000-000000000000"}'
+
+  - id: requirements.geocode_release
+    title: 批量放行或重排地图复核
+    description: 对同一 geo_run_id 内最多100条待复核行提交人工坐标，或在不带 location 时重新排队。
+    domain: requirements
+    command: hyacinthus capability run requirements.geocode_release
+    method: POST
+    path: /api/v1/agent/requirements/geocode-runs/release
+    required_scopes: [requirements:write]
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: true
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    request_schema:
+      type: object
+      additionalProperties: false
+      required: [geo_run_id, rows]
+      properties:
+        geo_run_id: {type: string, minLength: 36, maxLength: 36}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              row_id: {type: [integer, "null"], minimum: 1}
+              requirement_code: {type: [string, "null"], maxLength: 64}
+              confirmed_address: {type: [string, "null"], maxLength: 255}
+              location:
+                type: [object, "null"]
+                properties:
+                  lat: {type: number, minimum: -90, maximum: 90}
+                  lng: {type: number, minimum: -180, maximum: 180}
+              diagnostic: {type: [object, "null"]}
+    response_schema: *requirement_upload_run_response
+    examples:
+      - title: 放行复核行
+        command: hyacinthus capability run requirements.geocode_release --data @geo-release.json --yes
+
+  - id: requirements.batch_extend_v2
+    title: 批量延期并复用坐标
+    description: 最多100条按准确编号延期，保持现有业务内容和已验证坐标，不调用地图。
+    domain: requirements
+    command: hyacinthus capability run requirements.batch_extend_v2
+    method: POST
+    path: /api/v1/agent/requirements/batch-extend
+    required_scopes: [requirements:write]
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: true
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    request_schema:
+      type: object
+      additionalProperties: false
+      required: [client_run_id, rows]
+      properties:
+        instance_id: {type: [integer, "null"], minimum: 1}
+        client_run_id: {type: string, minLength: 1, maxLength: 160}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [client_row_id, requirement_code]
+            properties:
+              client_row_id: {type: string, minLength: 1, maxLength: 160}
+              requirement_code: {type: string, minLength: 1, maxLength: 64}
+              revision_key: {type: [string, "null"], maxLength: 160}
+              expires_at: {type: [string, "null"]}
+    response_schema: *requirement_upload_run_response
+    examples:
+      - title: 延期不变岗位
+        command: hyacinthus capability run requirements.batch_extend_v2 --data @batch-extend.json --yes
+
+  - id: requirements.identity_lookup
+    title: 批量岗位身份与版本查询
+    description: 最多200条只读判断 new、update、duplicate，并返回当前岗位ID与版本键；不写库、不调用地图。
+    domain: requirements
+    command: hyacinthus capability run requirements.identity_lookup
+    method: POST
+    path: /api/v1/agent/requirements/identity-lookup
+    required_scopes: [requirements:read]
+    risk_level: read
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    request_schema:
+      type: object
+      additionalProperties: false
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [client_row_id, requirement_code]
+            properties:
+              client_row_id: {type: string, minLength: 1, maxLength: 160}
+              requirement_code: {type: string, minLength: 1, maxLength: 64}
+              revision_key: {type: [string, "null"], maxLength: 160}
+    response_schema:
+      type: array
+      items:
+        type: object
+        required: [client_row_id, requirement_code, classification]
+        properties:
+          client_row_id: {type: string}
+          requirement_code: {type: string}
+          requirement_id: {type: [integer, "null"]}
+          current_revision_key: {type: [string, "null"]}
+          classification: {type: string, enum: [new, update, duplicate]}
+    examples:
+      - title: 上传前查询版本动作
+        command: hyacinthus capability run requirements.identity_lookup --data @identity-lookup.json
+
+  - id: requirements.preflight_v2
+    title: 岗位只读预检
+    description: 最多200条检查结构和身份动作；不写库、不调用地图，逐行返回可提交性。
+    domain: requirements
+    command: hyacinthus capability run requirements.preflight_v2
+    method: POST
+    path: /api/v1/agent/requirements/preflight
+    required_scopes: [requirements:parse]
+    risk_level: read
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    request_schema:
+      type: object
+      additionalProperties: false
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            additionalProperties: false
+            required: [client_row_id, requirement]
+            properties:
+              client_row_id: {type: string, minLength: 1, maxLength: 160}
+              revision_key: {type: [string, "null"], maxLength: 160}
+              operation_key: {type: [string, "null"], maxLength: 200}
+              requirement: {type: object}
+    response_schema:
+      type: object
+      required: [valid, rows]
+      properties:
+        valid: {type: boolean}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [index, client_row_id, classification, valid, errors]
+            properties:
+              index: {type: integer, minimum: 1}
+              client_row_id: {type: string}
+              requirement_code: {type: [string, "null"]}
+              classification: {type: string, enum: [new, update, duplicate]}
+              valid: {type: boolean}
+              errors: {type: array, items: {type: string}}
+    examples:
+      - title: 提交前一次只读预检
+        command: hyacinthus capability run requirements.preflight_v2 --data @preflight.json

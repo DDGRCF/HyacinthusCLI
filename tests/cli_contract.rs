@@ -640,7 +640,7 @@ fn capability_list_returns_embedded_manifest() {
     let value = run_json(&["capability", "list"]);
 
     assert_eq!(value["ok"], true);
-    assert_eq!(value["data"]["version"], "2026-09-04");
+    assert_eq!(value["data"]["version"], "2026-09-20");
     assert!(value["data"]["capabilities"]
         .as_array()
         .unwrap()
@@ -671,6 +671,20 @@ fn capability_list_returns_embedded_manifest() {
         .unwrap()
         .iter()
         .any(|capability| capability["id"] == "claw.skills_list"));
+    for id in [
+        "requirements.upload_run",
+        "requirements.geocode_run",
+        "requirements.geocode_release",
+        "requirements.batch_extend_v2",
+        "requirements.identity_lookup",
+        "requirements.preflight_v2",
+    ] {
+        assert!(value["data"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|capability| capability["id"] == id));
+    }
 }
 
 #[test]
@@ -680,7 +694,7 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 22);
+    assert_eq!(value["data"]["capability_count"], 28);
     assert_eq!(value["meta"]["source"], "embedded");
 }
 
@@ -3706,7 +3720,7 @@ fn jq_filters_success_envelope() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value, "2026-09-04");
+    assert_eq!(value, "2026-09-20");
 }
 
 #[test]
