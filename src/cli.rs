@@ -1,4 +1,4 @@
-// 改动说明：需求解析使用严格默认和显式 --lenient，并移除重复的 auth grant 别名。
+// 改动说明：需求解析默认走宽松字段匹配，保留显式 --strict 模板复核，并移除重复的 auth grant 别名。
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -690,9 +690,12 @@ pub struct RequirementsParseArgs {
     pub preset_contact_phone: Option<String>,
     #[arg(long)]
     pub preset_contact_wechat: Option<String>,
-    /// Enables reviewed field aliases and noncanonical ordering without invoking AI.
+    /// Keeps the default lenient field matching explicit for scripts that document the mode.
     #[arg(long, default_value_t = false)]
     pub lenient: bool,
+    /// Forces canonical format2 field names and order for a strict review pass.
+    #[arg(long, conflicts_with = "lenient")]
+    pub strict: bool,
     #[arg(long)]
     pub dry_run: bool,
     #[arg(long, short = 'o')]
@@ -735,9 +738,12 @@ pub struct RequirementsImportRawArgs {
     pub preset_contact_phone: Option<String>,
     #[arg(long)]
     pub preset_contact_wechat: Option<String>,
-    /// Enables reviewed field aliases and noncanonical ordering without invoking AI.
+    /// Keeps the default lenient field matching explicit for scripts that document the mode.
     #[arg(long, default_value_t = false)]
     pub lenient: bool,
+    /// Forces canonical format2 field names and order for a strict review pass.
+    #[arg(long, conflicts_with = "lenient")]
+    pub strict: bool,
     #[arg(long)]
     pub idempotency_key: Option<String>,
     #[arg(long)]

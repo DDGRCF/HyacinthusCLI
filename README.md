@@ -144,7 +144,8 @@ hyacinthus requirements search --keyword "高一数学" --scope active -q '.data
 hyacinthus requirements extend KKH347 --dry-run -q '.data.request.body'
 hyacinthus requirements extend KKH347 --yes -q '.data.expires_at'
 hyacinthus requirements parse --text "高一数学" --dry-run -q '.data.request.body'
-hyacinthus requirements parse --text "高一数学" --dry-run --lenient
+hyacinthus requirements parse --text "高一数学" --dry-run
+hyacinthus requirements parse --text "高一数学" --dry-run --strict
 hyacinthus --request-id trace-123 requirements parse --text "高一数学" --dry-run
 ```
 

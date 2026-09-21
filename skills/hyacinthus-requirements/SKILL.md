@@ -126,7 +126,7 @@ hyacinthus requirements options
 hyacinthus requirements parse --file input.txt
 ```
 
-默认解析要求每条以独占行 `需求N：` 开始，并严格包含上述 13 个字段。只有输入无法先整理成固定模板时，才显式添加 `--advanced-matching`。
+默认解析按字段名宽松匹配格式二；只有需要复核固定字段名和顺序时才显式添加 `--strict`。城市和联系方式应通过 `--preset-city`、`--preset-contact-phone`、`--preset-contact-wechat` 传入。
 
 短文本可以直接使用 `--text`：
 

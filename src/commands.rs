@@ -1,4 +1,4 @@
-// Change note: gate capability pagination and validate each returned page against its wire schema.
+// Change note: default requirement parse/import-raw to lenient format-two matching while retaining strict review, and gate capability pagination against its wire schema.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -2606,11 +2606,7 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
                 payload["instance_id"] = json!(instance_id);
             }
         }
-        if args.lenient {
-            payload["mode"] = json!("lenient");
-        } else if payload.get("mode").is_none() {
-            payload["mode"] = json!("strict");
-        }
+        payload["mode"] = json!(if args.strict { "strict" } else { "lenient" });
         return Ok(payload);
     }
     let raw_text = if let Some(file) = &args.file {
@@ -2630,7 +2626,7 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
         "preset_contact_phone": args.preset_contact_phone,
         "preset_contact_wechat": args.preset_contact_wechat,
         "preset_city": args.preset_city,
-        "mode": if args.lenient { "lenient" } else { "strict" }
+        "mode": if args.strict { "strict" } else { "lenient" }
     });
     if let Some(resolved_instance_id) = instance_id {
         payload["instance_id"] = json!(resolved_instance_id);
@@ -2761,11 +2757,7 @@ fn build_import_raw_parse_payload(
                 payload["instance_id"] = json!(instance_id);
             }
         }
-        if args.lenient {
-            payload["mode"] = json!("lenient");
-        } else if payload.get("mode").is_none() {
-            payload["mode"] = json!("strict");
-        }
+        payload["mode"] = json!(if args.strict { "strict" } else { "lenient" });
         return Ok(payload);
     }
     let raw_text = if let Some(file) = &args.file {
@@ -2785,7 +2777,7 @@ fn build_import_raw_parse_payload(
         "preset_contact_phone": args.preset_contact_phone,
         "preset_contact_wechat": args.preset_contact_wechat,
         "preset_city": args.preset_city,
-        "mode": if args.lenient { "lenient" } else { "strict" }
+        "mode": if args.strict { "strict" } else { "lenient" }
     });
     if let Some(resolved_instance_id) = instance_id {
         payload["instance_id"] = json!(resolved_instance_id);

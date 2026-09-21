@@ -1,4 +1,4 @@
-// Change note: read complete mock HTTP requests and declare closed connections with failure diagnostics.
+// Change note: read complete mock HTTP requests, cover lenient-by-default requirement parsing, and declare closed connections with failure diagnostics.
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -602,7 +602,20 @@ fn dry_run_snapshots_match_golden() {
 }
 
 #[test]
-fn requirements_parse_lenient_flag_overrides_strict_default() {
+fn requirements_parse_defaults_to_lenient_and_strict_flag_overrides() {
+    let default_value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "--instance-id",
+        "1",
+        "requirements",
+        "parse",
+        "--text",
+        "高一数学，瓯海区，周末上课",
+        "--dry-run",
+    ]);
+    assert_eq!(default_value["data"]["request"]["body"]["mode"], "lenient");
+
     let value = run_json(&[
         "--base-url",
         "http://localhost:8000",
@@ -612,11 +625,11 @@ fn requirements_parse_lenient_flag_overrides_strict_default() {
         "parse",
         "--text",
         "高一数学，瓯海区，周末上课",
-        "--lenient",
+        "--strict",
         "--dry-run",
     ]);
 
-    assert_eq!(value["data"]["request"]["body"]["mode"], "lenient");
+    assert_eq!(value["data"]["request"]["body"]["mode"], "strict");
 }
 
 #[test]

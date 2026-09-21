@@ -1,4 +1,4 @@
-# 改动说明：需求解析 schema 使用 strict/lenient 封闭模式并默认 strict。
+# 改动说明：需求解析 schema 使用 strict/lenient 封闭模式并默认 lenient，保留 strict 复核。
 version: "2026-09-20"
 backend_min_version: "0.1.0"
 capabilities:
@@ -52,8 +52,8 @@ capabilities:
           enum:
             - strict
             - lenient
-          default: strict
-          description: 解析模式；默认严格校验 format2，仅在显式指定 lenient 时允许字段别名和非标准顺序，不调用 AI。
+          default: lenient
+          description: 解析模式；默认按字段名宽松匹配 format2，显式指定 strict 时复核标准字段名和顺序，不调用 AI。
     response_schema:
       type: object
       required:
@@ -113,8 +113,8 @@ capabilities:
     examples:
       - title: 从文本文件解析需求
         command: hyacinthus requirements parse --file input.txt
-      - title: 启用宽松字段匹配
-        command: hyacinthus requirements parse --file input.txt --lenient
+      - title: 严格复核格式二
+        command: hyacinthus requirements parse --file input.txt --strict
 
   - id: requirements.batch_import
     title: 批量导入需求
