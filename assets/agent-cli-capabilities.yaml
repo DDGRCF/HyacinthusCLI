@@ -1,10 +1,10 @@
-# 改动说明：需求解析 schema 使用 strict/lenient 封闭模式并默认 lenient，保留 strict 复核。
+# 改动说明：保留导入幂等、授权与字段 schema；confirmed_rows.ext 补充用户联系方式 user_contact_phone/user_contact_wechat（string|null，仅 warning 口径）。
 version: "2026-09-20"
 backend_min_version: "0.1.0"
 capabilities:
   - id: requirements.batch_parse
     title: 批量解析需求
-    description: Agent 专用异步需求批量解析能力；CLI 自动轮询任务并返回最终候选记录。
+    description: Agent 专用异步需求批量解析能力；CLI 自动轮询任务并返回最终候选记录，字段裁决仅由后端 errors 决定，warnings 永不阻断。
     domain: requirements
     command: hyacinthus requirements parse
     method: POST
@@ -27,7 +27,7 @@ capabilities:
         instance_id:
           type: integer
           minimum: 1
-          description: Claw 实例 ID；静态 Agent key 调用时必填，session token 调用默认使用授权用户身份。
+          description: 可选请求实例标识（i64 正整数）；授权身份由绑定 Agent token 确定，不用于选择授权用户。
         raw_text:
           type: string
           minLength: 1
@@ -53,7 +53,7 @@ capabilities:
             - strict
             - lenient
           default: lenient
-          description: 解析模式；默认按字段名宽松匹配 format2，显式指定 strict 时复核标准字段名和顺序，不调用 AI。
+          description: CSV/XLSX和标签文本按字段名及可识别别名映射到16字段规范，允许任意列数/顺序，缺失可选字段留空；未知/重复/冲突提供行级诊断，业务必填校验不变。默认 lenient，不调用 AI。
     response_schema:
       type: object
       required:
@@ -71,19 +71,21 @@ capabilities:
               description: 可自动提交的行数。
             needs_confirmation:
               type: integer
-              description: 需要人工确认的行数。
+              description: 存在后端 errors、需要修正的行数。
         rows:
           type: array
           items:
             type: object
             required:
+              - parsed
+              - errors
               - can_auto_commit
               - needs_confirmation
               - confirmation_reasons
             properties:
               parsed:
                 type: object
-                description: 解析后的需求字段；低置信地理编码会在 geo_diagnostic 中返回质量、置信度和 GEO_* 警告。
+                description: 后端裁决的需求字段；geo_diagnostic 仅提供地理编码诊断，不阻断导入。
                 properties:
                   geo_diagnostic:
                     type:
@@ -92,33 +94,34 @@ capabilities:
                     description: 地理编码诊断，包含 quality、confidence、warnings、reverse 等字段。
               warnings:
                 type: array
-                description: 解析警告；地理编码低置信时包含 GEO_* 代码。
+                description: 非阻断解析警告；包括 GEO_* 地理编码诊断，不影响自动提交。
                 items:
                   type: string
               errors:
                 type: array
+                description: 后端字段错误，唯一字段阻断来源。
                 items:
                   type: string
-              confidence:
-                type: number
               can_auto_commit:
                 type: boolean
+                description: 后端 errors 为空时为 true。
               needs_confirmation:
                 type: boolean
+                description: 后端 errors 非空时为 true。
               confirmation_reasons:
                 type: array
-                description: 需要确认的原因；地理编码低置信时包含 GEO_* 代码。
+                description: 等于后端 errors，不包含 warnings。
                 items:
                   type: string
     examples:
       - title: 从文本文件解析需求
         command: hyacinthus requirements parse --file input.txt
-      - title: 严格复核格式二
+      - title: 严格复核字段模板
         command: hyacinthus requirements parse --file input.txt --strict
 
   - id: requirements.batch_import
     title: 批量导入需求
-    description: Agent 专用需求批量导入能力，创建或更新已确认需求，并返回逐批统计与失败行；CLI import-raw 会先解析并只导入 can_auto_commit 且无需确认的行。
+    description: Agent 专用需求批量导入能力，创建或更新已确认需求，并返回逐批统计与失败行；CLI import-raw 会先解析并只导入后端 can_auto_commit 为 true 且 errors 为空的行，warnings 永不阻断。
     domain: requirements
     command: hyacinthus requirements import
     method: POST
@@ -137,26 +140,24 @@ capabilities:
       additionalProperties: false
       required:
         - confirmed_rows
+        - idempotency_key
       properties:
         instance_id:
           type: integer
           minimum: 1
-          description: Claw 实例 ID；静态 Agent key 调用时必填，session token 调用默认使用授权用户身份。
+          description: 可选请求实例标识（i64 正整数）；授权身份由绑定 Agent token 确定，不用于选择授权用户。
         idempotency_key:
-          type:
-            - string
-            - "null"
-          description: 批量导入幂等 key；重试同一批导入时必须复用。
+          type: string
+          minLength: 1
+          description: 调用方必填的稳定批次键，不允许空白或首尾空格；重试同一批导入必须复用，不自动生成或替换。
         confirmed_rows:
           type: array
           minItems: 1
           maxItems: 2000
-          description: 已确认可导入的需求创建 payload 列表。
+          description: 待提交需求列表；后端最终裁决，warnings不阻断，确认标志不能绕过errors。
           items:
             type: object
             additionalProperties: false
-            required:
-              - description
             properties:
               requirement_type:
                 type: string
@@ -164,12 +165,10 @@ capabilities:
                 description: 需求类型，例如 tutoring。
               title:
                 type: [string, "null"]
-                minLength: 1
-                description: 需求标题。
+                description: 可选需求标题；留空不阻断。
               description:
-                type: string
-                minLength: 1
-                description: 需求描述。
+                type: [string, "null"]
+                description: 可选需求描述；缺省、null或空串均不阻断。
               raw_text:
                 type:
                   - string
@@ -179,7 +178,7 @@ capabilities:
                 type:
                   - string
                   - "null"
-                description: 外部需求编号；为空时由后端处理。
+                description: 必填外部需求编号；为空或原文出现两个编号时由后端报error，不自动生成。
               target_role_id:
                 type:
                   - integer
@@ -251,7 +250,7 @@ capabilities:
                     type:
                       - number
                       - "null"
-                    description: 解析置信度。
+                    description: 薪资独立业务元数据，不参与批量提交资格；不是已删除的批量解析置信度。
                   ext:
                     type:
                       - object
@@ -317,7 +316,8 @@ capabilities:
                     type:
                       - string
                       - "null"
-                    description: 老师资格或职业要求。
+                    enum: [part_time_teacher, full_time_teacher, any, null]
+                    description: 老师职业要求（兼职、全职或不限）；家教经验等文本条件写入 description，不作为职业枚举。
                   source:
                     type:
                       - string
@@ -327,7 +327,7 @@ capabilities:
                     type:
                       - number
                       - "null"
-                    description: 解析置信度。
+                    description: 条件独立业务元数据，不参与批量提交资格；不是已删除的批量解析置信度。
                   ext:
                     type:
                       - object
@@ -419,7 +419,18 @@ capabilities:
                 type:
                   - object
                   - "null"
-                description: 需求扩展字段；Agent 导入会补默认 priority/admin contact，并写入压缩后的 geo_diagnostic 与 geo_location_source。
+                description: 需求扩展字段；Agent 导入会补默认 priority/admin contact，并写入压缩后的 geo_diagnostic 与 geo_location_source。用户联系方式（用户联系方式/用户电话/用户微信）拆分写入 user_contact_phone、user_contact_wechat。
+                properties:
+                  user_contact_phone:
+                    type:
+                      - string
+                      - "null"
+                    description: 用户联系方式电话（string|null）；为空静默，格式非法仅 warning（USER_CONTACT_PHONE_INVALID），不阻断提交。
+                  user_contact_wechat:
+                    type:
+                      - string
+                      - "null"
+                    description: 用户联系方式微信（string|null）；为空静默，格式非法仅 warning（USER_CONTACT_WECHAT_INVALID），不阻断提交。
     response_schema:
       type: object
       required:
@@ -429,6 +440,8 @@ capabilities:
         - created_ids
         - updated_ids
         - failed_rows
+        - idempotency_key
+        - idempotent_replay
       properties:
         created:
           type: integer
@@ -449,7 +462,8 @@ capabilities:
           items:
             type: object
         idempotency_key:
-          type: [string, "null"]
+          type: string
+          minLength: 1
         idempotent_replay:
           type: boolean
           description: true 表示后端返回的是同一幂等 key 的历史结果。
@@ -485,7 +499,7 @@ capabilities:
             - integer
             - "null"
           minimum: 1
-          description: Claw 实例 ID；静态 Agent key 调用时必填，session token 调用默认使用授权用户身份。
+          description: 可选请求实例标识（i64 正整数）；授权身份由绑定 Agent token 确定，不用于选择授权用户。
         requirement_code:
           type: string
           minLength: 1
@@ -2025,126 +2039,6 @@ capabilities:
     examples:
       - title: 查询后台状态
         command: hyacinthus admin status
-
-  - id: claw.status
-    title: Claw 运行状态
-    description: Agent 专用 Claw 只读状态查询能力，返回非敏感 Broker activation/observation 汇总。
-    domain: claw
-    command: hyacinthus claw status
-    method: GET
-    path: /api/v1/agent/claw/status
-    required_scopes:
-      - claw:read
-    risk_level: read
-    supports_dry_run: false
-    supports_idempotency: false
-    supports_pagination: false
-    supports_file_upload: false
-    min_backend_version: "0.1.0"
-    introduced_in: "0.1.0"
-    request_schema:
-      type: object
-      properties: {}
-    response_schema:
-      type: object
-      required:
-        - provider
-        - control_plane
-        - activated_instance_count
-        - current_observation_count
-        - attention_instance_count
-        - unobserved_instance_count
-        - provider_profile_count
-      properties:
-        provider:
-          type: string
-        control_plane:
-          type: string
-          enum: [broker]
-        activated_instance_count:
-          type: integer
-          minimum: 0
-        current_observation_count:
-          type: integer
-          minimum: 0
-        attention_instance_count:
-          type: integer
-          minimum: 0
-        unobserved_instance_count:
-          type: integer
-          minimum: 0
-        provider_profile_count:
-          type: integer
-          minimum: 0
-    examples:
-      - title: 查询 Claw 运行状态
-        command: hyacinthus claw status
-
-  - id: claw.skills_list
-    title: Claw Skills 列表
-    description: Agent 专用 Claw Skills 只读查询能力，返回服务端已登记 Skill 的非敏感摘要。
-    domain: claw
-    command: hyacinthus claw skills list
-    method: GET
-    path: /api/v1/agent/claw/skills
-    required_scopes:
-      - claw:read
-    risk_level: read
-    supports_dry_run: false
-    supports_idempotency: false
-    supports_pagination: false
-    supports_file_upload: false
-    min_backend_version: "0.1.0"
-    introduced_in: "0.1.0"
-    request_schema:
-      type: object
-      properties:
-        source:
-          type:
-            - string
-            - "null"
-    response_schema:
-      type: array
-      items:
-        type: object
-        required:
-          - id
-          - name
-          - display_name
-          - version
-          - source
-          - is_featured
-          - tags
-        properties:
-          id:
-            type: integer
-          name:
-            type: string
-          display_name:
-            type: string
-          description:
-            type:
-              - string
-              - "null"
-          version:
-            type: string
-          source:
-            type: string
-          is_featured:
-            type: boolean
-          tags:
-            type: array
-            items:
-              type: string
-          config_schema:
-            type:
-              - object
-              - "null"
-    examples:
-      - title: 查询全部 Claw Skills
-        command: hyacinthus claw skills list
-      - title: 按来源查询 Claw Skills
-        command: hyacinthus claw skills list --source builtin
 
   - id: requirements.upload_run
     title: 创建或续读岗位上传运行单

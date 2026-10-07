@@ -1,0 +1,22 @@
+{
+  "name": "hyacinthus-pi-agent-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test lib/*.test.mjs docker/*.test.mjs",
+    "preflight": "node lib/preflight.mjs",
+    "test:sandbox": "node lib/sandbox-probe.mjs",
+    "test:agent": "node docker/sop-run.mjs",
+    "test:report": "node docker/sop-report.mjs",
+    "list": "E2E_TELEMETRY_DISABLED=1 e2e list",
+    "test:agent:host": "node lib/run.mjs",
+    "test:report:host": "node lib/report-suite.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "e2e": "0.17.0",
+    "playwright": "1.62.1"
+  }
+}

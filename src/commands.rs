@@ -1,21 +1,22 @@
-// Change note: default requirement parse/import-raw to lenient format-two matching while retaining strict review, and gate capability pagination against its wire schema.
+// 改动说明：批量导入保持后端 errors 裁决与联系方式 warning 中文标签；优先级规则 dry-run 保存完整 --output 预览。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::CommandFactory;
 use clap_complete::{generate, Shell};
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::cli::{
     AdminSubcommand, AuthLoginArgs, AuthSubcommand, AuthTokenSubcommand, AuthWaitArgs,
-    CapabilitySubcommand, ClawSkillsSubcommand, ClawSubcommand, Cli, Command, ConfigSubcommand,
-    RequirementsCatalogCreateMissingArgs, RequirementsCatalogReorderArgs,
-    RequirementsCatalogSubcommand, RequirementsExtendArgs, RequirementsImportArgs,
-    RequirementsImportRawArgs, RequirementsParseArgs, RequirementsPriorityRuleAddArgs,
+    CapabilitySubcommand, Cli, Command, ConfigSubcommand, RequirementsCatalogCreateMissingArgs,
+    RequirementsCatalogReorderArgs, RequirementsCatalogSubcommand, RequirementsExtendArgs,
+    RequirementsImportArgs, RequirementsImportRawArgs, RequirementsParseArgs,
+    RequirementsParseJobArgs, RequirementsPriorityRuleAddArgs,
     RequirementsPriorityRuleExportJsonArgs, RequirementsPriorityRuleIdWriteArgs,
     RequirementsPriorityRuleImportJsonArgs, RequirementsPriorityRuleMatchesArgs,
     RequirementsPriorityRuleUpdateArgs, RequirementsPriorityRulesListArgs,
@@ -34,12 +35,6 @@ use crate::skills;
 
 /// Execute the parsed CLI command and print the standard success or error envelope.
 pub fn run(cli: Cli) -> i32 {
-    if let Command::ClawRuntimeGuard(args) = &cli.command {
-        return crate::claw_guard::run(args);
-    }
-    if let Command::ClawRuntimeProbe(args) = &cli.command {
-        return crate::claw_guard::run_probe(args);
-    }
     if let Command::Completion(args) = &cli.command {
         if let Err(err) = completion_command(&args.shell) {
             return output::print_error(
@@ -51,26 +46,79 @@ pub fn run(cli: Cli) -> i32 {
         }
         return 0;
     }
-    let format = match config::resolve_output_format(cli.profile.as_deref(), cli.format) {
+    if let Command::Skills(command) = &cli.command {
+        if let crate::cli::SkillsSubcommand::Read(args) = &command.command {
+            if !args.json && cli.format.is_none() {
+                return print_skill_markdown(&cli, args);
+            }
+        }
+    }
+    // Embedded discovery must work even when the saved profile is broken or unauthenticated.
+    let local_skills = matches!(cli.command, Command::Skills(_));
+    let skill_json = matches!(&cli.command, Command::Skills(command)
+        if matches!(&command.command, crate::cli::SkillsSubcommand::Read(args) if args.json));
+    let resolved_format = if skill_json {
+        Ok(crate::cli::OutputFormat::Json)
+    } else if local_skills {
+        Ok(cli.format.unwrap_or(crate::cli::OutputFormat::Json))
+    } else {
+        config::resolve_output_format(cli.profile.as_deref(), cli.format)
+    };
+    let format = match resolved_format {
         Ok(format) => format,
         Err(err) => {
             return output::print_error(
                 &err,
                 json!({ "profile": cli.profile }),
                 crate::cli::OutputFormat::Json,
-                !cli.no_notice,
+                !cli.no_notice && !local_skills,
             )
         }
     };
+    if let Err(err) = output::preflight_query(cli.jq.as_deref()) {
+        return output::print_error(&err, json!({ "profile": cli.profile }), format, false);
+    }
     match dispatch(&cli) {
-        Ok((data, meta)) => {
-            output::print_success(data, meta, format, cli.jq.as_deref(), !cli.no_notice)
-        }
+        Ok((data, meta)) => output::print_success(
+            data,
+            meta,
+            format,
+            cli.jq.as_deref(),
+            !cli.no_notice && !local_skills,
+        ),
         Err(err) => output::print_error(
             &err,
             json!({ "profile": cli.profile }),
             format,
-            !cli.no_notice,
+            !cli.no_notice && !local_skills,
+        ),
+    }
+}
+
+/// Emit trusted embedded Markdown directly, keeping discovery independent of configuration.
+fn print_skill_markdown(cli: &Cli, args: &crate::cli::SkillReadArgs) -> i32 {
+    let result = if cli.jq.is_some() {
+        Err(CliError::validation(
+            "skills read requires --json before applying --jq",
+        ))
+    } else {
+        skills::read(&args.name, args.path.as_deref())
+    };
+    match result {
+        Ok(file) => match io::stdout().lock().write_all(file.content.as_bytes()) {
+            Ok(()) => 0,
+            Err(error) => output::print_error(
+                &CliError::internal(format!("cannot write skill: {error}")),
+                json!({"command": "skills read"}),
+                crate::cli::OutputFormat::Json,
+                false,
+            ),
+        },
+        Err(error) => output::print_error(
+            &error,
+            json!({"command": "skills read"}),
+            crate::cli::OutputFormat::Json,
+            false,
         ),
     }
 }
@@ -79,7 +127,6 @@ pub fn run(cli: Cli) -> i32 {
 fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
     match &cli.command {
         Command::Admin(command) => admin_command(cli, &command.command),
-        Command::Claw(command) => claw_command(cli, &command.command),
         Command::Config(command) => config_command(cli, &command.command),
         Command::Auth(command) => auth_command(cli, &command.command),
         Command::Doctor(args) => doctor_command(cli, args.offline, args.strict),
@@ -92,6 +139,7 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
             RequirementsSubcommand::Search(args) => requirements_search(cli, args),
             RequirementsSubcommand::Extend(args) => requirements_extend(cli, args),
             RequirementsSubcommand::Parse(args) => requirements_parse(cli, args),
+            RequirementsSubcommand::ParseJob(args) => requirements_parse_job(cli, args),
             RequirementsSubcommand::Import(args) => requirements_import(cli, args),
             RequirementsSubcommand::ImportRaw(args) => requirements_import_raw(cli, args),
             RequirementsSubcommand::PriorityRules(command) => {
@@ -108,12 +156,6 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
         },
         Command::Skills(command) => skills_command(&command.command),
         Command::Completion(_) => unreachable!("completion is handled before envelope output"),
-        Command::ClawRuntimeGuard(_) => {
-            unreachable!("runtime guard command is handled before user configuration")
-        }
-        Command::ClawRuntimeProbe(_) => {
-            unreachable!("runtime probe command is handled before user configuration")
-        }
     }
 }
 
@@ -140,70 +182,26 @@ fn admin_command(cli: &Cli, command: &AdminSubcommand) -> CliResult<(Value, Valu
     }
 }
 
-/// Handle Claw runtime commands and nested skill operations.
-fn claw_command(cli: &Cli, command: &ClawSubcommand) -> CliResult<(Value, Value)> {
-    match command {
-        ClawSubcommand::Status => {
-            let ctx = config::resolve_context(
-                cli.profile.as_deref(),
-                cli.base_url.as_deref(),
-                cli.instance_id,
-                cli.request_id.as_deref(),
-            )?;
-            let capability = manifest::find_capability("claw.status")?;
-            manifest::ensure_supported(&capability)?;
-            ensure_scopes(&ctx, &capability.required_scopes)?;
-            let data = ApiClient::new(ctx)?.get(&capability.path)?;
-            validate_response_payload(&capability, &data)?;
-            Ok((
-                data,
-                json!({ "command": "claw status", "capability": "claw.status" }),
-            ))
-        }
-        ClawSubcommand::Skills(command) => match &command.command {
-            ClawSkillsSubcommand::List(args) => claw_skills_list(cli, args.source.as_deref()),
-        },
-    }
-}
-
-/// List skills visible to the current Claw instance.
-fn claw_skills_list(cli: &Cli, source: Option<&str>) -> CliResult<(Value, Value)> {
-    let ctx = config::resolve_context(
-        cli.profile.as_deref(),
-        cli.base_url.as_deref(),
-        cli.instance_id,
-        cli.request_id.as_deref(),
-    )?;
-    let capability = manifest::find_capability("claw.skills_list")?;
-    manifest::ensure_supported(&capability)?;
-    ensure_scopes(&ctx, &capability.required_scopes)?;
-    let params = source.map(|source| json!({ "source": source }));
-    let path = query::append_json_params(&capability.path, params.as_ref())?;
-    let data = ApiClient::new(ctx)?.get(&path)?;
-    validate_response_payload(&capability, &data)?;
-    Ok((
-        data,
-        json!({ "command": "claw skills list", "capability": "claw.skills_list" }),
-    ))
-}
-
-/// Handle bundled skill list, show, export, and installation checks.
+/// Handle embedded skill discovery, reference reading, full export and installation checks.
 fn skills_command(command: &crate::cli::SkillsSubcommand) -> CliResult<(Value, Value)> {
     match command {
-        crate::cli::SkillsSubcommand::List => Ok((
-            serialize_value(skills::list())?,
+        crate::cli::SkillsSubcommand::List(args) => Ok((
+            match args.path.as_deref() {
+                Some(path) => json!({"path": path, "entries": skills::list_path(path)?}),
+                None => serialize_value(skills::list()?)?,
+            },
             json!({ "command": "skills list" }),
         )),
-        crate::cli::SkillsSubcommand::Show(args) => Ok((
-            serialize_value(skills::show(&args.name)?)?,
-            json!({ "command": "skills show", "skill": args.name }),
+        crate::cli::SkillsSubcommand::Read(args) => Ok((
+            serialize_value(skills::read(&args.name, args.path.as_deref())?)?,
+            json!({ "command": "skills read", "skill": args.name }),
         )),
         crate::cli::SkillsSubcommand::Export(args) => Ok((
             serialize_value(skills::export_to(std::path::Path::new(&args.dir))?)?,
             json!({ "command": "skills export" }),
         )),
         crate::cli::SkillsSubcommand::Check(args) => Ok((
-            serialize_value(skills::check_dir(std::path::Path::new(&args.dir)))?,
+            serialize_value(skills::check_dir(std::path::Path::new(&args.dir))?)?,
             json!({ "command": "skills check" }),
         )),
     }
@@ -214,8 +212,13 @@ fn config_command(cli: &Cli, command: &ConfigSubcommand) -> CliResult<(Value, Va
     let mut config = config::load_config()?;
     match command {
         ConfigSubcommand::SetProfile(args) => {
-            let base_url = config::normalize_base_url(&args.base_url)?;
             let existing = config.profiles.get(&args.name).cloned();
+            let base_url = config::normalize_base_url(
+                args.base_url
+                    .as_deref()
+                    .or_else(|| existing.as_ref().map(|profile| profile.base_url.as_str()))
+                    .unwrap_or(config::DEFAULT_BASE_URL),
+            )?;
             let (client_instance_id, client_display_name, client_type) =
                 config::complete_profile_identity(
                     &args.name,
@@ -462,23 +465,22 @@ fn auth_token_command(cli: &Cli, command: &AuthTokenSubcommand) -> CliResult<(Va
                 cli.instance_id,
                 cli.request_id.as_deref(),
             )?;
-            match ApiClient::new(ctx)?.current_agent_grant() {
-                Ok(data) => Ok((data, json!({ "command": "auth token status" }))),
-                Err(mut error) if error.code.as_deref() == Some("AUTH_AGENT_INVALID") => {
-                    let profile_name = clear_local_agent_credentials(cli)?;
-                    error.detail = Some(json!({
-                        "profile": profile_name,
-                        "credentials_cleared": true,
-                        "token_present": false
-                    }));
-                    error.hint = Some(
-                        "the Agent credential is terminal and was removed; run `hyacinthus auth login` to authorize again"
-                            .to_string(),
-                    );
-                    Err(error)
-                }
-                Err(error) => Err(error),
-            }
+            let source = ctx.token_source;
+            let profile_name = ctx.profile_name.clone();
+            let data = ApiClient::new(ctx)?.current_agent_grant().map_err(|mut error| {
+                error.detail = Some(json!({
+                    "backend_detail": error.detail,
+                    "profile": profile_name,
+                    "token_source": source,
+                    "credentials_cleared": false
+                }));
+                error.hint = Some("verify the selected token's client ID/type binding; credentials were retained".to_string());
+                error
+            })?;
+            Ok((
+                data,
+                json!({ "command": "auth token status", "token_source": source }),
+            ))
         }
         AuthTokenSubcommand::Revoke => logout_agent_token(cli, false, "auth token revoke"),
     }
@@ -490,7 +492,8 @@ fn logout_agent_token(
     local_only: bool,
     command_name: &str,
 ) -> CliResult<(Value, Value)> {
-    let mut remote_terminal = false;
+    let mut source = None;
+    let profile_name;
     if !local_only {
         let ctx = config::resolve_context(
             cli.profile.as_deref(),
@@ -498,35 +501,36 @@ fn logout_agent_token(
             cli.instance_id,
             cli.request_id.as_deref(),
         )?;
+        source = ctx.token_source;
+        profile_name = ctx.profile_name.clone();
         if let Err(mut error) = ApiClient::new(ctx)?.revoke_current_agent_grant() {
-            if error.code.as_deref() == Some("AUTH_AGENT_INVALID") {
-                remote_terminal = true;
-            } else {
-                if error.exit_code == output::EXIT_NETWORK {
-                    error.detail = Some(json!({
-                        "authenticated": true,
-                        "acknowledgement_pending": true,
-                        "remote_revocation_pending": true,
-                        "local_credentials_retained": true
-                    }));
-                    error.hint = Some(
-                        "remote revocation was not acknowledged; retry logout or use --local-only explicitly"
-                            .to_string(),
-                    );
-                }
-                return Err(error);
-            }
+            error.detail = Some(json!({
+                "backend_detail": error.detail,
+                "token_source": source,
+                "authenticated": true,
+                "acknowledgement_pending": true,
+                "remote_revocation_pending": true,
+                "local_credentials_retained": true
+            }));
+            error.hint = Some("revocation was not acknowledged; verify token/client binding and retry logout, or explicitly use --local-only".to_string());
+            return Err(error);
         }
+        if source == Some(config::CredentialSource::Config) {
+            clear_local_agent_credentials(cli)?;
+        }
+    } else {
+        profile_name = clear_local_agent_credentials(cli)?;
     }
-    let profile_name = clear_local_agent_credentials(cli)?;
     Ok((
         json!({
             "profile": profile_name,
             "authenticated": false,
-            "token_present": false,
+            "token_present": source == Some(config::CredentialSource::Env),
+            "token_source": source,
+            "local_credentials_cleared": local_only || source == Some(config::CredentialSource::Config),
+            "environment_token_retained": source == Some(config::CredentialSource::Env),
             "scope_count": 0,
-            "remote_revoked": !local_only && !remote_terminal,
-            "remote_terminal": remote_terminal,
+            "remote_revoked": !local_only,
             "local_only": local_only
         }),
         json!({ "command": command_name }),
@@ -536,11 +540,7 @@ fn logout_agent_token(
 /// Clear one selected profile only after remote revocation succeeds or local-only is explicit.
 fn clear_local_agent_credentials(cli: &Cli) -> CliResult<String> {
     let mut file = config::load_config()?;
-    let profile_name = cli
-        .profile
-        .clone()
-        .or(file.active_profile.clone())
-        .ok_or_else(|| CliError::validation("no profile selected"))?;
+    let profile_name = config::resolve_profile_name(&file, cli.profile.as_deref());
     let profile = file
         .profiles
         .get_mut(&profile_name)
@@ -1467,7 +1467,7 @@ fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<
         manifest::find_capability(&args.id)?
     };
     manifest::ensure_supported(&capability)?;
-    ensure_scopes(&ctx, &capability.required_scopes)?;
+    output::preflight_path(args.output.as_deref())?;
     let body = if let Some(data) = &args.data {
         read_json_arg(data)?
     } else {
@@ -1501,8 +1501,18 @@ fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<
             json!({ "command": "capability run", "capability": args.id }),
         ));
     }
+    ensure_scopes(&ctx, &capability.required_scopes)?;
     ensure_execution_confirmed(args.yes, &capability)?;
+    let instance_id = body
+        .get("instance_id")
+        .and_then(Value::as_i64)
+        .or(ctx.instance_id);
+    let import_key = body
+        .get("idempotency_key")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
     let client = ApiClient::new(ctx)?;
+    let mut parse_job_id = None;
     let data = match capability.method.as_str() {
         "GET" => {
             if args.pagination.page_all {
@@ -1512,7 +1522,12 @@ fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<
             }
         }
         "POST" if capability.id == "requirements.batch_parse" => {
-            submit_and_wait_for_parse_job(&client, body)?
+            let (data, job_id) = submit_and_wait_for_parse_job(&client, body)?;
+            parse_job_id = Some(job_id);
+            data
+        }
+        "POST" if capability.id == "requirements.batch_import" => {
+            execute_batch_import(&client, &capability, &path, body)?
         }
         "POST" => client.post(&path, body)?,
         "PUT" => client.put(&path, body)?,
@@ -1529,14 +1544,32 @@ fn capability_run(cli: &Cli, args: &crate::cli::CapabilityRunArgs) -> CliResult<
         {
             validate_response_payload(&capability, page)?;
         }
-    } else {
-        validate_response_payload(&capability, &data)?;
+    } else if capability.id != "requirements.batch_import" {
+        validate_response_payload(&capability, &data).map_err(|error| {
+            if let Some(job_id) = &parse_job_id {
+                parse_job_recovery(error, job_id, instance_id, "result_validation")
+            } else {
+                error
+            }
+        })?;
     }
-    write_output_if_needed(&data, args.output.as_deref())?;
+    write_output_if_needed(&data, args.output.as_deref()).map_err(|error| {
+        if capability.id == "requirements.batch_import" {
+            committed_import_error(error, &data, import_key.as_deref())
+        } else if let Some(job_id) = &parse_job_id {
+            parse_job_recovery(error, job_id, instance_id, "result_delivery")
+        } else {
+            error
+        }
+    })?;
     Ok((
         data,
         json!({
             "command": "capability run",
+            "job_id": parse_job_id,
+            "instance_id": instance_id,
+            "committed": capability.id == "requirements.batch_import",
+            "idempotency_key": import_key,
             "capability": args.id,
             "source": if args.remote { "remote" } else { "embedded" }
         }),
@@ -2082,16 +2115,19 @@ fn priority_rule_write(
     ctx: RuntimeContext,
     request: PriorityRuleWriteRequest<'_>,
 ) -> CliResult<(Value, Value)> {
+    output::preflight_path(request.output)?;
     validate_request_payload(request.capability, &request.payload)?;
     if request.dry_run {
+        let data = dry_run_payload(
+            &request.capability.method,
+            request.path,
+            request.payload,
+            None,
+            ctx.request_id.as_deref(),
+        );
+        write_output_if_needed(&data, request.output)?;
         return Ok((
-            dry_run_payload(
-                &request.capability.method,
-                request.path,
-                request.payload,
-                None,
-                ctx.request_id.as_deref(),
-            ),
+            data,
             json!({ "command": request.command_name, "capability": request.capability.id }),
         ));
     }
@@ -2137,6 +2173,7 @@ fn priority_rule_path(path: &str, rule_id: i64) -> String {
 
 /// Parse raw requirement input into confirmable rows through the backend parser.
 fn requirements_parse(cli: &Cli, args: &RequirementsParseArgs) -> CliResult<(Value, Value)> {
+    output::preflight_path(args.output.as_deref())?;
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
         cli.base_url.as_deref(),
@@ -2146,62 +2183,57 @@ fn requirements_parse(cli: &Cli, args: &RequirementsParseArgs) -> CliResult<(Val
     let payload = build_parse_payload(ctx.instance_id, args)?;
     let capability = manifest::find_capability("requirements.batch_parse")?;
     manifest::ensure_supported(&capability)?;
-    ensure_scopes(&ctx, &capability.required_scopes)?;
     validate_request_payload(&capability, &payload)?;
     if args.dry_run {
-        return Ok((
-            dry_run_payload(
-                "POST",
-                "/api/v1/agent/requirements/batch-parse-jobs",
-                payload,
-                None,
-                ctx.request_id.as_deref(),
-            ),
-            json!({ "command": "requirements parse" }),
-        ));
+        let data = dry_run_payload(
+            "POST",
+            "/api/v1/agent/requirements/batch-parse-jobs",
+            payload,
+            None,
+            ctx.request_id.as_deref(),
+        );
+        write_output_if_needed(&data, args.output.as_deref())?;
+        return Ok((data, json!({ "command": "requirements parse" })));
     }
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    let instance_id = payload.get("instance_id").and_then(Value::as_i64);
     let client = ApiClient::new(ctx)?;
-    let data = submit_and_wait_for_parse_job(&client, payload)?;
-    validate_response_payload(&capability, &data)?;
-    write_output_if_needed(&data, args.output.as_deref())?;
+    let (data, job_id) = submit_and_wait_for_parse_job(&client, payload)?;
+    let delivery = (|| {
+        validate_response_payload(&capability, &data)?;
+        write_output_if_needed(&data, args.output.as_deref())
+    })();
+    delivery.map_err(|error| parse_job_recovery(error, &job_id, instance_id, "result_delivery"))?;
     Ok((
         data,
-        json!({ "command": "requirements parse", "capability": "requirements.batch_parse" }),
+        json!({ "command": "requirements parse", "capability": "requirements.batch_parse", "job_id": job_id, "instance_id": instance_id }),
     ))
 }
 
 /// Import confirmed requirement rows with idempotency and write confirmation.
 fn requirements_import(cli: &Cli, args: &RequirementsImportArgs) -> CliResult<(Value, Value)> {
+    output::preflight_path(args.output.as_deref())?;
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
         cli.base_url.as_deref(),
         args.instance_id.or(cli.instance_id),
         cli.request_id.as_deref(),
     )?;
-    let mut payload = build_import_payload(ctx.instance_id, args)?;
+    let payload = build_import_payload(ctx.instance_id, args)?;
     let capability = manifest::find_capability("requirements.batch_import")?;
     manifest::ensure_supported(&capability)?;
-    ensure_scopes(&ctx, &capability.required_scopes)?;
-    if payload
-        .get("idempotency_key")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .is_empty()
-    {
-        payload["idempotency_key"] = json!(format!("cli-{}", Uuid::new_v4()));
-    }
     validate_request_payload(&capability, &payload)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
     if args.dry_run {
-        return Ok((
-            dry_run_payload(
-                "POST",
-                "/api/v1/agent/requirements/batch-import",
-                payload,
-                None,
-                ctx.request_id.as_deref(),
-            ),
-            json!({ "command": "requirements import" }),
-        ));
+        let data = dry_run_payload(
+            "POST",
+            "/api/v1/agent/requirements/batch-import",
+            payload,
+            None,
+            ctx.request_id.as_deref(),
+        );
+        write_output_if_needed(&data, args.output.as_deref())?;
+        return Ok((data, json!({ "command": "requirements import" })));
     }
     ensure_execution_confirmed(args.yes, &capability)?;
     let idempotency_key = payload
@@ -2209,14 +2241,20 @@ fn requirements_import(cli: &Cli, args: &RequirementsImportArgs) -> CliResult<(V
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
         .ok_or_else(|| CliError::internal("idempotency_key missing after payload build"))?;
-    let data = ApiClient::new(ctx)?.post("/api/v1/agent/requirements/batch-import", payload)?;
-    validate_response_payload(&capability, &data)?;
-    write_output_if_needed(&data, args.output.as_deref())?;
+    let data = execute_batch_import(
+        &ApiClient::new(ctx)?,
+        &capability,
+        &capability.path,
+        payload,
+    )?;
+    write_output_if_needed(&data, args.output.as_deref())
+        .map_err(|error| committed_import_error(error, &data, Some(&idempotency_key)))?;
     Ok((
         data,
         json!({
             "command": "requirements import",
             "capability": "requirements.batch_import",
+            "committed": true,
             "idempotency_key": idempotency_key
         }),
     ))
@@ -2227,6 +2265,8 @@ fn requirements_import_raw(
     cli: &Cli,
     args: &RequirementsImportRawArgs,
 ) -> CliResult<(Value, Value)> {
+    output::preflight_path(args.output.as_deref())?;
+    let idempotency_key = resolve_import_key(None, args.idempotency_key.as_deref())?;
     let ctx = config::resolve_context(
         cli.profile.as_deref(),
         cli.base_url.as_deref(),
@@ -2234,78 +2274,142 @@ fn requirements_import_raw(
         cli.request_id.as_deref(),
     )?;
     let parse_payload = build_import_raw_parse_payload(ctx.instance_id, args)?;
+    let instance_id = parse_payload.get("instance_id").and_then(Value::as_i64);
     let parse_capability = manifest::find_capability("requirements.batch_parse")?;
     manifest::ensure_supported(&parse_capability)?;
-    ensure_scopes(&ctx, &parse_capability.required_scopes)?;
     validate_request_payload(&parse_capability, &parse_payload)?;
-
+    ensure_scopes(&ctx, &parse_capability.required_scopes)?;
     let client = ApiClient::new(ctx.clone())?;
-    let parse_data = submit_and_wait_for_parse_job(&client, parse_payload)?;
-    validate_response_payload(&parse_capability, &parse_data)?;
+    let (parse_data, job_id) =
+        submit_and_wait_for_parse_job(&client, parse_payload).map_err(|mut error| {
+            if let Some(detail) = error.detail.as_mut().and_then(Value::as_object_mut) {
+                detail.insert("idempotency_key".to_string(), json!(idempotency_key));
+            }
+            error
+        })?;
+    let completion: CliResult<(Value, Value)> = (|| {
+        validate_response_payload(&parse_capability, &parse_data)?;
+        let (confirmed_rows, skipped_rows) = split_import_raw_rows(&parse_data)?;
+        let parse_summary = parse_data
+            .get("summary")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let mut result = json!({
+            "job_id": job_id,
+            "parse_summary": parse_summary,
+            "warnings": parse_data["rows"].as_array().into_iter().flatten()
+                .enumerate()
+                .filter(|(_, row)| row.get("warnings").and_then(Value::as_array).is_some_and(|warnings| !warnings.is_empty()))
+                .map(|(index, row)| attach_warning_labels(&import_raw_skip_summary(index + 1, row)))
+                .collect::<Vec<_>>(),
+            "import_summary": null,
+            "auto_commit_rows": confirmed_rows.len(),
+            "skipped_rows": skipped_rows.iter().map(attach_warning_labels).collect::<Vec<_>>(),
+            "skipped": skipped_rows.len(),
+            "idempotency_key": idempotency_key,
+            "dry_run": args.dry_run
+        });
 
-    let (confirmed_rows, skipped_rows) = split_import_raw_rows(&parse_data)?;
-    let parse_summary = parse_data
-        .get("summary")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let idempotency_key = args
-        .idempotency_key
-        .clone()
-        .unwrap_or_else(|| format!("cli-import-raw-{}", Uuid::new_v4()));
-    let mut result = json!({
-        "parse_summary": parse_summary,
-        "import_summary": null,
-        "auto_commit_rows": confirmed_rows.len(),
-        "skipped_rows": skipped_rows,
-        "skipped": skipped_rows.len(),
-        "idempotency_key": idempotency_key,
-        "dry_run": args.dry_run
-    });
+        if confirmed_rows.is_empty() {
+            if !args.dry_run && !skipped_rows.is_empty() {
+                return Err(CliError::validation_with_detail(
+                    "no importable rows due to backend errors; correct them and provide explicit confirmed_rows to requirements import; --yes only authorizes the write",
+                    json!({"skipped_rows": skipped_rows, "idempotency_key": idempotency_key}),
+                ));
+            }
+            write_output_if_needed(&result, args.output.as_deref())?;
+            return Ok((
+                result,
+                json!({
+                    "command": "requirements import-raw",
+                    "job_id": job_id,
+                    "instance_id": instance_id,
+                    "idempotency_key": idempotency_key,
+                    "committed": false,
+                    "capabilities": ["requirements.batch_parse"]
+                }),
+            ));
+        }
 
-    if confirmed_rows.is_empty() {
-        write_output_if_needed(&result, args.output.as_deref())?;
-        return Ok((
+        let import_capability = manifest::find_capability("requirements.batch_import")?;
+        manifest::ensure_supported(&import_capability)?;
+        ensure_scopes(&ctx, &import_capability.required_scopes)?;
+        let mut import_payload = json!({
+            "idempotency_key": idempotency_key,
+            "confirmed_rows": confirmed_rows
+        });
+        if let Some(resolved_instance_id) = instance_id {
+            import_payload["instance_id"] = json!(resolved_instance_id);
+        }
+        validate_request_payload(&import_capability, &import_payload)?;
+        if args.dry_run {
+            result["import_summary"] = dry_run_payload(
+                "POST",
+                "/api/v1/agent/requirements/batch-import",
+                import_payload,
+                None,
+                ctx.request_id.as_deref(),
+            );
+        } else {
+            ensure_execution_confirmed(args.yes, &import_capability)?;
+            let import_data = execute_batch_import(
+                &client,
+                &import_capability,
+                &import_capability.path,
+                import_payload,
+            )?;
+            result["import_summary"] = import_data;
+        }
+        write_output_if_needed(&result, args.output.as_deref()).map_err(|error| {
+            if !args.dry_run {
+                committed_import_error(error, &result, Some(&idempotency_key))
+            } else {
+                error
+            }
+        })?;
+        Ok((
             result,
             json!({
                 "command": "requirements import-raw",
-                "capabilities": ["requirements.batch_parse"]
+                "job_id": job_id,
+                "instance_id": instance_id,
+                "idempotency_key": idempotency_key,
+                "committed": !args.dry_run,
+                "capabilities": ["requirements.batch_parse", "requirements.batch_import"]
             }),
-        ));
-    }
-
-    let import_capability = manifest::find_capability("requirements.batch_import")?;
-    manifest::ensure_supported(&import_capability)?;
-    ensure_scopes(&ctx, &import_capability.required_scopes)?;
-    let mut import_payload = json!({
-        "idempotency_key": idempotency_key,
-        "confirmed_rows": confirmed_rows
-    });
-    if let Some(resolved_instance_id) = ctx.instance_id {
-        import_payload["instance_id"] = json!(resolved_instance_id);
-    }
-    validate_request_payload(&import_capability, &import_payload)?;
-    if args.dry_run {
-        result["import_summary"] = dry_run_payload(
-            "POST",
-            "/api/v1/agent/requirements/batch-import",
-            import_payload,
-            None,
-            ctx.request_id.as_deref(),
-        );
-    } else {
-        ensure_execution_confirmed(args.yes, &import_capability)?;
-        let import_data = client.post("/api/v1/agent/requirements/batch-import", import_payload)?;
-        validate_response_payload(&import_capability, &import_data)?;
-        result["import_summary"] = import_data;
-    }
-    write_output_if_needed(&result, args.output.as_deref())?;
-    Ok((
-        result,
-        json!({
-            "command": "requirements import-raw",
-            "capabilities": ["requirements.batch_parse", "requirements.batch_import"]
-        }),
-    ))
+        ))
+    })();
+    completion.map_err(|mut error| {
+        if error
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.get("committed"))
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            if let Some(detail) = error.detail.as_mut().and_then(Value::as_object_mut) {
+                detail.insert("job_id".to_string(), json!(job_id));
+            }
+            error
+        } else {
+            let phase = if error
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.get("phase"))
+                .and_then(Value::as_str)
+                == Some("submit")
+            {
+                "import_submit"
+            } else {
+                "import_preparation"
+            };
+            let mut error = parse_job_recovery(error, &job_id, instance_id, phase);
+            if let Some(detail) = error.detail.as_mut().and_then(Value::as_object_mut) {
+                detail.insert("idempotency_key".to_string(), json!(idempotency_key));
+            }
+            error
+        }
+    })
 }
 
 /// Create missing subject or grade catalog records after explicit confirmation.
@@ -2588,6 +2692,111 @@ fn object_at_path<'a>(root: &'a mut Value, path: &[&str]) -> CliResult<&'a mut M
         .ok_or_else(|| CliError::validation("payload must be an object"))
 }
 
+/// Resolve a caller-owned stable key without generation or trimming; reject empty and padded inputs.
+fn resolve_import_key(json_key: Option<&Value>, flag_key: Option<&str>) -> CliResult<String> {
+    let json_key = json_key
+        .map(|key| {
+            key.as_str()
+                .ok_or_else(|| CliError::validation("idempotency_key must be a nonempty string"))
+        })
+        .transpose()?;
+    for key in [json_key, flag_key].into_iter().flatten() {
+        if key.is_empty() || key.trim() != key {
+            return Err(CliError::validation(
+                "idempotency_key must be a nonempty stable key without surrounding whitespace",
+            ));
+        }
+    }
+    if let (Some(json_key), Some(flag_key)) = (json_key, flag_key) {
+        if json_key != flag_key {
+            return Err(CliError::validation(
+                "JSON idempotency_key conflicts with --idempotency-key",
+            ));
+        }
+    }
+    json_key.or(flag_key).map(ToOwned::to_owned).ok_or_else(|| {
+        CliError::validation(
+            "idempotency_key is required; supply a stable key and reuse it for retries",
+        )
+    })
+}
+
+/// Preserve a known successful import response when validation or delivery fails afterwards.
+fn committed_import_error(mut error: CliError, result: &Value, key: Option<&str>) -> CliError {
+    error.detail = Some(
+        json!({ "committed": true, "phase": "result_delivery", "result": result, "idempotency_key": key, "delivery_error": error.detail }),
+    );
+    error.retryable = false;
+    error.hint = Some(
+        "save the preserved committed result; do not create a new key or repeat the write"
+            .to_string(),
+    );
+    error
+}
+
+/// Execute the single batch-import path and retain the stable key on ambiguous network failure.
+fn execute_batch_import(
+    client: &ApiClient,
+    capability: &manifest::Capability,
+    path: &str,
+    payload: Value,
+) -> CliResult<Value> {
+    validate_request_payload(capability, &payload)?;
+    let key = resolve_import_key(payload.get("idempotency_key"), None)?;
+    let data = client.post(path, payload).map_err(|mut error| {
+        error.detail = Some(json!({ "phase": "submit", "outcome": "unknown", "idempotency_key": key, "backend_detail": error.detail }));
+        error.hint = Some("retry only the identical confirmed_rows payload with the same idempotency_key".to_string());
+        error
+    })?;
+    let validation = validate_response_payload(capability, &data).and_then(|()| {
+        if data.get("idempotency_key").and_then(Value::as_str) != Some(key.as_str()) {
+            return Err(CliError::api(
+                "batch import response idempotency_key mismatch",
+                Some("IMPORT_PROTOCOL_ERROR".to_string()),
+                Some(data.clone()),
+            ));
+        }
+        Ok(())
+    });
+    validation.map_err(|mut error| {
+        error.detail = Some(json!({"phase": "submit_response", "outcome": "unknown", "idempotency_key": key, "backend_result": data}));
+        error.retryable = false;
+        error.hint = Some("verify the preserved response; retry only the identical confirmed_rows payload with the same idempotency_key".to_string());
+        error
+    })?;
+    Ok(data)
+}
+
+/// Reject business flag overrides when a complete parse JSON payload is supplied.
+fn reject_parse_json_flags(
+    strict: bool,
+    lenient: bool,
+    city: &Option<String>,
+    phone: &Option<String>,
+    wechat: &Option<String>,
+) -> CliResult<()> {
+    if strict || lenient || city.is_some() || phone.is_some() || wechat.is_some() {
+        return Err(CliError::validation("--data is the sole business input; do not combine it with --strict, --lenient or preset flags"));
+    }
+    Ok(())
+}
+
+/// Merge request identity only when absent and reject explicit conflicts.
+fn merge_instance_id(payload: &mut Value, instance_id: Option<i64>) -> CliResult<()> {
+    if let Some(instance_id) = instance_id {
+        if let Some(existing) = payload.get("instance_id") {
+            if existing.as_i64() != Some(instance_id) {
+                return Err(CliError::validation(
+                    "JSON instance_id conflicts with the selected instance ID",
+                ));
+            }
+        } else {
+            payload["instance_id"] = json!(instance_id);
+        }
+    }
+    Ok(())
+}
+
 /// Convert parse flags, raw text, or JSON input into the backend batch-parse payload.
 fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -> CliResult<Value> {
     let source_count = [&args.file, &args.data, &args.text]
@@ -2600,13 +2809,18 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
         ));
     }
     if let Some(data) = &args.data {
+        reject_parse_json_flags(
+            args.strict,
+            args.lenient,
+            &args.preset_city,
+            &args.preset_contact_phone,
+            &args.preset_contact_wechat,
+        )?;
         let mut payload = read_json_arg(data)?;
-        if payload.get("instance_id").is_none() {
-            if let Some(instance_id) = instance_id {
-                payload["instance_id"] = json!(instance_id);
-            }
+        if !payload.is_object() {
+            return Err(CliError::validation("parse JSON must be an object"));
         }
-        payload["mode"] = json!(if args.strict { "strict" } else { "lenient" });
+        merge_instance_id(&mut payload, instance_id)?;
         return Ok(payload);
     }
     let raw_text = if let Some(file) = &args.file {
@@ -2634,6 +2848,7 @@ fn build_parse_payload(instance_id: Option<i64>, args: &RequirementsParseArgs) -
     Ok(payload)
 }
 
+/// Build explicit confirmed rows or project only already auto-approved parse rows.
 fn build_import_payload(
     instance_id: Option<i64>,
     args: &RequirementsImportArgs,
@@ -2669,30 +2884,13 @@ fn build_import_payload(
         let rows = rows_value
             .as_array()
             .ok_or_else(|| CliError::validation("parse output must contain rows array"))?;
-        let blocked = rows
-            .iter()
-            .filter(|row| row.get("needs_confirmation").and_then(Value::as_bool) == Some(true))
-            .count();
-        if blocked > 0 && !args.yes {
-            return Err(CliError::confirmation_required(
-                "requirements import contains rows needing confirmation",
-                "write",
+        let (confirmed, skipped) = split_import_raw_rows(&json!({"rows": rows}))?;
+        if !skipped.is_empty() {
+            return Err(CliError::validation_with_detail(
+                "parse rows contain backend errors; correct them and submit explicit confirmed_rows; --yes only authorizes the write",
+                json!({"skipped_rows": skipped}),
             ));
         }
-        let confirmed = rows
-            .iter()
-            .filter(|row| {
-                row.get("can_auto_commit").and_then(Value::as_bool) == Some(true)
-                    || (args.yes
-                        && row.get("needs_confirmation").and_then(Value::as_bool) == Some(true))
-            })
-            .map(|row| {
-                let parsed = row.get("parsed").cloned().ok_or_else(|| {
-                    CliError::validation("parse output row is missing parsed payload")
-                })?;
-                Ok(normalize_parsed_row_for_import(parsed))
-            })
-            .collect::<CliResult<Vec<_>>>()?;
         json!({ "confirmed_rows": confirmed })
     } else {
         return Err(CliError::validation(
@@ -2704,9 +2902,11 @@ fn build_import_payload(
             payload["instance_id"] = json!(instance_id);
         }
     }
-    if payload.get("idempotency_key").is_none() {
-        payload["idempotency_key"] = json!(args.idempotency_key.clone().unwrap_or_default());
-    }
+    let key = resolve_import_key(
+        payload.get("idempotency_key"),
+        args.idempotency_key.as_deref(),
+    )?;
+    payload["idempotency_key"] = json!(key);
     let row_count = payload
         .get("confirmed_rows")
         .and_then(Value::as_array)
@@ -2718,18 +2918,13 @@ fn build_import_payload(
     Ok(payload)
 }
 
-/// Normalize a parse row's payload into the stricter import request shape.
+/// Adapt parser diagnostics and nullable time slots to the write schema without changing business fields.
 fn normalize_parsed_row_for_import(mut parsed: Value) -> Value {
     let Some(object) = parsed.as_object_mut() else {
         return parsed;
     };
     // Parser diagnostics belong to review output, never the closed write contract.
     object.remove("geo_diagnostic");
-    for key in ["requirement_type", "preferred_mode"] {
-        if object.get(key).is_some_and(Value::is_null) {
-            object.remove(key);
-        }
-    }
     if object.get("time_slots").is_some_and(Value::is_null) {
         object.insert("time_slots".to_string(), json!([]));
     }
@@ -2751,13 +2946,18 @@ fn build_import_raw_parse_payload(
         ));
     }
     if let Some(data) = &args.data {
+        reject_parse_json_flags(
+            args.strict,
+            args.lenient,
+            &args.preset_city,
+            &args.preset_contact_phone,
+            &args.preset_contact_wechat,
+        )?;
         let mut payload = read_json_arg(data)?;
-        if payload.get("instance_id").is_none() {
-            if let Some(instance_id) = instance_id {
-                payload["instance_id"] = json!(instance_id);
-            }
+        if !payload.is_object() {
+            return Err(CliError::validation("parse JSON must be an object"));
         }
-        payload["mode"] = json!(if args.strict { "strict" } else { "lenient" });
+        merge_instance_id(&mut payload, instance_id)?;
         return Ok(payload);
     }
     let raw_text = if let Some(file) = &args.file {
@@ -2785,8 +2985,135 @@ fn build_import_raw_parse_payload(
     Ok(payload)
 }
 
-/// Submit one parse job and poll until the backend returns its final parse result.
-fn submit_and_wait_for_parse_job(client: &ApiClient, payload: Value) -> CliResult<Value> {
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+/// Closed durable parse-task lifecycle accepted from the existing GET endpoint.
+enum ParseJobStatus {
+    Queued,
+    RetryWait,
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Deserialize)]
+/// Typed task identity and lifecycle projection; result uses the registered parse schema.
+struct ParseJobState {
+    job_id: String,
+    status: ParseJobStatus,
+    result: Option<Value>,
+    error: Option<ParseJobFailure>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+/// Safe structured failure reported by a durable parse task.
+struct ParseJobFailure {
+    code: String,
+    detail: String,
+}
+
+/// Retain a created job handle and direct recovery to a GET of that same task.
+fn parse_job_recovery(
+    mut error: CliError,
+    job_id: &str,
+    instance_id: Option<i64>,
+    phase: &str,
+) -> CliError {
+    let instance_flag = instance_id
+        .map(|value| format!(" --instance-id {value}"))
+        .unwrap_or_default();
+    let command = format!("hyacinthus requirements parse-job {job_id}{instance_flag}");
+    error.detail = Some(
+        json!({ "job_id": job_id, "phase": phase, "job_created": true,
+        "instance_id": instance_id, "recovery_command": command, "cause": error.detail }),
+    );
+    error.hint = Some(format!("use the same profile/base URL/client binding: {command}; do not rerun parse/import-raw or POST another job"));
+    error.retryable = false;
+    error
+}
+
+/// Build the sole read-only task query path using a validated identifier.
+fn parse_job_path(job_id: &str, instance_id: Option<i64>) -> CliResult<String> {
+    client::validate_path_identifier(job_id, "job_id", 128)?;
+    if instance_id.is_some_and(|value| value <= 0) {
+        return Err(CliError::validation("instance_id must be positive"));
+    }
+    let query = instance_id
+        .map(|value| format!("?instance_id={value}"))
+        .unwrap_or_default();
+    Ok(format!(
+        "/api/v1/agent/requirements/batch-parse-jobs/{job_id}{query}"
+    ))
+}
+
+/// Validate that each task response belongs to the requested handle and has a known lifecycle.
+fn decode_parse_job(state: &Value, expected_id: &str) -> CliResult<ParseJobState> {
+    let parsed: ParseJobState = serde_json::from_value(state.clone()).map_err(|error| {
+        CliError::api(
+            format!("invalid parse job response: {error}"),
+            Some("PARSE_JOB_PROTOCOL_ERROR".to_string()),
+            Some(state.clone()),
+        )
+    })?;
+    if parsed.job_id != expected_id {
+        return Err(CliError::api(
+            "parse job response job_id mismatch",
+            Some("PARSE_JOB_ID_MISMATCH".to_string()),
+            Some(state.clone()),
+        ));
+    }
+    if matches!(parsed.status, ParseJobStatus::Succeeded) {
+        let result = parsed.result.as_ref().ok_or_else(|| {
+            CliError::api(
+                "completed parse job is missing result",
+                Some("PARSE_JOB_PROTOCOL_ERROR".to_string()),
+                Some(state.clone()),
+            )
+        })?;
+        validate_response_payload(
+            &manifest::find_capability("requirements.batch_parse")?,
+            result,
+        )?;
+    }
+    Ok(parsed)
+}
+
+/// Official recovery command: query an existing task once, never submit or fall back to raw API.
+fn requirements_parse_job(cli: &Cli, args: &RequirementsParseJobArgs) -> CliResult<(Value, Value)> {
+    client::validate_path_identifier(&args.job_id, "job_id", 128)?;
+    output::preflight_path(args.output.as_deref())?;
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        args.instance_id.or(cli.instance_id),
+        cli.request_id.as_deref(),
+    )?;
+    let instance_id = ctx.instance_id;
+    let path = parse_job_path(&args.job_id, instance_id)?;
+    if ctx.scopes.as_ref().is_some_and(|scopes| {
+        !missing_scopes(&["requirements:parse".to_string()], scopes).is_empty()
+    }) {
+        return Err(CliError::auth_required("parse-job requires requirements:parse; authorize separately before this read-only query", json!({"required_scopes": ["requirements:parse"], "job_id": args.job_id})));
+    }
+    let client = ApiClient::new(ctx)?;
+    let data = client
+        .get(&path)
+        .map_err(|error| parse_job_recovery(error, &args.job_id, instance_id, "query"))?;
+    decode_parse_job(&data, &args.job_id).map_err(|error| {
+        parse_job_recovery(error, &args.job_id, instance_id, "query_validation")
+    })?;
+    write_output_if_needed(&data, args.output.as_deref())
+        .map_err(|error| parse_job_recovery(error, &args.job_id, instance_id, "result_delivery"))?;
+    Ok((
+        data,
+        json!({"command": "requirements parse-job", "job_id": args.job_id, "instance_id": instance_id}),
+    ))
+}
+
+/// Submit exactly one task; all post-create errors retain its handle for read-only recovery.
+fn submit_and_wait_for_parse_job(client: &ApiClient, payload: Value) -> CliResult<(Value, String)> {
     let instance_id = payload.get("instance_id").and_then(Value::as_i64);
     let job = client.post("/api/v1/agent/requirements/batch-parse-jobs", payload)?;
     let job_id = job
@@ -2794,75 +3121,94 @@ fn submit_and_wait_for_parse_job(client: &ApiClient, payload: Value) -> CliResul
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CliError::api(
-                "parse job response is missing job_id",
-                None,
-                Some(job.clone()),
-            )
+        "parse job response is missing job_id; creation outcome is unknown; do not POST again",
+        Some("PARSE_JOB_PROTOCOL_ERROR".to_string()), Some(job.clone()))
         })?
         .to_string();
-    client::validate_path_identifier(&job_id, "job_id", 128)?;
-    let query = instance_id
-        .map(|value| format!("?instance_id={value}"))
-        .unwrap_or_default();
-    let path = format!("/api/v1/agent/requirements/batch-parse-jobs/{job_id}{query}");
-
-    let deadline = Instant::now() + Duration::from_secs(300);
-    let mut poll_delay = Duration::from_millis(500);
-    loop {
-        if Instant::now() >= deadline {
-            break;
-        }
-        let state = client.get(&path)?;
-        match state.get("status").and_then(Value::as_str) {
-            Some("succeeded") => {
-                return state.get("result").cloned().ok_or_else(|| {
-                    CliError::api("completed parse job is missing result", None, Some(state))
-                });
-            }
-            Some("failed") => {
-                let error = state.get("error").cloned().unwrap_or(Value::Null);
-                let message = error
-                    .get("detail")
-                    .and_then(Value::as_str)
-                    .unwrap_or("requirement parse job failed")
-                    .to_string();
-                let code = error
-                    .get("code")
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned);
-                return Err(CliError::api(message, code, Some(state)));
-            }
-            Some("cancelled") => {
-                let error = state.get("error").cloned().unwrap_or(Value::Null);
-                let message = error
-                    .get("detail")
-                    .and_then(Value::as_str)
-                    .unwrap_or("requirement parse job was cancelled")
-                    .to_string();
-                let code = error
-                    .get("code")
-                    .and_then(Value::as_str)
-                    .unwrap_or("REQUIREMENT_PARSE_JOB_CANCELLED")
-                    .to_string();
-                return Err(CliError::api(message, Some(code), Some(state)));
-            }
-            Some("queued" | "retry_wait" | "running") => {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                thread::sleep(poll_delay.min(remaining));
-                poll_delay = poll_delay.saturating_mul(2).min(Duration::from_secs(5));
-            }
-            _ => {
-                return Err(CliError::api(
-                    "parse job returned an unknown status",
-                    None,
-                    Some(state),
+    let result = (|| {
+        let path = parse_job_path(&job_id, instance_id)?;
+        decode_parse_job(&job, &job_id)?;
+        let deadline = Instant::now() + Duration::from_secs(300);
+        let mut poll_delay = Duration::from_millis(500);
+        loop {
+            if Instant::now() >= deadline {
+                return Err(CliError::network(
+                    "requirement parse job did not finish within 300 seconds",
                 ));
             }
+            let state = client.get(&path)?;
+            let parsed = decode_parse_job(&state, &job_id)?;
+            match parsed.status {
+                ParseJobStatus::Succeeded => {
+                    return parsed.result.ok_or_else(|| {
+                        CliError::api(
+                            "completed parse job is missing result",
+                            Some("PARSE_JOB_PROTOCOL_ERROR".to_string()),
+                            Some(state),
+                        )
+                    })
+                }
+                ParseJobStatus::Failed | ParseJobStatus::Cancelled => {
+                    let (message, code) = if let Some(error) = parsed.error {
+                        (error.detail, error.code)
+                    } else if matches!(parsed.status, ParseJobStatus::Cancelled) {
+                        (
+                            "requirement parse job was cancelled".to_string(),
+                            "REQUIREMENT_PARSE_JOB_CANCELLED".to_string(),
+                        )
+                    } else {
+                        return Err(CliError::api(
+                            "failed parse job is missing structured error",
+                            Some("PARSE_JOB_PROTOCOL_ERROR".to_string()),
+                            Some(state),
+                        ));
+                    };
+                    return Err(CliError::api(message, Some(code), Some(state)));
+                }
+                ParseJobStatus::Queued | ParseJobStatus::RetryWait | ParseJobStatus::Running => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    thread::sleep(poll_delay.min(remaining));
+                    poll_delay = poll_delay.saturating_mul(2).min(Duration::from_secs(5));
+                }
+            }
         }
+    })();
+    result
+        .map(|data| (data, job_id.clone()))
+        .map_err(|error| parse_job_recovery(error, &job_id, instance_id, "poll"))
+}
+
+#[derive(Deserialize)]
+/// Required backend row protocol; business fields remain opaque and warnings never gate admission.
+struct BackendParseRow {
+    parsed: serde_json::Map<String, Value>,
+    errors: Vec<String>,
+    can_auto_commit: bool,
+    needs_confirmation: bool,
+    confirmation_reasons: Vec<String>,
+}
+
+/// Read the backend verdict and reject absent or contradictory protocol fields without repairing them.
+fn backend_parse_row(row: &Value) -> CliResult<BackendParseRow> {
+    let parsed: BackendParseRow = serde_json::from_value(row.clone()).map_err(|error| {
+        CliError::api(
+            format!("invalid backend parse row: {error}"),
+            Some("PARSE_ROW_PROTOCOL_ERROR".to_string()),
+            Some(row.clone()),
+        )
+    })?;
+    let has_errors = !parsed.errors.is_empty();
+    if parsed.can_auto_commit == has_errors
+        || parsed.needs_confirmation != has_errors
+        || parsed.confirmation_reasons != parsed.errors
+    {
+        return Err(CliError::api(
+            "backend parse row verdict contradicts errors",
+            Some("PARSE_ROW_PROTOCOL_ERROR".to_string()),
+            Some(row.clone()),
+        ));
     }
-    Err(CliError::network(
-        "requirement parse job did not finish within 300 seconds",
-    ))
+    Ok(parsed)
 }
 
 /// Split parse output into importable payloads and concise review-only rows.
@@ -2870,22 +3216,60 @@ fn split_import_raw_rows(parse_data: &Value) -> CliResult<(Vec<Value>, Vec<Value
     let rows = parse_data
         .get("rows")
         .and_then(Value::as_array)
-        .ok_or_else(|| CliError::validation("parse response must contain rows array"))?;
+        .ok_or_else(|| {
+            CliError::api(
+                "parse response must contain rows array",
+                Some("PARSE_ROW_PROTOCOL_ERROR".to_string()),
+                Some(parse_data.clone()),
+            )
+        })?;
     let mut confirmed_rows = Vec::new();
     let mut skipped_rows = Vec::new();
     for (index, row) in rows.iter().enumerate() {
-        if row.get("can_auto_commit").and_then(Value::as_bool) == Some(true)
-            && row.get("needs_confirmation").and_then(Value::as_bool) != Some(true)
-        {
-            let parsed = row.get("parsed").cloned().ok_or_else(|| {
-                CliError::validation("parse output row is missing parsed payload")
-            })?;
-            confirmed_rows.push(normalize_parsed_row_for_import(parsed));
+        let verdict = backend_parse_row(row)?;
+        if verdict.can_auto_commit {
+            confirmed_rows.push(normalize_parsed_row_for_import(Value::Object(
+                verdict.parsed,
+            )));
         } else {
             skipped_rows.push(import_raw_skip_summary(index + 1, row));
         }
     }
     Ok((confirmed_rows, skipped_rows))
+}
+
+/// 已知用户联系方式 warning 机器码到可读中文的展示映射；仅用于展示，不参与校验、不拦截提交。
+fn warning_label_zh(code: &str) -> Option<&'static str> {
+    match code {
+        "USER_CONTACT_PHONE_INVALID" => Some("用户手机号格式不对"),
+        "USER_CONTACT_WECHAT_INVALID" => Some("用户微信格式不对"),
+        _ => None,
+    }
+}
+
+/// 为 review 行补充 warnings 的可读中文标签（warning_labels）；不改写后端 warnings 与裁决字段。
+fn attach_warning_labels(row: &Value) -> Value {
+    let mut labels = serde_json::Map::new();
+    for warning in row
+        .get("warnings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(text) = warning.as_str() else {
+            continue;
+        };
+        let code = text.split(':').next().unwrap_or(text);
+        if let Some(label) = warning_label_zh(code) {
+            labels.insert(code.to_owned(), json!(label));
+        }
+    }
+    if labels.is_empty() {
+        return row.clone();
+    }
+    let mut labeled = row.clone();
+    labeled["warning_labels"] = Value::Object(labels);
+    labeled
 }
 
 /// Build a compact skipped-row summary that is safe to show to an Agent.
@@ -3179,12 +3563,29 @@ fn missing_scopes(required: &[String], available: &[String]) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
+/// Validate transport structure locally while leaving imported business fields to backend submission.
 fn validate_request_payload(
     capability: &crate::manifest::Capability,
     payload: &Value,
 ) -> CliResult<()> {
-    // Validate before sending so Agent errors are local and deterministic.
-    let errors = schema_validate::validate(&capability.request_schema, payload);
+    if capability.id == "requirements.batch_import" {
+        resolve_import_key(payload.get("idempotency_key"), None)?;
+        let rows = payload
+            .get("confirmed_rows")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                CliError::validation("confirmed_rows is required and must be an explicit array")
+            })?;
+        if rows.is_empty() {
+            return Err(CliError::validation("confirmed_rows is empty"));
+        }
+    }
+    let mut request_schema = capability.request_schema.clone();
+    if capability.id == "requirements.batch_import" {
+        // Published row schemas document the backend contract, not a second client business validator.
+        request_schema["properties"]["confirmed_rows"]["items"] = json!({"type": "object"});
+    }
+    let errors = schema_validate::validate(&request_schema, payload);
     if errors.is_empty() {
         return Ok(());
     }
@@ -3217,6 +3618,17 @@ fn validate_response_payload(
     // Treat backend/schema drift as an API error so automation can stop safely.
     let errors = schema_validate::validate(&capability.response_schema, payload);
     if errors.is_empty() {
+        if capability.id == "requirements.batch_parse" {
+            for row in payload["rows"].as_array().ok_or_else(|| {
+                CliError::api(
+                    "parse response is missing rows",
+                    Some("PARSE_ROW_PROTOCOL_ERROR".to_string()),
+                    Some(payload.clone()),
+                )
+            })? {
+                backend_parse_row(row)?;
+            }
+        }
         return Ok(());
     }
     Err(CliError::api(

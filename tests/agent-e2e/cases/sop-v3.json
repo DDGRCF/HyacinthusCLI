@@ -1,0 +1,164 @@
+{
+  "version": "sop-v3",
+  "cases": [
+    {
+      "id": "A1",
+      "name": "安装与导出",
+      "type": "engineering",
+      "dependsOn": []
+    },
+    {
+      "id": "A2",
+      "name": "升级与损坏检测",
+      "type": "engineering",
+      "dependsOn": [
+        "A1"
+      ]
+    },
+    {
+      "id": "A3",
+      "name": "离线读取",
+      "type": "engineering",
+      "dependsOn": [
+        "A1"
+      ]
+    },
+    {
+      "id": "B1",
+      "name": "自然语言发现",
+      "type": "pi",
+      "dependsOn": [
+        "A1"
+      ],
+      "prompt": "风信子能帮我管理哪些事情？",
+      "scopes": []
+    },
+    {
+      "id": "B2",
+      "name": "doctor健康与失败门禁",
+      "type": "pi",
+      "dependsOn": [
+        "B1"
+      ],
+      "prompt": "帮我检查当前测试实例是否可用，把发现的问题告诉我。",
+      "scopes": [
+        "requirements:read"
+      ]
+    },
+    {
+      "id": "B3",
+      "name": "查询授权与空结果",
+      "type": "pi",
+      "dependsOn": [
+        "B1"
+      ],
+      "prompt": "帮我查一下当前有效的初一数学需求。",
+      "scopes": [
+        "requirements:read"
+      ]
+    },
+    {
+      "id": "C1",
+      "name": "资料修改",
+      "type": "pi",
+      "dependsOn": [
+        "B1"
+      ],
+      "prompt": "把我的显示名改成 SOP-{run_id}，先给我看预览，等我确认再执行。",
+      "approval": "确认将显示名改成 SOP-{run_id}，请执行刚才预览的修改。",
+      "scopes": [
+        "users:read",
+        "users:write"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "优先级规则",
+      "type": "pi",
+      "dependsOn": [
+        "B1"
+      ],
+      "prompt": "新增一条规则：编号以 {run_id}- 开头的岗位优先级设为5。先让我确认预览。",
+      "approval": "我确认创建刚才预览的这一条规则。",
+      "scopes": [
+        "requirements:priority_rules"
+      ]
+    },
+    {
+      "id": "D1",
+      "name": "邮件来源与整理",
+      "type": "pi",
+      "dependsOn": [
+        "B1"
+      ],
+      "prompt": "帮我上传邮件里的全部家教岗位。",
+      "sourceReply": "使用当前目录 saved_mail.txt 这封已保存邮件，不连接真实邮箱。",
+      "scopes": [
+        "requirements:read",
+        "requirements:parse",
+        "requirements:write"
+      ]
+    },
+    {
+      "id": "D2",
+      "name": "真实解析与复核预览",
+      "type": "mixed",
+      "dependsOn": [
+        "D1"
+      ]
+    },
+    {
+      "id": "D3",
+      "name": "批准导入与全量详情核对",
+      "type": "pi",
+      "dependsOn": [
+        "D2",
+        "C2"
+      ],
+      "approval": "确认导入刚才完整预览并复核的30条岗位。"
+    },
+    {
+      "id": "D4",
+      "name": "新会话邮件重放",
+      "type": "pi",
+      "dependsOn": [
+        "D3"
+      ],
+      "prompt": "再帮我处理一下 saved_mail.txt 这封邮件里的岗位。",
+      "scopes": [
+        "requirements:read",
+        "requirements:write"
+      ]
+    },
+    {
+      "id": "E1",
+      "name": "失败与恢复",
+      "type": "mixed",
+      "dependsOn": [
+        "B1"
+      ],
+      "subcases": [
+        "E1a",
+        "E1b",
+        "E1c",
+        "E1d",
+        "E1e",
+        "E1f"
+      ]
+    },
+    {
+      "id": "E2",
+      "name": "报告脱敏与清理",
+      "type": "host",
+      "dependsOn": []
+    }
+  ],
+  "fixture": {
+    "address": "杭州市西湖区浙江大学紫金港校区",
+    "map_provider": "tencent",
+    "contract": "online also requires source address, backend verified location and valid admin contact",
+    "normalized_fields": 20,
+    "contact_policy": "Explicit mode and user/admin contacts have dedicated columns; unknown optional contacts stay empty; contact data is not moved into remarks",
+    "contact_probe": "Separate controller parse-only fixture: user phone13800138001, administrator phone13800138000 and administrator WeChat; never fed to Pi or imported"
+  }
+}

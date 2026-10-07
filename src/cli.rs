@@ -1,11 +1,10 @@
-// 改动说明：需求解析默认走宽松字段匹配，保留显式 --strict 模板复核，并移除重复的 auth grant 别名。
+// 改动说明：保留统一 Skills 入口，移除需求 parse/import-raw 的本地置信度阈值参数。
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Clone, Debug, Parser)]
 #[command(
@@ -39,7 +38,6 @@ pub struct Cli {
 /// Root command groups exposed by the CLI.
 pub enum Command {
     Admin(AdminCommand),
-    Claw(ClawCommand),
     Config(ConfigCommand),
     Auth(AuthCommand),
     Doctor(DoctorArgs),
@@ -50,40 +48,6 @@ pub enum Command {
     Requirements(RequirementsCommand),
     Skills(SkillsCommand),
     Completion(CompletionArgs),
-    #[command(name = "__claw-runtime-guard", hide = true)]
-    ClawRuntimeGuard(ClawRuntimeGuardArgs),
-    #[command(name = "__claw-runtime-probe", hide = true)]
-    ClawRuntimeProbe(ClawRuntimeProbeArgs),
-}
-
-/// Carries the exact canonical activation identity required while PicoClaw is supervised.
-#[derive(Clone, Debug, Args)]
-pub struct ClawRuntimeGuardArgs {
-    #[arg(long)]
-    pub authority_path: PathBuf,
-    #[arg(long)]
-    pub pointer_digest: String,
-    #[arg(long)]
-    pub instance: String,
-    #[arg(long)]
-    pub release_digest: String,
-    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
-    pub activation_fence: u64,
-    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
-    pub runtime_epoch: u64,
-    #[arg(long)]
-    pub program_name: String,
-    #[arg(long)]
-    pub guard_nonce: Uuid,
-    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
-    pub health_port: u16,
-}
-
-/// Carries the sole loopback endpoint accepted by the container-local readiness probe.
-#[derive(Clone, Debug, Args)]
-pub struct ClawRuntimeProbeArgs {
-    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
-    pub health_port: u16,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -97,40 +61,6 @@ pub struct AdminCommand {
 /// Administrative operations that are safe for Agent status inspection.
 pub enum AdminSubcommand {
     Status,
-}
-
-#[derive(Clone, Debug, Args)]
-/// Claw operations command group wrapper.
-pub struct ClawCommand {
-    #[command(subcommand)]
-    pub command: ClawSubcommand,
-}
-
-#[derive(Clone, Debug, Subcommand)]
-/// Claw operations available through the Agent CLI.
-pub enum ClawSubcommand {
-    Status,
-    Skills(ClawSkillsCommand),
-}
-
-#[derive(Clone, Debug, Args)]
-/// Claw skill command group wrapper.
-pub struct ClawSkillsCommand {
-    #[command(subcommand)]
-    pub command: ClawSkillsSubcommand,
-}
-
-#[derive(Clone, Debug, Subcommand)]
-/// Claw skill subcommands.
-pub enum ClawSkillsSubcommand {
-    List(ClawSkillsListArgs),
-}
-
-#[derive(Clone, Debug, Args)]
-/// Filters for listing runtime skills installed in Claw.
-pub struct ClawSkillsListArgs {
-    #[arg(long)]
-    pub source: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -155,8 +85,9 @@ pub enum ConfigSubcommand {
 /// Arguments for creating or updating a named CLI profile.
 pub struct SetProfileArgs {
     pub name: String,
+    /// Overrides the backend origin; omission preserves an existing profile or uses the built-in default.
     #[arg(long)]
-    pub base_url: String,
+    pub base_url: Option<String>,
     #[arg(long)]
     pub client_instance_id: Option<String>,
     #[arg(long)]
@@ -477,6 +408,8 @@ pub enum RequirementsSubcommand {
     Search(RequirementsSearchArgs),
     Extend(RequirementsExtendArgs),
     Parse(RequirementsParseArgs),
+    /// Query an existing parse job without creating another task.
+    ParseJob(RequirementsParseJobArgs),
     Import(RequirementsImportArgs),
     ImportRaw(RequirementsImportRawArgs),
     PriorityRules(RequirementsPriorityRulesCommand),
@@ -693,11 +626,21 @@ pub struct RequirementsParseArgs {
     /// Keeps the default lenient field matching explicit for scripts that document the mode.
     #[arg(long, default_value_t = false)]
     pub lenient: bool,
-    /// Forces canonical format2 field names and order for a strict review pass.
+    /// Requests strict named-field validation without imposing a fixed column count or order.
     #[arg(long, conflicts_with = "lenient")]
     pub strict: bool,
     #[arg(long)]
     pub dry_run: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for reading one existing parse task and its current result.
+pub struct RequirementsParseJobArgs {
+    pub job_id: String,
+    #[arg(long)]
+    pub instance_id: Option<i64>,
     #[arg(long, short = 'o')]
     pub output: Option<String>,
 }
@@ -741,7 +684,7 @@ pub struct RequirementsImportRawArgs {
     /// Keeps the default lenient field matching explicit for scripts that document the mode.
     #[arg(long, default_value_t = false)]
     pub lenient: bool,
-    /// Forces canonical format2 field names and order for a strict review pass.
+    /// Requests strict named-field validation without imposing a fixed column count or order.
     #[arg(long, conflicts_with = "lenient")]
     pub strict: bool,
     #[arg(long)]
@@ -820,16 +763,25 @@ pub struct SkillsCommand {
 #[derive(Clone, Debug, Subcommand)]
 /// Bundled Agent skill discovery and export operations.
 pub enum SkillsSubcommand {
-    List,
-    Show(SkillNameArgs),
+    List(SkillListArgs),
+    Read(SkillReadArgs),
     Export(SkillsExportArgs),
     Check(SkillsCheckArgs),
 }
 
 #[derive(Clone, Debug, Args)]
-/// Arguments that identify a bundled skill by name.
-pub struct SkillNameArgs {
+/// Optional embedded directory to inspect without loading unrelated guides.
+pub struct SkillListArgs {
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Read a skill or reference as Markdown, or as a structured JSON envelope.
+pub struct SkillReadArgs {
     pub name: String,
+    pub path: Option<String>,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Clone, Debug, Args)]

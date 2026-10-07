@@ -1,7 +1,7 @@
 {
   "data": {
     "command": "hyacinthus requirements parse",
-    "description": "Agent 专用异步需求批量解析能力；CLI 自动轮询任务并返回最终候选记录。",
+    "description": "Agent 专用异步需求批量解析能力；CLI 自动轮询任务并返回最终候选记录，字段裁决仅由后端 errors 决定，warnings 永不阻断。",
     "domain": "requirements",
     "examples": [
       {
@@ -10,7 +10,7 @@
       },
       {
         "command": "hyacinthus requirements parse --file input.txt --strict",
-        "title": "严格复核格式二"
+        "title": "严格复核字段模板"
       }
     ],
     "id": "requirements.batch_parse",
@@ -23,7 +23,7 @@
       "properties": {
         "mode": {
           "default": "lenient",
-          "description": "解析模式；默认按字段名宽松匹配 format2，显式指定 strict 时复核标准字段名和顺序，不调用 AI。",
+          "description": "CSV/XLSX和标签文本按字段名及可识别别名映射到16字段规范，允许任意列数/顺序，缺失可选字段留空；未知/重复/冲突提供行级诊断，业务必填校验不变。默认 lenient，不调用 AI。",
           "enum": [
             "strict",
             "lenient"
@@ -31,7 +31,7 @@
           "type": "string"
         },
         "instance_id": {
-          "description": "Claw 实例 ID；静态 Agent key 调用时必填，session token 调用默认使用授权用户身份。",
+          "description": "可选请求实例标识（i64 正整数）；授权身份由绑定 Agent token 确定，不用于选择授权用户。",
           "minimum": 1,
           "type": "integer"
         },
@@ -76,29 +76,29 @@
           "items": {
             "properties": {
               "can_auto_commit": {
+                "description": "后端 errors 为空时为 true。",
                 "type": "boolean"
               },
-              "confidence": {
-                "type": "number"
-              },
               "confirmation_reasons": {
-                "description": "需要确认的原因；地理编码低置信时包含 GEO_* 代码。",
+                "description": "等于后端 errors，不包含 warnings。",
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
               "errors": {
+                "description": "后端字段错误，唯一字段阻断来源。",
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
               "needs_confirmation": {
+                "description": "后端 errors 非空时为 true。",
                 "type": "boolean"
               },
               "parsed": {
-                "description": "解析后的需求字段；低置信地理编码会在 geo_diagnostic 中返回质量、置信度和 GEO_* 警告。",
+                "description": "后端裁决的需求字段；geo_diagnostic 仅提供地理编码诊断，不阻断导入。",
                 "properties": {
                   "geo_diagnostic": {
                     "description": "地理编码诊断，包含 quality、confidence、warnings、reverse 等字段。",
@@ -111,7 +111,7 @@
                 "type": "object"
               },
               "warnings": {
-                "description": "解析警告；地理编码低置信时包含 GEO_* 代码。",
+                "description": "非阻断解析警告；包括 GEO_* 地理编码诊断，不影响自动提交。",
                 "items": {
                   "type": "string"
                 },
@@ -119,6 +119,8 @@
               }
             },
             "required": [
+              "parsed",
+              "errors",
               "can_auto_commit",
               "needs_confirmation",
               "confirmation_reasons"
@@ -134,7 +136,7 @@
               "type": "integer"
             },
             "needs_confirmation": {
-              "description": "需要人工确认的行数。",
+              "description": "存在后端 errors、需要修正的行数。",
               "type": "integer"
             }
           },

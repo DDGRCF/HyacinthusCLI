@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// 改动说明：安装 CLI 时联动可发现的完整 Skills，支持显式目标、自动发现和跳过；不启动 Agent 或读取其凭据。
 "use strict";
 
 const childProcess = require("node:child_process");
@@ -11,11 +12,10 @@ const path = require("node:path");
 const DEFAULT_REPO = "DDGRCF/HyacinthusCLI";
 const DEFAULT_INSTALL_DIR = path.join(os.homedir(), ".local", "bin");
 const SUPPORTED_SKILL_TARGETS = new Map([
-  ["hermes", path.join(os.homedir(), ".hermes", "skills")],
-  ["codex", path.join(os.homedir(), ".codex", "skills")],
-  ["claude", path.join(os.homedir(), ".claude", "skills")],
-  ["picoclaw", path.join(os.homedir(), ".picoclaw", "skills")],
-  ["nullclaw", path.join(os.homedir(), ".nullclaw", "skills")],
+  ["hermes", path.join((process.env.HERMES_HOME || "").trim() || path.join(os.homedir(), ".hermes"), "skills")],
+  ["codex", path.join((process.env.CODEX_HOME || "").trim() || path.join(os.homedir(), ".codex"), "skills")],
+  ["claude", path.join((process.env.CLAUDE_HOME || "").trim() || path.join(os.homedir(), ".claude"), "skills")],
+  ["pi", path.join((process.env.PI_CODING_AGENT_DIR || "").trim() || path.join(os.homedir(), ".pi", "agent"), "skills")],
 ]);
 
 function printUsage() {
@@ -23,7 +23,8 @@ function printUsage() {
 
 Usage:
   hyacinthus-cli install [--version latest|v0.1.0] [--target <triple>] [--install-dir <dir>]
-  hyacinthus-cli skills install --target hermes|codex|claude|picoclaw|nullclaw [--dir <dir>]
+                        [--skills-target hermes|codex|claude|pi | --skills-dir <dir> | --skip-skills]
+  hyacinthus-cli skills install --target hermes|codex|claude|pi [--dir <dir>]
 
 Environment:
   GITHUB_TOKEN or GH_TOKEN              GitHub token for private release downloads
@@ -31,6 +32,11 @@ Environment:
   HYACINTHUS_CLI_VERSION               Release version, default latest
   HYACINTHUS_CLI_TARGET                Release target triple override
   HYACINTHUS_CLI_INSTALL_DIR           Install dir, default ${DEFAULT_INSTALL_DIR}
+  PI_CODING_AGENT_DIR                  Pi config dir, default ~/.pi/agent; skills use its skills/ directory
+
+Install exports/checks bundled Skills for detected Agent homes by default.
+Use --skills-target to select one Agent, --skills-dir for a custom directory,
+or --skip-skills for a binary-only install. Restart the Agent session after updating Skills.
 `);
 }
 
@@ -195,7 +201,9 @@ function findBinary(dir) {
   return null;
 }
 
+/** Download the verified binary and install its own version-bound Skills. */
 async function installCommand(args) {
+  const skillDestinations = installSkillDestinations(args);
   const repo = args.repo || process.env.HYACINTHUS_CLI_REPO || DEFAULT_REPO;
   const version = args.version || process.env.HYACINTHUS_CLI_VERSION || "latest";
   const target = args.target || process.env.HYACINTHUS_CLI_TARGET || detectTarget();
@@ -227,6 +235,7 @@ async function installCommand(args) {
     fs.chmodSync(installed, 0o755);
     childProcess.execFileSync(installed, ["--version"], { stdio: "inherit" });
     console.log(`installed ${installed}`);
+    installBundledSkills(installed, skillDestinations);
     return installed;
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -242,24 +251,53 @@ function resolveHyacinthusBinary(args) {
   fail(`hyacinthus binary not found. Run \`hyacinthus-cli install\` first, or pass --install-dir if it is installed outside ${installDir}.`);
 }
 
+/** Resolve a supported Agent skill directory or an explicitly supplied generic directory. */
 function skillsDir(args) {
-  if (args.dir) return path.resolve(args.dir);
   const target = args.target;
-  if (!target) fail("skills install requires --target hermes|codex|claude|picoclaw|nullclaw");
-  const dir = SUPPORTED_SKILL_TARGETS.get(target);
-  if (!dir) {
+  if (target && !SUPPORTED_SKILL_TARGETS.has(target)) {
     fail(`unsupported skills target: ${target}\nsupported targets: ${Array.from(SUPPORTED_SKILL_TARGETS.keys()).join(", ")}`);
   }
-  return dir;
+  if (args.dir) return path.resolve(args.dir);
+  if (!target) fail("skills install requires --target hermes|codex|claude|pi or --dir");
+  return SUPPORTED_SKILL_TARGETS.get(target);
 }
 
+/** Resolve installation targets before a download or any filesystem mutation. */
+function installSkillDestinations(args) {
+  const requested = [args["skills-target"], args["skills-dir"], args["skip-skills"]].filter(Boolean);
+  if (requested.length > 1) fail("choose only one of --skills-target, --skills-dir or --skip-skills", 2);
+  if (args["skip-skills"]) return [];
+  if (args["skills-target"]) return [skillsDir({ target: args["skills-target"] })];
+  if (args["skills-dir"]) {
+    if (typeof args["skills-dir"] !== "string") fail("--skills-dir requires a directory", 2);
+    return [path.resolve(args["skills-dir"])];
+  }
+  const homes = { hermes: "HERMES_HOME", codex: "CODEX_HOME", claude: "CLAUDE_HOME", pi: "PI_CODING_AGENT_DIR" };
+  return [...new Set(Array.from(SUPPORTED_SKILL_TARGETS, ([target, dir]) =>
+    (process.env[homes[target]] || "").trim() || fs.existsSync(path.dirname(dir)) ? path.resolve(dir) : null).filter(Boolean))];
+}
+
+/** Export and verify every entry and reference without running an Agent or reading its login. */
+function installBundledSkills(binary, destinations) {
+  if (destinations.length === 0) {
+    console.log("No Skill destination selected. Run hyacinthus-cli skills install --target <agent> when needed.");
+    return;
+  }
+  for (const outDir of destinations) {
+    childProcess.execFileSync(binary, ["--no-notice", "skills", "export", "--dir", outDir], { stdio: "inherit" });
+    const checked = childProcess.execFileSync(binary, ["--no-notice", "skills", "check", "--dir", outDir], { encoding: "utf8" });
+    const result = JSON.parse(checked);
+    if (result.ok !== true || result.data?.ok !== true) throw new Error(`Bundled Skill verification failed for ${outDir}`);
+    console.log(`installed and verified Hyacinthus Skills in ${outDir}`);
+  }
+  console.log("Restart your Agent session to load hyacinthus-cli and tutoring-job-mail-upload.");
+}
+
+/** Install bundled Skills from an already installed binary. */
 async function skillsInstallCommand(args) {
-  const binary = resolveHyacinthusBinary(args);
   const outDir = skillsDir(args);
-  fs.mkdirSync(outDir, { recursive: true });
-  childProcess.execFileSync(binary, ["skills", "export", "--dir", outDir], { stdio: "inherit" });
-  childProcess.execFileSync(binary, ["skills", "check", "--dir", outDir], { stdio: "inherit" });
-  console.log(`installed Hyacinthus skills into ${outDir}`);
+  const binary = resolveHyacinthusBinary(args);
+  installBundledSkills(binary, [outDir]);
 }
 
 async function main() {
@@ -280,4 +318,5 @@ async function main() {
   fail(`unknown command: ${args._.join(" ")}`);
 }
 
-main().catch((error) => fail(error.stack || error.message));
+if (require.main === module) main().catch((error) => fail(error.stack || error.message));
+module.exports = { installSkillDestinations, installBundledSkills };

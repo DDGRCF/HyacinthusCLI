@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs a released Hyacinthus CLI archive and verifies its checksum.
+# 改动说明：校验 CLI 下载后自动向已存在的 Agent 目录安装并核对完整 Skills，支持显式目录和跳过。
 set -euo pipefail
 
 repo="${HYACINTHUS_CLI_REPO:-DDGRCF/HyacinthusCLI}"
@@ -75,3 +75,40 @@ fi
 mkdir -p "${install_dir}"
 install -m 0755 "${binary}" "${install_dir}/hyacinthus"
 "${install_dir}/hyacinthus" --version
+
+# Export and validate the binary-owned Skill tree before reporting installation success.
+install_skills() {
+  local destination="$1" checked
+  "${install_dir}/hyacinthus" --no-notice skills export --dir "${destination}"
+  checked="$("${install_dir}/hyacinthus" --no-notice --jq .data.ok skills check --dir "${destination}")"
+  if [[ "${checked}" != "true" ]]; then
+    echo "Skills verification failed: ${destination}" >&2
+    return 1
+  fi
+}
+
+if [[ "${HYACINTHUS_CLI_SKIP_SKILLS:-0}" == "1" ]]; then
+  if [[ -n "${HYACINTHUS_CLI_SKILLS_DIR:-}" ]]; then
+    echo "HYACINTHUS_CLI_SKIP_SKILLS and HYACINTHUS_CLI_SKILLS_DIR cannot be combined" >&2
+    exit 2
+  fi
+elif [[ -n "${HYACINTHUS_CLI_SKILLS_DIR:-}" ]]; then
+  install_skills "${HYACINTHUS_CLI_SKILLS_DIR}"
+else
+  skill_homes=("${HERMES_HOME:-${HOME}/.hermes}" "${CODEX_HOME:-${HOME}/.codex}" "${CLAUDE_HOME:-${HOME}/.claude}" "${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}")
+  installed_homes=()
+  for agent_home in "${skill_homes[@]}"; do
+    [[ -d "${agent_home}" ]] || continue
+    duplicate=0
+    for previous_home in "${installed_homes[@]}"; do
+      [[ "${previous_home}" != "${agent_home}" ]] || duplicate=1
+    done
+    [[ "${duplicate}" == "0" ]] || continue
+    install_skills "${agent_home}/skills"
+    installed_homes+=("${agent_home}")
+  done
+  if [[ "${#installed_homes[@]}" == "0" ]]; then
+    echo 'No existing Agent directory found. Run: hyacinthus skills export --dir <agent-skills-dir>'
+  fi
+fi
+echo 'Restart the Agent session to discover the installed Skills.'

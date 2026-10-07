@@ -1,4 +1,4 @@
-// 改动说明：首次授权前持久化实例身份，使独立 auth wait 进程恢复同一授权上下文。
+// 改动说明：新增优先识别 Pi 的稳定 profile，移除 NullClaw；保留凭据来源与身份绑定的闭合校验。
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -24,14 +24,7 @@ const MAX_PENDING_AUTH_BYTES: u64 = 64 * 1024;
 const MAX_DEVICE_SECRET_BYTES: usize = 1024;
 
 /// Agent client types accepted by backend authorization and profile identity.
-pub const SUPPORTED_CLIENT_TYPES: &[&str] = &[
-    "hermes",
-    "codex",
-    "claude",
-    "picoclaw",
-    "nullclaw",
-    "hyacinthus-cli",
-];
+pub const SUPPORTED_CLIENT_TYPES: &[&str] = &["hermes", "codex", "claude", "pi", "hyacinthus-cli"];
 /// Production backend URL used when flags, env, and profile config do not override it.
 pub const DEFAULT_BASE_URL: &str = "https://www.fxzjjzx.cn";
 
@@ -57,6 +50,36 @@ pub struct Profile {
     pub raw_api_enabled: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+/// Identifies the selected credential owner without exposing the token.
+pub enum CredentialSource {
+    Env,
+    Config,
+}
+
+/// Select one credential source; explicit invalid environment input never falls back.
+fn select_credentials(
+    profile: Option<&Profile>,
+    saved_credentials_match: bool,
+) -> CliResult<(Option<String>, Option<CredentialSource>)> {
+    match env::var("HYACINTHUS_AGENT_TOKEN") {
+        Ok(token) => Ok((Some(normalize_token(&token)?), Some(CredentialSource::Env))),
+        Err(env::VarError::NotUnicode(_)) => Err(CliError::validation(
+            "HYACINTHUS_AGENT_TOKEN must be Unicode",
+        )),
+        Err(env::VarError::NotPresent) => {
+            let token = profile
+                .filter(|_| saved_credentials_match)
+                .and_then(|profile| profile.token.as_deref())
+                .map(normalize_token)
+                .transpose()?;
+            let source = token.as_ref().map(|_| CredentialSource::Config);
+            Ok((token, source))
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 /// Fully resolved runtime context used for authenticated backend requests.
 pub struct RuntimeContext {
@@ -68,6 +91,7 @@ pub struct RuntimeContext {
     pub instance_id: Option<i64>,
     pub request_id: Option<String>,
     pub token: Option<String>,
+    pub token_source: Option<CredentialSource>,
     pub scopes: Option<Vec<String>>,
     pub raw_api_enabled: bool,
 }
@@ -173,9 +197,15 @@ pub fn load_config() -> CliResult<ConfigFile> {
         CliError::validation(format!("failed to read config {}: {err}", path.display()))
     })?;
     let text = read_bounded_string(file, MAX_CONFIG_BYTES, "config file")?;
-    serde_json::from_str(&text).map_err(|err| {
+    let config: ConfigFile = serde_json::from_str(&text).map_err(|err| {
         CliError::validation(format!("failed to parse config {}: {err}", path.display()))
-    })
+    })?;
+    for profile in config.profiles.values() {
+        if let Some(client_type) = profile.client_type.as_deref() {
+            normalize_client_type(client_type)?;
+        }
+    }
+    Ok(config)
 }
 
 /// Persist CLI configuration as pretty JSON, creating the parent directory if needed.
@@ -751,18 +781,7 @@ pub fn resolve_context(
             &client_type,
         )
     });
-    let env_token = env::var("HYACINTHUS_AGENT_TOKEN").ok();
-    let token = if let Some(token) = env_token {
-        Some(normalize_token(&token)?)
-    } else if saved_credentials_match {
-        profile
-            .as_ref()
-            .and_then(|profile| profile.token.as_deref())
-            .map(normalize_token)
-            .transpose()?
-    } else {
-        None
-    };
+    let (token, token_source) = select_credentials(profile.as_ref(), saved_credentials_match)?;
     let raw_api_enabled = env::var("HYACINTHUS_RAW_API").ok().as_deref() == Some("1")
         || profile
             .as_ref()
@@ -774,7 +793,7 @@ pub fn resolve_context(
         .or_else(|| {
             profile
                 .as_ref()
-                .filter(|_| saved_credentials_match)
+                .filter(|_| token_source == Some(CredentialSource::Config))
                 .and_then(|profile| {
                     if profile.scopes.is_empty() {
                         None
@@ -792,6 +811,7 @@ pub fn resolve_context(
         instance_id,
         request_id,
         token,
+        token_source,
         scopes,
         raw_api_enabled,
     })
@@ -888,20 +908,12 @@ pub fn resolve_auth_status_context(
                 })
             })
     });
-    let env_token = env::var("HYACINTHUS_AGENT_TOKEN").ok();
-    let (token_present, token_source) = if env_token
-        .as_deref()
-        .is_some_and(|token| normalize_token(token).is_ok())
-    {
-        (true, Some("env".to_string()))
-    } else if let Some(profile) = profile.filter(|_| saved_credentials_match) {
-        (
-            profile.token.is_some(),
-            profile.token.as_ref().map(|_| "config".to_string()),
-        )
-    } else {
-        (false, None)
-    };
+    let (token, source) = select_credentials(profile, saved_credentials_match)?;
+    let token_present = token.is_some();
+    let token_source = source.map(|source| match source {
+        CredentialSource::Env => "env".to_string(),
+        CredentialSource::Config => "config".to_string(),
+    });
     let raw_api_enabled = env::var("HYACINTHUS_RAW_API").ok().as_deref() == Some("1")
         || profile
             .map(|profile| profile.raw_api_enabled)
@@ -911,7 +923,7 @@ pub fn resolve_auth_status_context(
         .map(|value| parse_scope_list(&value))
         .or_else(|| {
             profile
-                .filter(|_| saved_credentials_match)
+                .filter(|_| source == Some(CredentialSource::Config))
                 .and_then(|profile| {
                     if profile.scopes.is_empty() {
                         None
@@ -960,7 +972,13 @@ pub fn normalize_client_type(value: &str) -> CliResult<String> {
 /// Infer a client type from a profile name when no explicit type is configured.
 pub fn infer_client_type(profile_name: &str) -> String {
     let normalized = profile_name.to_ascii_lowercase();
-    for client_type in ["hermes", "codex", "claude", "picoclaw", "nullclaw"] {
+    if normalized
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|part| part == "pi")
+    {
+        return "pi".to_string();
+    }
+    for client_type in ["hermes", "codex", "claude"] {
         if normalized.contains(client_type) {
             return client_type.to_string();
         }
@@ -994,7 +1012,8 @@ pub fn complete_profile_identity(
 }
 
 /// Resolve profile-name precedence, including Agent HOME-derived instance profiles.
-fn resolve_profile_name(config: &ConfigFile, profile_flag: Option<&str>) -> String {
+/// Resolve the selected profile consistently for execution and credential cleanup.
+pub fn resolve_profile_name(config: &ConfigFile, profile_flag: Option<&str>) -> String {
     if let Some(profile) = profile_flag {
         return profile.to_string();
     }
@@ -1013,14 +1032,15 @@ fn resolve_profile_name(config: &ConfigFile, profile_flag: Option<&str>) -> Stri
     "local".to_string()
 }
 
-/// Detect Agent-specific HOME variables that imply a separate local authorization profile.
+/// Detect the current Pi process/config home before inherited homes of other Agents.
 fn detect_agent_home_env() -> Option<(String, String)> {
+    if let Some(path) = pi_agent_home() {
+        return Some(("pi".to_string(), path));
+    }
     for (key, client_type) in [
         ("HERMES_HOME", "hermes"),
         ("CODEX_HOME", "codex"),
         ("CLAUDE_HOME", "claude"),
-        ("PICOCLAW_HOME", "picoclaw"),
-        ("NULLCLAW_HOME", "nullclaw"),
     ] {
         if let Ok(path) = env::var(key) {
             let trimmed = path.trim();
@@ -1030,6 +1050,29 @@ fn detect_agent_home_env() -> Option<(String, String)> {
         }
     }
     None
+}
+
+/// Resolve Pi's config directory from its override or process markers without reading credentials.
+fn pi_agent_home() -> Option<String> {
+    if let Ok(path) = env::var("PI_CODING_AGENT_DIR") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    let is_pi = env::var("AI_AGENT").is_ok_and(|value| value.trim() == "pi")
+        || env::var("PI_CODING_AGENT").is_ok_and(|value| value.trim() == "true")
+        || env::var("PI_SESSION_ID").is_ok_and(|value| !value.trim().is_empty());
+    if !is_pi {
+        return None;
+    }
+    Some(
+        PathBuf::from(env::var("HOME").unwrap_or_default())
+            .join(".pi")
+            .join("agent")
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 /// Convert an Agent HOME path into a stable profile name.
@@ -1084,8 +1127,7 @@ fn title_case_client_type(client_type: &str) -> String {
         "hermes" => "Hermes".to_string(),
         "codex" => "Codex".to_string(),
         "claude" => "Claude".to_string(),
-        "picoclaw" => "PicoClaw".to_string(),
-        "nullclaw" => "NullClaw".to_string(),
+        "pi" => "Pi".to_string(),
         "hyacinthus-cli" => "Hyacinthus CLI".to_string(),
         _ => client_type.to_string(),
     }

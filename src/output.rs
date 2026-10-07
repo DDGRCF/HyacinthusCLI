@@ -1,4 +1,4 @@
-// 改动说明：认证错误保留后端顶层 error_code，供 Agent token 命令稳定分类。
+// 改动说明：保留可靠输出交付，授权错误引导 Agent 使用原始授权链接及同会话等待。
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -62,7 +62,7 @@ impl CliError {
         }
     }
 
-    /// Create an authentication error with token setup guidance.
+    /// Create an authentication error with the Agent authorization handoff guidance.
     pub fn auth(message: impl Into<String>) -> Self {
         Self {
             exit_code: EXIT_AUTH,
@@ -70,7 +70,7 @@ impl CliError {
             code: Some("AUTH_FAILED".to_string()),
             message: message.into(),
             hint: Some(
-                "configure HYACINTHUS_AGENT_TOKEN or run `hyacinthus config set-token`".to_string(),
+                "run `hyacinthus auth status`; read the capability required_scopes, use `hyacinthus auth login --scope <scopes>` and share its authorize_url; after approval run `hyacinthus auth wait` for the same session".to_string(),
             ),
             detail: None,
             risk: None,
@@ -90,7 +90,7 @@ impl CliError {
             code: Some(code.into()),
             message: message.into(),
             hint: Some(
-                "configure HYACINTHUS_AGENT_TOKEN or run `hyacinthus config set-token`".to_string(),
+                "run `hyacinthus auth status`; read the capability required_scopes, use `hyacinthus auth login --scope <scopes>` and share its authorize_url; after approval run `hyacinthus auth wait` for the same session".to_string(),
             ),
             detail,
             risk: None,
@@ -155,7 +155,7 @@ impl CliError {
             code: Some("AUTH_REQUIRED".to_string()),
             message: message.into(),
             hint: Some(
-                "open authorize_url or send qr_code_text to the user, then run `hyacinthus auth wait` using the saved private pending state"
+                "share the original authorize_url or qr_code_text with the user and end this turn; only after the user confirms approval, run `hyacinthus auth wait` for the same saved private session"
                     .to_string(),
             ),
             detail: Some(detail),
@@ -240,6 +240,71 @@ impl CliError {
 /// Standard result type for CLI command execution.
 pub type CliResult<T> = Result<T, CliError>;
 
+/// Validate restricted jq syntax before execution, using the existing evaluator on a synthetic tree.
+pub fn preflight_query(expression: Option<&str>) -> CliResult<()> {
+    let Some(expression) = expression else {
+        return Ok(());
+    };
+    let expression = expression.trim();
+    if expression.is_empty() || expression == "." {
+        return Ok(());
+    }
+    let mut fixture = Value::Null;
+    for part in expression.trim_start_matches('.').split('.').rev() {
+        let (name, array) = part
+            .strip_suffix("[]")
+            .map_or((part, false), |name| (name, true));
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(CliError::validation(
+                "jq supports only dot field names and [] expansion",
+            ));
+        }
+        let mut object = serde_json::Map::new();
+        object.insert(
+            name.to_string(),
+            if array { json!([fixture]) } else { fixture },
+        );
+        fixture = Value::Object(object);
+    }
+    json_query::apply(&fixture, expression).map(|_| ())
+}
+
+/// Check predictable file-delivery failures without creating or truncating any output file.
+pub fn preflight_path(path: Option<&str>) -> CliResult<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let path = std::path::Path::new(path);
+    if path.as_os_str().is_empty() || path.file_name().is_none() {
+        return Err(CliError::validation("--output must name a file"));
+    }
+    if path.exists() {
+        let metadata = std::fs::metadata(path)
+            .map_err(|error| CliError::validation(format!("invalid output path: {error}")))?;
+        if !metadata.is_file() || metadata.permissions().readonly() {
+            return Err(CliError::validation(
+                "--output is not a writable regular file",
+            ));
+        }
+    }
+    let parent = path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let metadata = std::fs::metadata(parent)
+        .map_err(|error| CliError::validation(format!("invalid output parent: {error}")))?;
+    if !metadata.is_dir() || metadata.permissions().readonly() {
+        return Err(CliError::validation(
+            "--output parent is not a writable directory",
+        ));
+    }
+    Ok(())
+}
+
 /// Print a successful CLI envelope and return exit code 0.
 pub fn print_success<T: Serialize>(
     data: T,
@@ -254,7 +319,34 @@ pub fn print_success<T: Serialize>(
     let value = match jq {
         Some(expression) => match json_query::apply(&envelope, expression) {
             Ok(value) => value,
-            Err(err) => return print_error(&err, json!({ "jq": expression }), format, false),
+            Err(mut err) => {
+                err.code = Some("OUTPUT_DELIVERY_FAILED".to_string());
+                err.detail = Some(json!({
+                    "command_completed": true,
+                    "phase": "result_delivery",
+                    "job_id": envelope["meta"]["job_id"],
+                    "committed": envelope["meta"]["committed"],
+                    "idempotency_key": envelope["meta"]["idempotency_key"],
+                    "result": envelope["data"],
+                    "result_meta": envelope["meta"]
+                }));
+                err.hint = Some(
+                    "save the preserved result; do not resubmit the completed command".to_string(),
+                );
+                if let Some(job_id) = envelope["meta"]["job_id"].as_str() {
+                    let instance_flag = envelope["meta"]["instance_id"]
+                        .as_i64()
+                        .map(|value| format!(" --instance-id {value}"))
+                        .unwrap_or_default();
+                    let recovery =
+                        format!("hyacinthus requirements parse-job {job_id}{instance_flag}");
+                    if let Some(detail) = err.detail.as_mut().and_then(Value::as_object_mut) {
+                        detail.insert("recovery_command".to_string(), json!(recovery));
+                    }
+                    err.hint = Some(format!("save the preserved result; recover this task read-only with the same profile/base URL/client binding: {recovery}; do not POST again"));
+                }
+                return print_error(&err, json!({ "jq": expression }), OutputFormat::Json, false);
+            }
         },
         None => envelope,
     };
@@ -263,7 +355,12 @@ pub fn print_success<T: Serialize>(
 }
 
 /// Print a failed CLI envelope and return the mapped exit code.
-pub fn print_error(err: &CliError, meta: Value, format: OutputFormat, include_notice: bool) -> i32 {
+pub fn print_error(
+    err: &CliError,
+    meta: Value,
+    _format: OutputFormat,
+    include_notice: bool,
+) -> i32 {
     let mut envelope = json!({
         "ok": false,
         "error": {
@@ -279,7 +376,7 @@ pub fn print_error(err: &CliError, meta: Value, format: OutputFormat, include_no
     });
     attach_notice(&mut envelope, include_notice);
     attach_content_safety_alert(&mut envelope);
-    print_value(&envelope, format);
+    print_value(&envelope, OutputFormat::Json);
     err.exit_code
 }
 

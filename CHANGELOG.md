@@ -1,4 +1,21 @@
+<!-- 改动说明：记录统一 CLI Skills 发现、完整引用交付、安装联动和独立 Pi 验收，并保留此前运行链路调整。 -->
 # Changelog
+
+## Unreleased
+
+- Consolidate shared/runtime/requirements into a discoverable `hyacinthus-cli` entry with 11 relative task guides; retain the independent mail workflow.
+- Add frontmatter-backed metadata, directory listing and raw/JSON `skills read`; export/check all references and reconcile only previously registered retired entries.
+- Install and verify bundled Skills alongside npm and Shell binary installation, with explicit targets/directories and opt-out.
+- Guide authentication errors through original authorization links and wait only after user approval; preserve the configured environment during network failures.
+- Save full parse/import dry-run data with `--output` even when stdout is reduced with `--jq`; constrain teacher occupation to backend canonical enums and retain experience as description text.
+- Add independent Docker API/Worker/PostGIS/Redis/MinIO/Pi acceptance using MiMo Token Plan, natural user tasks, actual browser authorization and independent business readback.
+
+- Remove managed runtime guard/probe and status/skill business commands, capabilities, tests, and fixtures.
+- Retain Hermes, Codex, Claude Code, and direct CLI authorization, requirement imports, and generic local skill export/install; do not restore Claw/PicoClaw hosting.
+- Add Pi authorization with a stable `pi-agent` default profile, process/config-directory detection ahead of inherited Agent homes, explicit profile precedence, and unchanged credential binding checks.
+- Add npm skill target `pi` using `~/.pi/agent/skills` or `PI_CODING_AGENT_DIR/skills` without starting Pi or reading its credentials.
+- Remove NullClaw client/skill targets and `NULLCLAW_HOME` detection; reject explicit legacy client types and unsupported targets even with `--dir`, without converting them to Pi.
+- Add Pi profile/token lifecycle and token-boundary contracts plus npm package skill-target/path coverage.
 
 ## 0.1.15
 
@@ -18,14 +35,10 @@
 
 - Normalize requirement extension deadlines to RFC 3339; business times without an offset use +08:00 and invalid dates fail locally.
 
-- Start Claw directly as the container's unprivileged user without requiring setgroups/setuid capabilities.
-- Verify sealed configuration and load bounded environment overrides before launching the runtime.
-
 ## 0.1.12
 
-- Bundle the Claw activation test fixture so standalone release builds do not require the backend repository.
 - Persist Agent identity before authorization so a separate auth wait process can resume a new profile.
-- Harden authorization polling, token revocation, credential storage, and Claw guard supervision.
+- Harden authorization polling, token revocation, and credential storage.
 - Align bundled Agent capabilities, skills, schema validation, and requirement import lifecycle with backend contracts.
 - Add explicit lenient requirement parsing and preserve request IDs through parse requests.
 
@@ -68,6 +81,6 @@
 
 - Initial Agent-oriented Hyacinthus CLI.
 - Added profile/auth/doctor/capability/schema/raw API commands.
-- Added admin, Claw, Claw Skills, and requirements shortcuts.
+- Added admin and requirements shortcuts.
 - Added structured JSON envelopes, output formats, jq-style dot paths, pagination, notices, content-safety alerts, and scope prechecks.
 - Added bundled Agent Skills export/check workflow.

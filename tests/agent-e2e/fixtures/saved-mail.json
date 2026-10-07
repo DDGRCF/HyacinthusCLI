@@ -1,0 +1,13 @@
+{
+  "fixture_kind": "synthetic_saved_mail",
+  "description": "合成的已保存邮件样本，不声称取自真实邮箱；运行时仅替换批次命名空间与岗位编号。",
+  "thread_id": "fixture-pi-mail-batch",
+  "message_id": "fixture-pi-mail-message",
+  "subject": "线上数学家教岗位批量样本",
+  "sender": "fixture@example.invalid",
+  "received_at": "2026-10-01T08:00:00+08:00",
+  "row_count": 30,
+  "template": "编号：{{CODE}}\n年级科目：初一，数学\n学员情况：家长发布，学生为男生\n每周次数：1次（周六）\n每次时长：2小时（14:00-16:00）\n对老师的要求：女老师，本科，有家教经验\n薪酬：{{AMOUNT}}元/小时\n地址：线上授课，无线下地点\n备注：仅线上一对一；不要求创建目录",
+  "defaults": { "contact_phone": "13800138000", "requirement_type": "tutoring", "preferred_mode": "online" },
+  "expected": { "subject_name": "数学", "grade_name": "初一", "weekly_frequency": 1, "session_duration_minutes": 120 }
+}
