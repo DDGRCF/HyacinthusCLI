@@ -1,5 +1,6 @@
-// 改动说明：以合成事件、回调和无业务子进程覆盖空结果判定、继续清理及准备日志脱敏。
+// 改动说明：覆盖数据库TCP健康检查、专项代理恢复、空结果判定、独立清理及准备日志脱敏。
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { verifyEmptySearch, cleanupSteps, safeChildOutput, captureChild, prepareSecrets, verifyLocalSopImages } from './sop-lifecycle.mjs';
 
@@ -9,6 +10,11 @@ function search(keyword, scope = 'active', overrides = {}) {
     result: { ok: true, data: { keyword, scope, total: 0, has_more: false, items: [], ...overrides } } };
 }
 const conditions = { keywords: ['数学', '初一'] };
+
+test('database health waits for TCP after the temporary initialization socket', async () => {
+  const compose = await readFile(new URL('./compose.yml', import.meta.url), 'utf8');
+  assert.match(compose, /pg_isready -h 127\.0\.0\.1 -U postgres -d hyacinthus_test/);
+});
 
 test('math followed by grade remains correct and records the two extra CLI calls', () => {
   const actual = verifyEmptySearch([search('数学'), search('初一'), { action: 'requirements search', outputText: 'help' }], conditions);

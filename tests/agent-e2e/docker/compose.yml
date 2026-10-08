@@ -1,4 +1,4 @@
-# 改动说明：固定SOP v5当前镜像并部署独立测试服务和共用Pi/CLI，内网及腾讯地图直连以避开容器中不可用的宿主代理。
+# 改动说明：PostgreSQL按TCP健康检查等待初始化完成，固定SOP v5镜像并保持测试服务、Pi/CLI和地图直连。
 services:
   db:
     image: postgis/postgis:16-3.4
@@ -8,7 +8,7 @@ services:
       POSTGRES_DB: hyacinthus_test
     volumes: [test-db:/var/lib/postgresql/data]
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U postgres -d hyacinthus_test"]
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U postgres -d hyacinthus_test"]
       interval: 2s
       timeout: 3s
       retries: 30
