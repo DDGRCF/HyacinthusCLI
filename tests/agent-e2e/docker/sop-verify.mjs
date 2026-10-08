@@ -1,7 +1,46 @@
-// 改动说明：核对21字段及未提供联系方式、解析优先级在完整预览中的保留及入库字段。
+// 改动说明：核对21字段、真实写后回读和关联同一任务的成功解析恢复。
 import assert from 'node:assert/strict';
 import { NORMALIZED_LABELS } from '../lib/verify.mjs';
 import { GEO_FIXTURE } from './geo-fixture.mjs';
+import { flag } from './sop-policy.mjs';
+import { cliData, isCliCommand } from './cli-evidence.mjs';
+/** Read complete direct parse results or a succeeded recovery tied to an earlier actual job. */
+export function parseResults(events){
+ const jobs=new Set(),results=[];
+ for(const event of events){
+  const data=cliData(event);
+  if(isCliCommand(event,'requirements parse')){
+   if(!event.denied){const detail=event.result?.error?.detail;const id=event.result?.meta?.job_id||(detail?.job_created===true?detail.job_id:undefined);if(typeof id==='string'&&id)jobs.add(id);}
+   if(Array.isArray(data?.rows)&&data?.summary)results.push({event,data,jobId:event.result?.meta?.job_id||null});
+  }else if(isCliCommand(event,'requirements parse-job')&&data?.status==='succeeded'&&jobs.has(data.job_id)&&Array.isArray(data.result?.rows)&&data.result?.summary){
+   results.push({event,data:data.result,jobId:data.job_id});
+  }
+ }
+ return results;
+}
+/** Verify exact code coverage from successful searches after the actual successful import. */
+export function verifyReadbackCodes(events,expected,write){
+ const index=events.indexOf(write);
+ assert.ok(index>=0&&write.writes&&cliData(write),'Readback lacks a successful import');
+ const codes=new Set();let searches=0;
+ for(const event of events.slice(index+1)){
+  if(!isCliCommand(event,'requirements search')||event.exitCode!==0||event.denied||event.result?.ok===false)continue;
+  const projection=(flag(event.argv||[],'--jq')||flag(event.argv||[],'-q')||'').trim();
+  let items;
+  const data=cliData(event);
+  if(data)items=data.items;
+  else if(projection==='.data.items')items=event.result;
+  else if(projection==='.data.items[]')items=Array.isArray(event.result)?event.result:[event.result];
+  else if(projection==='.data.items[].requirement_code'){
+   const values=Array.isArray(event.result)?event.result:[event.result];
+   if(values.every(value=>typeof value==='string'))items=values.map(requirement_code=>({requirement_code}));
+  }
+  if(!Array.isArray(items)||items.some(row=>typeof row?.requirement_code!=='string'))continue;
+  searches++;for(const row of items)codes.add(row.requirement_code);
+ }
+ assert.ok(expected.every(row=>codes.has(row.code)),'Agent did not read back every code');
+ return {expectedCodes:expected.length,successfulSearches:searches,readbackCodes:[...codes]};
+}
 /** Accept the two literal hyphen spellings of this exact prefix, rejecting broader patterns. */
 export function prefixRuleMatches(rule,runId){return rule.priority===5&&rule.enabled===true&&[ `^${runId}-`, `^${runId}\\-` ].includes(rule.pattern);}
 /** Verify replay counts and source identity without treating historical imports as new writes. */

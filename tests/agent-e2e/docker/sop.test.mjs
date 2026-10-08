@@ -1,4 +1,4 @@
-// 改动说明：覆盖21字段、来源及SOP依赖，并验证缺地址拒绝措辞不会触发绕过规则误报。
+// 改动说明：覆盖合法回读投影和关联任务恢复的拒绝边界，保留21字段验证。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { redactWithSecrets } from '../lib/policy.mjs';
 import { callKind, requestFingerprint, confirmationRequested, caseWorkspace } from './sop-policy.mjs';
 import { requireApproval, realArguments, requestControl } from './container-broker.mjs';
-import { mailFixture, sourceRows, csvRecords, normalizedLabelText, prefixRuleMatches, verifyReplayReport, isHourlyBilling, verifyRunReuse } from './sop-verify.mjs';
+import { mailFixture, sourceRows, csvRecords, normalizedLabelText, prefixRuleMatches, verifyReplayReport, isHourlyBilling, verifyRunReuse, verifyReadbackCodes, parseResults } from './sop-verify.mjs';
 import { NORMALIZED_LABELS } from '../lib/verify.mjs';
 import { renderSopHtml } from './sop-report.mjs';
 import { archiveTaskArtifacts } from './sop-artifacts.mjs';
@@ -16,6 +16,65 @@ import { createAdminRequirementReader } from './admin-readback.mjs';
 import { GEO_FIXTURE, MAP_SECRET_KEYS, withoutMapSecrets, probeBackendMap } from './geo-fixture.mjs';
 import { authorizationContinuation } from './sop-session.mjs';
 import { verifyMissingAddressStop } from './sop-recovery.mjs';
+test('readback accepts actual envelopes and explicit full data or items projections',()=>{
+ const expected=mailFixture('READ').expected;
+ const write={writes:true,exitCode:0,result:{ok:true,data:{created:30}}};
+ for(const projection of ['', '.', '.data', '.data.items']){
+  const reads=expected.map(({code})=>{const data={items:[{requirement_code:code}],total:1};return {action:'requirements search',exitCode:0,argv:projection?['--jq',projection]:[],result:projection==='.data'?data:projection==='.data.items'?data.items:{ok:true,data}};});
+  assert.equal(verifyReadbackCodes([write,...reads],expected,write).expectedCodes,30);
+ }
+ const first={action:'requirements search',exitCode:0,argv:['-q=.data'],result:{items:[{requirement_code:'A'}]}};
+ const second={action:'requirements search',exitCode:0,argv:[],result:{ok:true,data:{items:[{requirement_code:'B'}]}}};
+ assert.equal(verifyReadbackCodes([write,first,second],[{code:'A'},{code:'B'}],write).successfulSearches,2);
+ const saved={...first,argv:['--jq','.meta'],resultSource:'cli-output-file',result:{command:'search'},outputData:{items:[{requirement_code:'A'}]}};
+ verifyReadbackCodes([write,saved],[{code:'A'}],write);
+});
+test('readback rejects failed, denied, unrelated, malformed and insufficient projected output',()=>{
+ const write={writes:true,exitCode:0,result:{ok:true,data:{created:1}}};
+ const data={items:[{requirement_code:'A'}]};const search={action:'requirements search',exitCode:0,argv:['--jq','.data'],result:data};
+ for(const change of [{exitCode:2},{denied:true},{action:'skills read'},{result:{ok:false,...data}},{argv:[]},{argv:['--jq','.meta']},{argv:['--jq','.data.total'],result:1},{argv:['--jq','.data.items'],result:{requirement_code:'A'}},{argv:['--jq','.data.items[]','--help'],result:{requirement_code:'A'}},{result:{}},{result:{items:{}}},{result:{items:[{}]}},{result:{items:[{requirement_code:'A-extra'}]}},{result:{items:[]}}])assert.throws(()=>verifyReadbackCodes([write,{...search,...change}],[{code:'A'}],write),/every code/);
+});
+test('readback requires post-write coverage and cannot replace a missing code with duplicates',()=>{
+ const write={writes:true,exitCode:0,result:{ok:true,data:{created:2}}};
+ const search={action:'requirements search',exitCode:0,argv:[],result:{ok:true,data:{items:[{requirement_code:'A'}]}}};
+ assert.throws(()=>verifyReadbackCodes([search,write],[{code:'A'}],write),/every code/);
+ assert.throws(()=>verifyReadbackCodes([write,search,search],[{code:'A'},{code:'B'}],write),/every code/);
+ assert.throws(()=>verifyReadbackCodes([search],[{code:'A'}],write),/successful import/);
+ for(const change of [{exitCode:1},{writes:false},{denied:true},{result:{ok:false}}]){const failed={...write,...change};assert.throws(()=>verifyReadbackCodes([failed,search],[{code:'A'}],failed),/successful import/);}
+});
+test('readback accepts expanded row and code projections including a single collapsed result',()=>{
+ const write={writes:true,exitCode:0,result:{ok:true,data:{created:2}}};
+ for(const projection of ['.data.items[]','.data.items[].requirement_code']){
+  const values=projection.endsWith('requirement_code')?['A','B']:[{requirement_code:'A'},{requirement_code:'B'}];
+  const event={action:'requirements search',exitCode:0,argv:['--jq',projection],result:values};
+  verifyReadbackCodes([write,event],[{code:'A'},{code:'B'}],write);
+  verifyReadbackCodes([write,{...event,result:values[0]}],[{code:'A'}],write);
+  assert.throws(()=>verifyReadbackCodes([write,{...event,result:[]}],[{code:'A'}],write),/every code/);
+ }
+});
+test('parse evidence accepts complete output and recovery from the same earlier created job',()=>{
+ const data={rows:[{parsed:{requirement_code:'A'},errors:[]}],summary:{total:1}};
+ const direct={action:'requirements parse',exitCode:0,argv:['--jq','.data'],result:data};
+ assert.equal(parseResults([direct])[0].data,data);
+ const origin={action:'requirements parse',exitCode:1,argv:[],result:{ok:false,error:{detail:{job_created:true,job_id:'job-1'}}}};
+ const recovered={action:'requirements parse-job',exitCode:0,argv:['requirements','parse-job','job-1'],result:{ok:true,data:{job_id:'job-1',status:'succeeded',result:data}}};
+ assert.equal(parseResults([origin,recovered])[0].jobId,'job-1');
+ const projected={...recovered,argv:[...recovered.argv,'--jq','.data'],result:recovered.result.data};
+ assert.equal(parseResults([origin,projected])[0].data,data);
+ const saved={...direct,result:{total:1},resultSource:'cli-output-file',outputData:data};
+ assert.equal(parseResults([saved])[0].data,data);
+});
+test('parse recovery rejects unrelated, unfinished, failed, denied and partial job evidence',()=>{
+ const data={rows:[],summary:{total:0}};
+ const origin={action:'requirements parse',exitCode:1,argv:[],result:{ok:false,error:{detail:{job_created:true,job_id:'job-1'}}}};
+ const recovery={action:'requirements parse-job',exitCode:0,argv:[],result:{ok:true,data:{job_id:'job-1',status:'succeeded',result:data}}};
+ assert.deepEqual(parseResults([recovery]),[]);
+ assert.deepEqual(parseResults([recovery,origin]),[]);
+ for(const change of [{job_id:'other'},{status:'running'},{status:'failed'},{status:'cancelled'},{result:{summary:{}}},{result:null}])assert.deepEqual(parseResults([origin,{...recovery,result:{ok:true,data:{...recovery.result.data,...change}}}]),[]);
+ for(const change of [{exitCode:1},{denied:true},{argv:['--help']}])assert.deepEqual(parseResults([origin,{...recovery,...change}]),[]);
+ assert.deepEqual(parseResults([{...origin,denied:true},recovery]),[]);
+ assert.deepEqual(parseResults([{...origin,result:{ok:false,error:{detail:{job_id:'job-1'}}}},recovery]),[]);
+});
 test('authorization continuation preserves diagnostics and configured user intent',()=>{
  assert.doesNotMatch(authorizationContinuation('B2',false),/预览|业务确认/);
  assert.match(authorizationContinuation('B3',false),/原任务/);

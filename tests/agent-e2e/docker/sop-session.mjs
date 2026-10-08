@@ -1,4 +1,4 @@
-// 改动说明：逐轮隔离任务文件，按任务续接授权；诊断只继续诊断，业务批准绑定真实预览。
+// 改动说明：授权按真实完整输出核对权限，保留任务隔离及预览批准。
 import assert from 'node:assert/strict';
 import { appendFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -11,6 +11,7 @@ import { redactWithSecrets } from '../lib/policy.mjs';
 import { SOP_POLICY as P, confirmationRequested } from './sop-policy.mjs';
 import { createContainerBroker } from './container-broker.mjs';
 import { isolateWorkspace } from './workspace-isolation.mjs';
+import { cliData } from './cli-evidence.mjs';
 /** Select an authorization continuation that preserves the task and any existing business approval. */
 export function authorizationContinuation(caseId,approved,configured){
  if(configured!==undefined){assert.ok(typeof configured==='string'&&configured.trim(),'Authorization continuation must be nonempty text');return configured;}
@@ -61,9 +62,9 @@ export async function openPi(control,approver,{secrets=[]}={}){
  /** Perform only authorization handoffs; return once the Agent ends a real business turn. */
  async function task(prompt,{authorizationReply}={}){let next=prompt;for(let round=0;round<P.maxTurns;round++){
  const {reply,events}=await turn(next);let handoff;
- for(const e of events.toReversed()){const h=e.result?.ok?e.result.data:e.result?.error?.detail;if(h?.authorize_url){handoff=h;break;}}
+ for(const e of events.toReversed()){const h=cliData(e)||e.result?.error?.detail;if(h?.authorize_url){handoff=h;break;}}
  if(!handoff)return reply;
- assert.ok(sharedAuthorization(reply,handoff.authorize_url),'Agent did not share the original authorization URL');assert.ok((handoff.required_scopes||[]).every(s=>control.scopes.includes(s)),'Unrelated authorization scope');assert.ok(!authLinks.has(handoff.authorize_url),'Repeated completed authorization handoff');
+ assert.ok(sharedAuthorization(reply,handoff.authorize_url),'Agent did not share the original authorization URL');assert.ok(Array.isArray(handoff.required_scopes)&&handoff.required_scopes.length>0,'Authorization handoff omitted required scopes');assert.ok(handoff.required_scopes.every(s=>control.scopes.includes(s)),'Unrelated authorization scope');assert.ok(!authLinks.has(handoff.authorize_url),'Repeated completed authorization handoff');
  await approver.approve(handoff.authorize_url,control.evidence);authLinks.add(handoff.authorize_url);next=authorizationContinuation(control.caseId,approvals.length>0,authorizationReply);
  }throw new Error('User turn budget exceeded');}
  /** Approve the latest actual preview after caller has verified source fields and pre-write state. */

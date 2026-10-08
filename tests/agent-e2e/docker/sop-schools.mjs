@@ -1,5 +1,6 @@
-// 改动说明：学校验收保留全部相关候选，逐校核对资质并区分精确、模糊和三页结果。
+// 改动说明：学校验收按真实完整输出读取候选与来源，保留资质及分页核验。
 import assert from 'node:assert/strict';
+import { cliData } from './cli-evidence.mjs';
 
 /** Require the reviewed source snapshot even for empty pages. */
 export function verifySchoolSnapshot(data){
@@ -47,21 +48,21 @@ export async function schoolQueryCase({definition,session,close,readCLI,evidence
  const pi=await session('C3');
  try{
   const reply=await pi.task(definition.prompt);
-  const calls=pi.broker.events.filter(e=>e.action==='requirements catalog schools'&&e.result?.ok);
+  const calls=pi.broker.events.filter(e=>e.action==='requirements catalog schools'&&cliData(e));
   await evidence('C3','agent-queries.json',calls);
   assert.ok(calls.length>=2,'Agent did not actually query both schools');
-  const zju=calls.flatMap(e=>e.result.data.items).find(s=>s.name==='浙江大学');
+  const zju=calls.flatMap(e=>cliData(e).items).find(s=>s.name==='浙江大学');
   assert.ok(zju,'Missing actual Zhejiang University result');
   assert.deepEqual([zju.is_985,zju.is_211,zju.is_double_first_class],[true,true,true]);
-  const candidates=[...new Map(calls.flatMap(e=>e.result.data.items).filter(s=>s.name.includes('中国矿业大学')).map(s=>[s.id,s])).values()];
+  const candidates=[...new Map(calls.flatMap(e=>cliData(e).items).filter(s=>s.name.includes('中国矿业大学')).map(s=>[s.id,s])).values()];
   verifyMiningSchoolCandidates(candidates);
-  verifySchoolQueryReply(reply.text,calls.flatMap(e=>e.result.data.items));
-  for(const call of calls)verifySchoolSnapshot(call.result.data);
+  verifySchoolQueryReply(reply.text,calls.flatMap(e=>cliData(e).items));
+  for(const call of calls)verifySchoolSnapshot(cliData(call));
   const unknown=await pi.task(definition.unknownPrompt.replaceAll('{run_id}',runId));
-  const unknownCalls=pi.broker.events.filter(e=>e.action==='requirements catalog schools'&&e.result?.ok&&e.argv.some(arg=>arg.includes(`虚构校名-${runId}`)));
+  const unknownCalls=pi.broker.events.filter(e=>e.action==='requirements catalog schools'&&cliData(e)&&e.argv.some(arg=>arg.includes(`虚构校名-${runId}`)));
   await evidence('C3','agent-unknown.json',{text:unknown.text,calls:unknownCalls});
-  assert.ok(unknownCalls.some(e=>e.result.data.total===0&&e.result.data.items.length===0),'Agent did not query the unknown name');
-  for(const call of unknownCalls)verifySchoolSnapshot(call.result.data);
+  assert.ok(unknownCalls.some(e=>cliData(e).total===0&&cliData(e).items.length===0),'Agent did not query the unknown name');
+  for(const call of unknownCalls)verifySchoolSnapshot(cliData(call));
   assert.match(unknown.text,/不能|无法|不代表|不等于|不意味着/);
   assert.ok(!pi.broker.events.some(e=>e.writes||e.denied),'School lookup attempted a write or forbidden command');
   const engineering=[];
@@ -75,7 +76,7 @@ export async function schoolQueryCase({definition,session,close,readCLI,evidence
    ['--keyword','中国矿业大学','--skip','2','--limit','1'],['--keyword','浙大'],
   ]){
    const data=await readCLI(pi,['requirements','catalog','schools',...flags]);
-   verifySchoolSnapshot(data);assert.deepEqual(data.catalog,calls[0].result.data.catalog,'Directory changed between queries');engineering.push({flags,data});
+   verifySchoolSnapshot(data);assert.deepEqual(data.catalog,cliData(calls[0]).catalog,'Directory changed between queries');engineering.push({flags,data});
   }
   assert.equal(engineering[0].data.total,1);assert.equal(engineering[0].data.items.length,1);
   assert.equal(engineering[0].data.items[0].name,'浙江大学');assert.equal(engineering[0].data.has_more,false);

@@ -1,4 +1,4 @@
-// 改动说明：覆盖数据库TCP健康检查、专项代理恢复、空结果判定、独立清理及准备日志脱敏。
+// 改动说明：覆盖完整data空结果及不足投影拒绝，保留TCP、代理恢复和清理验证。
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -6,10 +6,18 @@ import { verifyEmptySearch, cleanupSteps, safeChildOutput, captureChild, prepare
 
 /** Build a synthetic successful empty CLI search without any live service. */
 function search(keyword, scope = 'active', overrides = {}) {
-  return { id: keyword, action: 'requirements search', writes: false,
+  return { id: keyword, action: 'requirements search', writes: false, exitCode: 0, argv: [],
     result: { ok: true, data: { keyword, scope, total: 0, has_more: false, items: [], ...overrides } } };
 }
 const conditions = { keywords: ['数学', '初一'] };
+test('empty search accepts full data or a real saved result and rejects insufficient projections',()=>{
+ const actual=search('数学');
+ const projected={...actual,argv:['--jq','.data'],result:actual.result.data};
+ assert.equal(verifyEmptySearch([projected],conditions).returned,0);
+ const saved={...actual,argv:['--jq','.data.total'],result:0,resultSource:'cli-output-file',outputData:actual.result.data};
+ assert.equal(verifyEmptySearch([saved],conditions).returned,0);
+ for(const event of [{...projected,exitCode:1},{...projected,argv:[]},{...actual,argv:['--jq','.data.items'],result:[]},{...actual,argv:['--jq','.data.total'],result:0}])assert.throws(()=>verifyEmptySearch([event],conditions),/No actual successful query/);
+});
 
 test('database health waits for TCP after the temporary initialization socket', async () => {
   const compose = await readFile(new URL('./compose.yml', import.meta.url), 'utf8');

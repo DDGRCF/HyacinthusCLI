@@ -1,8 +1,9 @@
-// 改动说明：selected恢复后刷新Nginx代理，预检本地SOP镜像，按条件验证空结果，独立清理并捕获脱敏准备输出。
+// 改动说明：按真实完整输出验证空结果，保留专项代理恢复、镜像预检和独立清理。
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { cliData } from './cli-evidence.mjs';
 
 const GENERATED_SECRET_KEYS = ['HYACINTHUS_SECURITY__JWT_SECRET', 'HYACINTHUS_SECURITY__REQUIREMENT_CURSOR_ACTIVE_KEY',
   'HYACINTHUS_SECURITY__SNAPSHOT_PAGINATION__ACTIVE_KEY', 'HYACINTHUS_ADMIN_PLATFORM__SETTINGS_ENCRYPTION_KEY',
@@ -52,17 +53,17 @@ export async function prepareSecrets(privateDir, mapSecretKeys, read = readFile)
 /** Select exhaustive empty evidence for one requested condition, and count later CLI work. */
 export function verifyEmptySearch(events, { keywords, scope = 'active' }) {
   assert.ok(Array.isArray(keywords) && keywords.length, 'Missing requested search conditions');
-  const searches = events.filter(event => event.action === 'requirements search' && event.result?.ok);
+  const searches = events.filter(event => event.action === 'requirements search' && cliData(event));
   assert.ok(searches.length, 'No actual successful query');
-  assert.ok(searches.every(event => event.result.data.scope === scope), 'Query expanded the requested scope');
-  const index = events.findIndex(event => event.action === 'requirements search' && event.result?.ok
-    && event.result.data.scope === scope && keywords.includes(event.result.data.keyword)
-    && event.result.data.total === 0 && event.result.data.has_more === false
-    && Array.isArray(event.result.data.items) && event.result.data.items.length === 0);
+  assert.ok(searches.every(event => cliData(event).scope === scope), 'Query expanded the requested scope');
+  const index = events.findIndex(event => {const data=cliData(event);return event.action === 'requirements search' && data
+    && data.scope === scope && keywords.includes(data.keyword)
+    && data.total === 0 && data.has_more === false
+    && Array.isArray(data.items) && data.items.length === 0;});
   assert.ok(index >= 0, 'No exhaustive empty query for a requested condition');
   assert.ok(!events.some(event => event.denied || event.writes), 'Query attempted a denied action or business write');
   const query = events[index];
-  return { queryEventId: query.id, keyword: query.result.data.keyword, scope,
+  return { queryEventId: query.id, keyword: cliData(query).keyword, scope,
     returned: 0, emptyResultEndsTask: index === events.length - 1,
     extraCliCallsAfterEmpty: events.length - index - 1,
     extraActionsAfterEmpty: events.slice(index + 1).map(event => event.action) };

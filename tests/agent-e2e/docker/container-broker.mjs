@@ -1,4 +1,4 @@
-// 改动说明：同容器守护真实CLI及审批，允许任务内物理子目录，并按实际工作目录校验相对文件。
+// 改动说明：守护真实CLI及审批，独立保存stdout与裸data输出文件，并按真实来源核对预览和响应丢失。
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, writeFile, realpath, stat, unlink } from 'node:fs/promises';
@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { createFileQueue } from '../lib/file-queue.mjs';
 import { redact } from '../lib/policy.mjs';
 import { SOP_POLICY as P, NETWORK_DENY_EXEC, flag, without, sha, requestFingerprint, callKind } from './sop-policy.mjs';
+import { cliData } from './cli-evidence.mjs';
 const exec=promisify(execFile);
 /** Map a container working directory to its physical location within this case only. */
 export async function requestControl(control,cwd){
@@ -62,13 +63,12 @@ export async function createContainerBroker(control) {
  if(event.writes){if(!argv.includes('--yes'))throw new Error('Write requires --yes after preview approval');const check=await containerCLI(execution,argv,{preview:true});const json=JSON.parse(check.stdout);if(!json.ok||!json.data?.request)throw new Error('Write request has no valid actual preview');event.fingerprint=requestFingerprint(event.action,json.data.request);requireApproval(event.fingerprint,approvals);}
  output=await containerCLI(execution,argv);event.exitCode=output.exitCode;
  try{event.result=JSON.parse(output.stdout);}catch{event.outputText=output.stdout;}
- const savedOutput=flag(submitted.argv,'--output')||flag(submitted.argv,'-o');if(savedOutput&&output.exitCode===0){const bytes=await readFile(await checkedPath(execution,savedOutput));event.rawStdout=output.stdout;event.result={ok:true,data:JSON.parse(bytes),meta:event.result?.meta||{command:event.action}};event.resultSource='cli-output-file';event.output_sha256=sha(bytes);}
+ const savedOutput=flag(submitted.argv,'--output')||flag(submitted.argv,'-o');if(savedOutput&&output.exitCode===0&&!argv.includes('--help')&&!argv.includes('-h')){const bytes=await readFile(await checkedPath(execution,savedOutput));event.rawStdout=output.stdout;event.outputData=JSON.parse(bytes);event.resultSource='cli-output-file';event.output_sha256=sha(bytes);}
+ const resultData=cliData(event);
  if(!event.writes&&argv.includes('--dry-run')){
- let json=event.result;
- if(!json?.data?.request){const saved=flag(submitted.argv,'--output')||flag(submitted.argv,'-o');if(saved)json={ok:true,data:JSON.parse(await readFile(await checkedPath(execution,saved),'utf8'))};}
- if(json?.data?.request){event.preview=json.data;event.fingerprint=requestFingerprint(event.action,json.data.request);}
+ if(resultData?.request){event.preview=resultData;event.fingerprint=requestFingerprint(event.action,resultData.request);}
  }
- if(fault&&event.writes&&output.exitCode===0&&event.result?.data?.created>0&&event.result.data.failed===0){event.actualCommitted=true;output={stdout:JSON.stringify({ok:false,error:{code:'UPLOAD_RESULT_UNKNOWN',message:'Controlled response loss after real commit'}}),stderr:'',exitCode:1};event.responseLost=true;const out=flag(submitted.argv,'--output');if(out)await unlink(await checkedPath(execution,out)).catch(e=>{if(e.code!=='ENOENT')throw e;});fault=false;}
+ if(fault&&event.writes&&resultData?.created>0&&resultData.failed===0){event.actualCommitted=true;output={stdout:JSON.stringify({ok:false,error:{code:'UPLOAD_RESULT_UNKNOWN',message:'Controlled response loss after real commit'}}),stderr:'',exitCode:1};event.responseLost=true;const out=flag(submitted.argv,'--output')||flag(submitted.argv,'-o');if(out)await unlink(await checkedPath(execution,out)).catch(e=>{if(e.code!=='ENOENT')throw e;});fault=false;}
  }catch(e){event.denied=true;event.reason=e.message;output={stdout:JSON.stringify({ok:false,error:{code:'SOP_APPROVAL_DENIED',message:e.message}}),stderr:'',exitCode:2};event.exitCode=2;}
  event.deliveryExitCode=output.exitCode;event.durationMs=performance.now()-started;ledger.push(event);await writeFile(path.join(control.evidence,'cli-events.json'),JSON.stringify(redact(ledger),null,2));return output;
  },e=>ledger.push({denied:true,reason:e.message}));

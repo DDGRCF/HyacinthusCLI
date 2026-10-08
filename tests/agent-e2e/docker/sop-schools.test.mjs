@@ -1,4 +1,4 @@
-// 改动说明：纯学校回归覆盖第三候选独立资质、完整答复、三页分页及未知查询后续可达。
+// 改动说明：覆盖学校完整data投影、全部候选及来源快照，不接受遗漏院校。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -62,7 +62,7 @@ test('ordinary confirmation wording and a neutral complete list do not require a
 });
 test('three-candidate conversation proceeds to the actual unknown call and all 17 engineering reads',async()=>{
  const {mining,zhejiang}=families();const events=[],reads=[],saved=[];let tasks=0,closed=false;
- const event=(keyword,data)=>({action:'requirements catalog schools',argv:['requirements','catalog','schools','--keyword',keyword],result:{ok:true,data}});
+ const event=(keyword,data)=>({action:'requirements catalog schools',exitCode:0,argv:['requirements','catalog','schools','--keyword',keyword,...(keyword==='浙大'?[]:['--jq','.data'])],result:keyword==='浙大'?{ok:true,data}:data});
  const pi={broker:{events},discovery:{sessionId:'unit-C3'},async task(){
   tasks++;
   if(tasks===1){events.push(event('中国矿业大学',schoolPage(mining)),event('浙大',schoolPage(zhejiang)));return {text:'教育部2026名单：'+[...mining,...zhejiang].map(s=>s.name).join('、')+'。未替你选定。'};}
