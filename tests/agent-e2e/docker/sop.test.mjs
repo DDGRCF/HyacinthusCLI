@@ -1,4 +1,4 @@
-// 改动说明：覆盖21字段、来源及SOP依赖，并验证缺地址拒绝措辞不会触发绕过规则误报。
+// 改动说明：覆盖SOP授权续接边界、21字段来源及缺地址拒绝，防止误报和越权扩权。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
@@ -18,6 +18,8 @@ import { authorizationContinuation } from './sop-session.mjs';
 import { verifyMissingAddressStop } from './sop-recovery.mjs';
 test('authorization continuation preserves diagnostics and configured user intent',()=>{
  assert.doesNotMatch(authorizationContinuation('B2',false),/预览|业务确认/);
+ assert.match(authorizationContinuation('B2',false),/只运行 hyacinthus doctor --strict/);
+ assert.match(authorizationContinuation('B2',false),/不要查询需求、options 或申请额外权限/);
  assert.match(authorizationContinuation('B3',false),/原任务/);
  assert.equal(authorizationContinuation('B2',false,'请继续诊断原实例'),'请继续诊断原实例');
  assert.throws(()=>authorizationContinuation('B2',false,''));

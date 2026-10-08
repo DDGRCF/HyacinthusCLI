@@ -1,4 +1,4 @@
-// 改动说明：逐轮隔离任务文件，按任务续接授权；诊断只继续诊断，业务批准绑定真实预览。
+// 改动说明：逐轮隔离任务文件，按任务续接授权；B2续接仅重跑doctor，业务批准绑定真实预览。
 import assert from 'node:assert/strict';
 import { appendFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -14,7 +14,7 @@ import { isolateWorkspace } from './workspace-isolation.mjs';
 /** Select an authorization continuation that preserves the task and any existing business approval. */
 export function authorizationContinuation(caseId,approved,configured){
  if(configured!==undefined){assert.ok(typeof configured==='string'&&configured.trim(),'Authorization continuation must be nonempty text');return configured;}
- if(caseId==='B2')return '已通过原始链接批准CLI访问权限。请继续检查当前测试实例是否可用，并告诉我发现的问题。';
+ if(caseId==='B2')return '已通过原始链接批准CLI访问权限。只运行 hyacinthus doctor --strict 复核测试实例；不要查询需求、options 或申请额外权限。向我报告检查结果后停止。';
  return approved?'已通过原始链接批准CLI访问权限。此前已确认的业务预览仍有效，请严格按已批准的原内容继续。':'已通过原始链接批准CLI访问权限。请继续原任务；如果涉及业务写入，请完成预览并等待我的业务确认。';
 }
 /** Open the Agent's exact authorization URL in the deployed admin UI, retaining credentials only in memory. */

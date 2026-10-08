@@ -1,4 +1,4 @@
-// 改动说明：准确区分缺来源时申请授权的效率门禁，保留SOP v5逐例证据、凭据边界及selected代理恢复。
+// 改动说明：SOP v5逐例留证和凭据边界；selected续跑按依赖恢复后重建管理端nginx，避免代理缓存旧地址。
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises';
