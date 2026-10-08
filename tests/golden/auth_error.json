@@ -2,7 +2,7 @@
   "error": {
     "code": "AUTH_FAILED",
     "detail": null,
-    "hint": "configure HYACINTHUS_AGENT_TOKEN or run `hyacinthus config set-token`",
+    "hint": "run `hyacinthus auth status`; read the capability required_scopes, use `hyacinthus auth login --scope <scopes>` and share its authorize_url; after approval run `hyacinthus auth wait` for the same session",
     "message": "agent token is not configured",
     "retryable": false,
     "risk": null,

@@ -1,4 +1,4 @@
-// Change note: preserve HTTP failures, explain oversized imports and classify revoked Agent grants.
+// 改动说明：封闭授权客户端新增 Pi、移除 NullClaw；保留 HTTP 错误、导入限制和已撤销授权处理。
 use std::io::Read;
 use std::time::Duration;
 
@@ -40,8 +40,7 @@ pub enum AgentClientType {
     Hermes,
     #[serde(rename = "hyacinthus-cli")]
     HyacinthusCli,
-    Nullclaw,
-    Picoclaw,
+    Pi,
 }
 
 impl AgentClientType {
@@ -52,8 +51,7 @@ impl AgentClientType {
             Self::Codex => "codex",
             Self::Hermes => "hermes",
             Self::HyacinthusCli => "hyacinthus-cli",
-            Self::Nullclaw => "nullclaw",
-            Self::Picoclaw => "picoclaw",
+            Self::Pi => "pi",
         }
     }
 }

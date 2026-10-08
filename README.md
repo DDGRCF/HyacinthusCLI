@@ -1,12 +1,13 @@
+<!-- 改动说明：补齐学校查询与后端同步前提，保留SOP v5入口及 raw 地图 errors 裁决说明。 -->
 # Hyacinthus CLI
 
-Agent-oriented CLI for 风信子家教中心 backend operations. The CLI is designed for OpenClaw, Codex, Claude Code, and internal operators that need a stable, structured, auditable command surface.
+Agent-oriented CLI for 风信子家教中心 backend operations. The CLI supports Hermes, Codex, Claude Code, Pi, and direct `hyacinthus-cli` authorization identities with a stable, structured, auditable command surface.
 
 ## Principles
 
 - The backend is the source of truth for permissions, validation, business rules, idempotency, and audit logs.
 - The CLI communicates over HTTP and never connects directly to the database, Redis, MinIO, or message queues.
-- Default output is JSON envelope format for AI Agent parsing.
+- For machine parsing, pass `--format json` explicitly; a profile can change the default format.
 - Mutating commands support dry-run where possible and require `--yes` for real execution.
 - Write and high-risk capabilities use a structured confirmation protocol with exit code `10`.
 
@@ -16,7 +17,7 @@ Agent-oriented CLI for 风信子家教中心 backend operations. The CLI is desi
 cargo build
 
 ./target/debug/hyacinthus auth status
-./target/debug/hyacinthus config set-token --profile local --token "$HYACINTHUS_AGENT_TOKEN"
+./target/debug/hyacinthus auth login --scope "requirements:parse requirements:write"
 ./target/debug/hyacinthus doctor --offline
 ./target/debug/hyacinthus capability list
 ```
@@ -27,34 +28,42 @@ Install from a GitHub release:
 curl -fsSL https://raw.githubusercontent.com/DDGRCF/HyacinthusCLI/main/scripts/install.sh | bash
 ```
 
-Install from the private GitHub release through the npm wrapper:
+With access to the npm package, install through its authenticated GitHub wrapper:
 
 ```bash
-GITHUB_TOKEN=github_pat_xxx npx @ddgrcf/hyacinthus-cli install
+GITHUB_TOKEN=github_pat_xxx npx @ddgrcf/hyacinthus-cli install --skills-target pi
 npx @ddgrcf/hyacinthus-cli skills install --target hermes
-npx @ddgrcf/hyacinthus-cli skills install --target nullclaw --dir ~/.nullclaw/skills
+npx @ddgrcf/hyacinthus-cli skills install --target pi
 ```
 
-The npm wrapper does not contain the Rust binary. It uses `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token` to read the private `DDGRCF/HyacinthusCLI` release assets, download the matching archive, verify the `.sha256` checksum, and install `hyacinthus` into `~/.local/bin` by default. Alpine environments are detected as `x86_64-unknown-linux-musl`; other Linux x86_64 environments use `x86_64-unknown-linux-gnu`.
+The npm wrapper does not contain the Rust binary. It currently requires `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token` to download release assets, verify the `.sha256` checksum, and install `hyacinthus` into `~/.local/bin` by default. GitHub releases are public; the shell installer above does not require this token. Alpine environments are detected by the npm wrapper as `x86_64-unknown-linux-musl`; other Linux x86_64 environments use `x86_64-unknown-linux-gnu`.
+
+`skills read` emits raw Markdown by default; `--json` or explicit `--format json` returns the normal JSON envelope. `skills list [name/path]` lists one embedded directory level.
+
+Skill installation targets are `hermes`, `codex`, `claude`, and `pi`. Pi installs into `~/.pi/agent/skills` by default, or `<PI_CODING_AGENT_DIR>/skills` when the trimmed override is non-empty. An explicit `--dir` takes precedence, but an unsupported target (including `nullclaw`) is rejected even with `--dir`. Use `skills install --dir <dir>` for a generic destination, or `hyacinthus skills export --dir <dir>` directly. Skill installation never starts Pi or reads its credentials. Agent authorization, requirement imports, and local skill export/check do not require a managed runtime; Claw/PicoClaw hosting remains removed.
+
+Normal `install` also exports and verifies bundled Skills in detected Hermes/Codex/Claude/Pi homes. Select one using `--skills-target <agent>`, a custom directory using `--skills-dir <dir>`, or a binary-only installation using `--skip-skills`. Reload the Agent session after installation. Export/check cover every reference file. A subsequent export removes only retired entry files recorded by the installer manifest, retaining unrelated Skills and custom files.
 
 The wrapper package lives in `npm/hyacinthus-cli` and can be published privately with `npm publish --access restricted`. Private npm access only controls the wrapper download; GitHub release access is still checked separately by GitHub.
 
-Installed release binaries default to the production API:
+## Backend target
 
-```text
-https://www.fxzjjzx.cn
+Release binaries use the production API by default: `https://www.fxzjjzx.cn`. For local debugging, create a separate profile and authorize against the local backend:
+
+```bash
+hyacinthus config set-profile dev --base-url http://localhost:8000
+hyacinthus --profile dev auth status
+hyacinthus --profile dev auth login --scope requirements:read --wait
+hyacinthus --profile dev auth token status
 ```
 
-Do not pass `--base-url` for normal production use. Only set `HYACINTHUS_BASE_URL` or a profile `--base-url` when intentionally targeting development or staging.
+`auth status` shows the resolved `base_url`. Use `--profile dev` for local commands; each profile stores its own credentials. If `HYACINTHUS_BASE_URL` is set, it overrides the profile URL.
 
 ## Core Commands
 
 ```bash
 hyacinthus auth status
 hyacinthus admin status
-hyacinthus claw status
-hyacinthus claw skills list
-hyacinthus auth status
 hyacinthus auth login --scope requirements:read --wait
 hyacinthus auth scopes
 hyacinthus auth check --scope requirements:read
@@ -70,27 +79,43 @@ hyacinthus capability run requirements.options --output options.json
 hyacinthus api GET /api/v1/agent/capabilities --params '{"limit":10}' --dry-run
 HYACINTHUS_RAW_API=1 hyacinthus api GET /api/v1/agent/capabilities --output capabilities.json
 hyacinthus skills list
-hyacinthus skills show hyacinthus-requirements
+hyacinthus skills read hyacinthus-cli references/requirements-import.md
 hyacinthus skills export --dir ./.tmp/agent-skills
 hyacinthus skills check --dir ./.tmp/agent-skills
 hyacinthus requirements options
+hyacinthus requirements catalog schools --keyword 浙大 --exact
+hyacinthus requirements catalog schools --keyword 中国矿业大学
+hyacinthus requirements catalog schools --province 浙江省 --tier 211 --limit 20
 hyacinthus requirements search --keyword 高一数学
 hyacinthus requirements extend KKH347 --yes
-hyacinthus requirements extend KKH347 --expires-at 2027-07-10T12:00:00+08:00 --yes
 hyacinthus requirements parse --file input.txt
-hyacinthus requirements catalog create-missing --file parsed.json --dry-run
-hyacinthus requirements catalog create-missing --file parsed.json --yes
+hyacinthus requirements catalog create-missing --subject <missing-subject> --dry-run
+hyacinthus requirements catalog create-missing --subject <missing-subject> --yes
 hyacinthus requirements catalog reorder --target subjects --ids 3,1,2 --yes
 hyacinthus requirements import --file confirmed.json --idempotency-key cli-demo --yes
 ```
 
-The complete Agent API and capability index is maintained in `docs/requirements/agent-cli/08-agent-api-index.md` in the main repository. Use `hyacinthus capability list` or `hyacinthus schema <id>` for the runtime schema actually exposed by the backend.
+School lookup requires `requirements:read`, an upgraded backend, and a catalog published by an administrator through the guarded Rust admin `sync-school-catalog` operation (`backend/scripts/run.sh admin ...`); a missing source snapshot returns `SCHOOL_CATALOG_SYNC_REQUIRED`. Results retain all candidates, independent qualification flags, and catalog source versions and file hashes. Confirm the school when an alias has multiple candidates; empty results do not prove a school does not exist or lacks qualifications, and school facts do not become recruitment requirements. Continue pages with `--skip` / `--limit` and `has_more`; if snapshot file hashes change, restart the query. See the bundled [school catalog guide](skills/hyacinthus-cli/references/catalog.md).
 
-`requirements extend --expires-at` accepts RFC 3339 timestamps. A time without an offset is interpreted as +08:00; omit the option to use the server’s default extension period.
+Batch parsing/import has no row-confidence threshold or `--min-confidence` option. The backend alone decides business validity: `errors` block rows; `warnings` are displayed but never block. `can_auto_commit` and `needs_confirmation` must agree with `errors`; missing or contradictory required verdict fields are protocol errors. `--yes` authorizes a write and never bypasses backend errors. Dry-run previews the payload without promising backend acceptance; submission still returns partial failures and import-raw skip summaries with the caller's stable idempotency key.
+
+Raw requirement parsing maps recognized field names (including supported aliases) into the canonical 21-field text/CSV template. These Chinese labels are input text labels, not import JSON keys: user and administrator contacts belong to `confirmed_rows[].ext`, and teacher occupation belongs to `condition.required_occupation`. Backend table parsing supports CSV/XLSX, but CLI `--file` reads UTF-8 TXT/CSV, not binary XLSX. Columns and labelled text may use any column count or order; absent optional fields remain empty. Unknown and non-identity duplicate fields produce a non-blocking `FIELD_RECOGNITION_NOTICE`; table details are aggregated at the parse result's `field_recognition`, while text details belong to each row. Duplicate identifiers are errors. Required business data is still validated before commit; free-form natural-language input remains supported. Separate reordered labelled records with a blank line.
+
+Default lenient parsing does not emit `SUBJECT_NAME_UNMAPPED:<name>` or `GRADE_NAME_UNMAPPED:<name>`. Compare source names with `requirements options`, then create approved missing names through explicit `--subject` / `--grade`. Catalog `--file` extracts only those named diagnostics; it does not discover missing names from a normal lenient result.
+
+The broader Agent API index is maintained in `docs/requirements/agent-cli/08-agent-api-index.md` in the main repository. For this CLI's current command and capability surface, use `hyacinthus --help` and `hyacinthus capability list`; the backend index may describe a different revision.
+
+`hyacinthus capability list` and `hyacinthus schema <id>` read the manifest embedded in the installed binary. Use `hyacinthus capability list --remote` or `hyacinthus capability schema <id> --remote` to inspect the backend's actual manifest, and `hyacinthus capability diff --remote --strict` to detect drift. The six upload/geocode/identity/preflight capabilities are available through `capability run <id>`, not dedicated requirements shortcut commands.
+
+`requirements parse --dry-run` only previews the request. `requirements import-raw --dry-run` still submits a real parse job and polls it, but does not import requirements. Its `--file` argument reads UTF-8 text (TXT/CSV), not a binary XLSX upload; the current manifest declares no file-upload capabilities.
+
+For review before writing, use `parse` once, save and review `confirmed_rows`, then run `import --dry-run` and `import --yes` against the same file and stable key. Parse does not generate `weekly_frequency_min/max` or `session_duration_minutes_min/max`; fill these four fields in `confirmed_rows` to preserve source frequency and duration. Reusing an import key with a changed payload replays the original receipt without checking the content; use a new key for a different batch or revised payload. Each `import-raw` invocation creates a new parse job; its dry-run `import_summary` is a request preview, not import statistics. Recovery through `parse-job` returns a task object whose `result` contains the parse data.
+
+Map resolution runs during the parse job to produce candidate coordinates, then import/upload_run resolves the submitted address again or reuses an existing requirement's verified location before writing. Client-supplied parse coordinates do not authorize a write. Ordinary import has no geography run handle; report map failures from `failed_rows`, and use upload-run outcomes for the persistent workflow.
+
+Both `batch_extend_v2` and single-row `requirements extend` use the server’s default expiry; supplied `expires_at` is not applied. A requested deadline cannot currently be set through either command. Single-row extension restores `open` and clears matching; batch extension preserves `matched`. See the bundled [batch and geography guide](skills/hyacinthus-cli/references/batch-and-geo.md).
 
 ## Environment Variables
-
-The CLI defaults to the production API at `https://www.fxzjjzx.cn`. Set `HYACINTHUS_BASE_URL` or run `hyacinthus config set-profile ... --base-url ...` only for development or staging environments.
 
 ```text
 HYACINTHUS_CONFIG_DIR
@@ -104,6 +129,7 @@ HYACINTHUS_FORMAT
 HYACINTHUS_RAW_API
 HYACINTHUS_CLI_LATEST_VERSION
 HYACINTHUS_SKILLS_TARGET_VERSION
+PI_CODING_AGENT_DIR
 ```
 
 Precedence:
@@ -144,7 +170,8 @@ hyacinthus requirements search --keyword "高一数学" --scope active -q '.data
 hyacinthus requirements extend KKH347 --dry-run -q '.data.request.body'
 hyacinthus requirements extend KKH347 --yes -q '.data.expires_at'
 hyacinthus requirements parse --text "高一数学" --dry-run -q '.data.request.body'
-hyacinthus requirements parse --text "高一数学" --dry-run --lenient
+hyacinthus requirements parse --text "高一数学" --dry-run
+hyacinthus requirements parse --text "高一数学" --dry-run --strict
 hyacinthus --request-id trace-123 requirements parse --text "高一数学" --dry-run
 ```
 
@@ -162,15 +189,9 @@ HYACINTHUS_RAW_API=1 hyacinthus api POST /api/v1/admin/items --data @payload.jso
 HYACINTHUS_RAW_API=1 hyacinthus api POST /api/v1/admin/items --data @payload.json --yes
 ```
 
-For development or staging profiles, configure the non-production backend explicitly:
-
-```bash
-hyacinthus config set-profile dev --base-url http://localhost:8000 --raw-api-enabled
-```
-
 Raw API paths must start with `/api/v1/`.
 
-Interactive Agent authorization is supported for hermes, Claw, and other automation clients:
+Interactive Agent authorization is supported for Hermes, Codex, Claude Code, Pi, and direct CLI clients:
 
 ```bash
 hyacinthus auth login --scope requirements:parse
@@ -183,9 +204,11 @@ hyacinthus auth token revoke
 hyacinthus auth logout
 ```
 
-`auth login` creates a backend authorization session, stores its device-only secret in an atomically written `0600` pending-state file, and prints only `session_id`, the private file path, `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. After approval, `auth wait` resumes from that file without placing the secret in argv, process listings, or normal output. An external trusted broker can instead pass the secret through stdin with `auth wait --session-id <session_id> --device-secret-stdin`. Polling is retryable until the CLI saves the token and acknowledges delivery. If acknowledgement fails after the token is saved, the command reports `authenticated: true` plus `acknowledgement_pending: true`; rerun `auth wait` to finish. Terminal non-`pending` states remove the pending file and exit non-zero.
+`auth login` creates a backend authorization session, stores its device-only secret in an atomically written `0600` pending-state file, and prints only `session_id`, the private file path, `authorize_url`, `qr_code_text`, `user_code`, and `required_scopes`. After approval, `auth wait` resumes from that file without placing the secret in argv, process listings, or normal output. An external trusted broker can instead pass the secret through stdin with `auth wait --session-id <session_id> --device-secret-stdin --expected-revision <revision>`. Polling is retryable until the CLI saves the token and acknowledges delivery. If acknowledgement fails after the token is saved, the command reports `authenticated: true` plus `acknowledgement_pending: true`; rerun `auth wait` to finish. Terminal non-`pending` states remove the pending file and exit non-zero.
 
-The CLI automatically binds each profile to a stable Agent identity. Supported `client_type` values are `hermes`, `codex`, `claude`, `picoclaw`, `nullclaw`, and `hyacinthus-cli`. Single-Agent setups can rely on default homes like `~/.hermes`; multi-instance setups should set a distinct `HYACINTHUS_PROFILE` or Agent home for each instance.
+The CLI automatically binds each profile to a stable Agent identity. Supported `client_type` values are `hermes`, `codex`, `claude`, `pi`, and `hyacinthus-cli`; Pi's display name is `Pi`. Profile selection is `--profile` > non-empty `HYACINTHUS_PROFILE` > Pi process/config directory > other Agent home variables > active profile > `local`. Pi is detected by `AI_AGENT=pi`, `PI_CODING_AGENT=true`, a non-empty `PI_SESSION_ID`, or a non-empty `PI_CODING_AGENT_DIR`; inherited `CODEX_HOME` cannot override Pi detection. Pi defaults to `~/.pi/agent`, producing `pi-agent`; a config directory override produces `pi-<sanitized directory basename>`. Session IDs are detection hints, not identity inputs. Pi SDK users without process markers should set `PI_CODING_AGENT_DIR` or explicitly configure a Pi profile. Multi-instance setups must use distinct profile names or distinct directory basenames.
+
+Profile-name inference matches `pi` only as a whole alphanumeric token (for example `pi-agent` or `worker_pi`), not inside `api-prod`, `spider`, or `pi2`. Explicit saved identity/type and existing token/profile/backend binding checks remain authoritative. `NULLCLAW_HOME` is ignored; saved or explicit `client_type: nullclaw` is unsupported and never converted to Pi.
 
 The first `auth login` persists that identity before sending the authorization request, so a separate `auth wait` process resumes the same session even with a brand-new configuration directory. Use the same profile for both commands. `auth token status` reads the actual server grant; `auth logout` revokes it remotely before removing local credentials.
 
@@ -194,7 +217,7 @@ Commands that return backend data can write the successful `data` payload to a f
 ```bash
 hyacinthus capability run requirements.options --output options.json
 hyacinthus requirements parse --text "高一数学" --output parsed.json
-hyacinthus requirements import --data @confirmed.json --yes --output import-result.json
+hyacinthus requirements import --data @confirmed.json --idempotency-key reviewed-batch-001 --yes --output import-result.json
 hyacinthus requirements extend KKH347 --yes --output extend-result.json
 HYACINTHUS_RAW_API=1 hyacinthus api GET /api/v1/agent/capabilities --output capabilities.json
 ```
@@ -203,16 +226,10 @@ Known token scopes can be declared for local precheck:
 
 ```bash
 HYACINTHUS_AGENT_SCOPES=requirements:read hyacinthus requirements search --keyword 高一数学
-HYACINTHUS_AGENT_SCOPES=requirements:parse,requirements:write hyacinthus requirements import --dry-run --data @rows.json
+HYACINTHUS_AGENT_SCOPES=requirements:parse,requirements:write hyacinthus requirements import --dry-run --data @rows.json --idempotency-key reviewed-rows-001
 HYACINTHUS_AGENT_SCOPES=requirements:write hyacinthus requirements extend KKH347 --dry-run
 hyacinthus auth scopes --domain requirements
 hyacinthus auth check --scope "requirements:read requirements:parse requirements:write"
-```
-
-Development profile example:
-
-```bash
-hyacinthus config set-profile dev --base-url http://localhost:8000 --scopes requirements:read,requirements:parse,requirements:write
 ```
 
 ## Requirement Deadline Extension
@@ -222,10 +239,9 @@ hyacinthus config set-profile dev --base-url http://localhost:8000 --scopes requ
 ```bash
 hyacinthus requirements extend KKH347 --dry-run
 hyacinthus requirements extend KKH347 --yes
-hyacinthus requirements extend KKH347 --expires-at 2027-07-10T12:00:00+08:00 --yes
 ```
 
-Without `--expires-at`, the backend uses the same default extension rule as the admin requirement list: it refreshes `expires_at` from the configured default validity window and reactivates expired requirements. With `--expires-at`, the backend sets the deadline to that future datetime.
+The backend refreshes `expires_at` from its configured default validity window, restores `open`, and clears matching and invalidation flags. `--expires-at` is accepted but not applied; batch extension also uses the default window and preserves `matched`. Report the actual returned deadline.
 
 Successful output data:
 
@@ -239,18 +255,23 @@ Successful output data:
 
 Common backend error codes are `REQUIREMENT_CODE_REQUIRED`, `REQUIREMENT_CODE_NOT_FOUND`, `REQUIREMENT_CODE_DUPLICATED`, and `REQUIREMENT_EXTEND_EXPIRES_AT_INVALID`.
 
+`config set-profile <name>` does not require `--base-url`. Omit it when using the built-in backend: `hyacinthus config set-profile production`. For a new profile, omission saves the built-in default URL; for an existing profile, omission preserves its current URL and matching credentials. Pass `--base-url` only to override the backend origin. Runtime URL environment overrides do not silently replace the saved profile URL.
+
 `config set-profile` is incremental for existing profiles: unspecified fields keep their current values. `auth logout` and `auth token revoke` first revoke `DELETE /api/v1/agent/auth/tokens/current`, then clear the saved token, scopes, and pending state. A network failure keeps local credentials for retry. Use the explicit `auth logout --local-only` escape hatch only when the backend is permanently unavailable.
 
 ## Agent Skills
 
-Bundled skills are part of the CLI contract and can be inspected without network access:
+The two discoverable entries are `hyacinthus-cli` and `tutoring-job-mail-upload`. The CLI entry routes to task-specific references; the mail entry loads CLI guidance only when uploading. Entry metadata comes directly from SKILL.md. All files are embedded in the binary and can be read without authentication or profile configuration:
 
 ```bash
 hyacinthus skills list
-hyacinthus skills show hyacinthus-shared
-hyacinthus skills show hyacinthus-requirements
-hyacinthus skills export --dir ~/.codex/skills
-hyacinthus skills check --dir ~/.codex/skills
+hyacinthus skills read hyacinthus-cli
+hyacinthus skills read hyacinthus-cli references/requirements-import.md
+hyacinthus skills read tutoring-job-mail-upload
+hyacinthus skills list hyacinthus-cli/references
+hyacinthus skills read hyacinthus-cli/references/auth.md --json
+hyacinthus skills export --dir ~/.agents/skills
+hyacinthus skills check --dir ~/.agents/skills
 ```
 
 Errors return:
@@ -285,6 +306,23 @@ hyacinthus --no-notice capability list
 For private or mirrored release sources, set `HYACINTHUS_CLI_REPO` or
 `HYACINTHUS_CLI_RELEASE_API_URL`. `HYACINTHUS_CLI_LATEST_VERSION` can still be
 used to force a local update notice without making a network request.
+
+## Pi-driven natural-language mail acceptance
+
+The Docker acceptance setup and natural-language MiMo/Pi suite live in `tests/agent-e2e/docker/`. They deploy their own PostGIS database, Redis, API/Worker and authorization UI; normal Pi receives only user requests and approvals. Generated task files use workspace-relative directories.
+
+The saved-mail processing workflow is bundled as `tutoring-job-mail-upload`; its source is now `skills/tutoring-job-mail-upload/SKILL.md`, rather than a standalone directory under `~/Tests`.
+
+[tests/agent-e2e/README.md](tests/agent-e2e/README.md) describes the real-Pi suite. After normal Skill installation, the user's first message is only “帮我上传一下邮件里的家教岗位。” Pi discovers the Skill, initiates authorization, processes every row in a 30-job saved-mail batch, previews and requests approval, imports, reads back and handles the same mail again without duplicates. The default suite runs the installed Pi SDK and real CLI in the same dedicated Docker container; the test runner never generates the Agent's confirmed payload. The current 21-field SOP v5 adds school identity, qualification and source checks and covers 15 top-level cases with seven E1 recovery subcases (E1a–g). It initializes only that Docker project's guarded `hyacinthus_test` once; selected runs preserve it and rerun dependencies. Current SOP, image builds and cleanup are documented in [tests/agent-e2e/SOP.md](tests/agent-e2e/SOP.md); actual results and HTML are archived under `/tmp/hyacinthus-sop-runs/<run_id>/`. The separately labeled host mode remains diagnostic.
+
+```bash
+cd tests/agent-e2e
+npm ci --ignore-scripts
+npm test          # Offline guards only, not an Agent acceptance result.
+# Build the current Docker images first; see SOP.md.
+npm run test:agent -- --mode docker --sop full
+npm run test:report -- --run <run_id> # Regenerate an existing run's HTML and render evidence.
+```
 
 ## Tests
 
@@ -334,8 +372,10 @@ cargo build --locked --release --target x86_64-unknown-linux-gnu
 scripts/package.sh x86_64-unknown-linux-gnu
 ```
 
+Shell 安装器同样向已存在的 Agent 目录自动安装并核对 Skills；`HYACINTHUS_CLI_SKILLS_DIR` 指定相对或绝对目标目录，`HYACINTHUS_CLI_SKIP_SKILLS=1` 跳过。
+
 ### Address confidence
 
 Requirement geocoding is owned by the server. Complete-address geocoding runs first; lower-confidence results may use POI suggestions for additional evidence. A failed suggestion request does not erase an existing forward coordinate.
 
-`requirements import-raw` exposes `geocoding` with each parsed row's index, address, location and `geo_diagnostic`. Low address confidence alone does not exclude a row from import. The CLI follows server validation flags and retains diagnostics on rows skipped for other validation failures. Direct import stores available coordinates and their server-generated diagnostic; unchanged reliable coordinates can be reused on resubmission. No CLI loop guesses addresses or retries completed rows automatically.
+`requirements import-raw` exposes `geocoding` with each parsed row's index, address, location and `geo_diagnostic`, and retains coordinates and diagnostics on skipped rows. Backend `errors` decide admission; warnings and address confidence do not add a CLI threshold. Imported business rows exclude the top-level parser diagnostic. Before writing, the server verifies the source address or reuses a valid verified location; client coordinates alone do not authorize a write. No CLI loop guesses addresses or retries completed rows automatically.

@@ -1,11 +1,10 @@
-// 改动说明：需求解析使用严格默认和显式 --lenient，并移除重复的 auth grant 别名。
+// 改动说明：增加学校目录只读查询，支持正式名、别名、标识码、资质和精确匹配。
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Clone, Debug, Parser)]
 #[command(
@@ -39,7 +38,6 @@ pub struct Cli {
 /// Root command groups exposed by the CLI.
 pub enum Command {
     Admin(AdminCommand),
-    Claw(ClawCommand),
     Config(ConfigCommand),
     Auth(AuthCommand),
     Doctor(DoctorArgs),
@@ -50,40 +48,6 @@ pub enum Command {
     Requirements(RequirementsCommand),
     Skills(SkillsCommand),
     Completion(CompletionArgs),
-    #[command(name = "__claw-runtime-guard", hide = true)]
-    ClawRuntimeGuard(ClawRuntimeGuardArgs),
-    #[command(name = "__claw-runtime-probe", hide = true)]
-    ClawRuntimeProbe(ClawRuntimeProbeArgs),
-}
-
-/// Carries the exact canonical activation identity required while PicoClaw is supervised.
-#[derive(Clone, Debug, Args)]
-pub struct ClawRuntimeGuardArgs {
-    #[arg(long)]
-    pub authority_path: PathBuf,
-    #[arg(long)]
-    pub pointer_digest: String,
-    #[arg(long)]
-    pub instance: String,
-    #[arg(long)]
-    pub release_digest: String,
-    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
-    pub activation_fence: u64,
-    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
-    pub runtime_epoch: u64,
-    #[arg(long)]
-    pub program_name: String,
-    #[arg(long)]
-    pub guard_nonce: Uuid,
-    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
-    pub health_port: u16,
-}
-
-/// Carries the sole loopback endpoint accepted by the container-local readiness probe.
-#[derive(Clone, Debug, Args)]
-pub struct ClawRuntimeProbeArgs {
-    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
-    pub health_port: u16,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -97,40 +61,6 @@ pub struct AdminCommand {
 /// Administrative operations that are safe for Agent status inspection.
 pub enum AdminSubcommand {
     Status,
-}
-
-#[derive(Clone, Debug, Args)]
-/// Claw operations command group wrapper.
-pub struct ClawCommand {
-    #[command(subcommand)]
-    pub command: ClawSubcommand,
-}
-
-#[derive(Clone, Debug, Subcommand)]
-/// Claw operations available through the Agent CLI.
-pub enum ClawSubcommand {
-    Status,
-    Skills(ClawSkillsCommand),
-}
-
-#[derive(Clone, Debug, Args)]
-/// Claw skill command group wrapper.
-pub struct ClawSkillsCommand {
-    #[command(subcommand)]
-    pub command: ClawSkillsSubcommand,
-}
-
-#[derive(Clone, Debug, Subcommand)]
-/// Claw skill subcommands.
-pub enum ClawSkillsSubcommand {
-    List(ClawSkillsListArgs),
-}
-
-#[derive(Clone, Debug, Args)]
-/// Filters for listing runtime skills installed in Claw.
-pub struct ClawSkillsListArgs {
-    #[arg(long)]
-    pub source: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -155,8 +85,9 @@ pub enum ConfigSubcommand {
 /// Arguments for creating or updating a named CLI profile.
 pub struct SetProfileArgs {
     pub name: String,
+    /// Overrides the backend origin; omission preserves an existing profile or uses the built-in default.
     #[arg(long)]
-    pub base_url: String,
+    pub base_url: Option<String>,
     #[arg(long)]
     pub client_instance_id: Option<String>,
     #[arg(long)]
@@ -477,6 +408,8 @@ pub enum RequirementsSubcommand {
     Search(RequirementsSearchArgs),
     Extend(RequirementsExtendArgs),
     Parse(RequirementsParseArgs),
+    /// Query an existing parse job without creating another task.
+    ParseJob(RequirementsParseJobArgs),
     Import(RequirementsImportArgs),
     ImportRaw(RequirementsImportRawArgs),
     PriorityRules(RequirementsPriorityRulesCommand),
@@ -614,10 +547,54 @@ pub struct RequirementsCatalogCommand {
 }
 
 #[derive(Clone, Debug, Subcommand)]
-/// Catalog maintenance operations for subjects and grades.
+/// Catalog reads and maintenance operations for schools, subjects and grades.
 pub enum RequirementsCatalogSubcommand {
+    Schools(RequirementsCatalogSchoolsArgs),
     CreateMissing(RequirementsCatalogCreateMissingArgs),
     Reorder(RequirementsCatalogReorderArgs),
+}
+
+/// Selects an independently recorded school qualification.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum SchoolQualification {
+    #[value(name = "985")]
+    Project985,
+    #[value(name = "211")]
+    Project211,
+    #[value(name = "double_first_class")]
+    DoubleFirstClass,
+}
+
+impl fmt::Display for SchoolQualification {
+    /// Format the qualification token accepted by the backend schema.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Project985 => "985",
+            Self::Project211 => "211",
+            Self::DoubleFirstClass => "double_first_class",
+        })
+    }
+}
+
+/// Searches synchronized school facts while preserving ambiguous candidates and provenance.
+#[derive(Clone, Debug, Args)]
+pub struct RequirementsCatalogSchoolsArgs {
+    #[arg(long)]
+    pub keyword: Option<String>,
+    #[arg(long = "id")]
+    pub school_id: Option<i64>,
+    #[arg(long)]
+    pub province: Option<String>,
+    #[arg(long, value_enum)]
+    pub tier: Option<SchoolQualification>,
+    #[arg(long)]
+    pub exact: bool,
+    #[arg(long, default_value_t = 0)]
+    pub skip: u64,
+    #[arg(long, default_value_t = 20)]
+    pub limit: u64,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]
@@ -690,11 +667,24 @@ pub struct RequirementsParseArgs {
     pub preset_contact_phone: Option<String>,
     #[arg(long)]
     pub preset_contact_wechat: Option<String>,
-    /// Enables reviewed field aliases and noncanonical ordering without invoking AI.
+    /// Keeps the default lenient field matching explicit for scripts that document the mode.
     #[arg(long, default_value_t = false)]
     pub lenient: bool,
+    /// Requests strict named-field validation without imposing a fixed column count or order.
+    #[arg(long, conflicts_with = "lenient")]
+    pub strict: bool,
     #[arg(long)]
     pub dry_run: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Arguments for reading one existing parse task and its current result.
+pub struct RequirementsParseJobArgs {
+    pub job_id: String,
+    #[arg(long)]
+    pub instance_id: Option<i64>,
     #[arg(long, short = 'o')]
     pub output: Option<String>,
 }
@@ -735,9 +725,12 @@ pub struct RequirementsImportRawArgs {
     pub preset_contact_phone: Option<String>,
     #[arg(long)]
     pub preset_contact_wechat: Option<String>,
-    /// Enables reviewed field aliases and noncanonical ordering without invoking AI.
+    /// Keeps the default lenient field matching explicit for scripts that document the mode.
     #[arg(long, default_value_t = false)]
     pub lenient: bool,
+    /// Requests strict named-field validation without imposing a fixed column count or order.
+    #[arg(long, conflicts_with = "lenient")]
+    pub strict: bool,
     #[arg(long)]
     pub idempotency_key: Option<String>,
     #[arg(long)]
@@ -814,16 +807,25 @@ pub struct SkillsCommand {
 #[derive(Clone, Debug, Subcommand)]
 /// Bundled Agent skill discovery and export operations.
 pub enum SkillsSubcommand {
-    List,
-    Show(SkillNameArgs),
+    List(SkillListArgs),
+    Read(SkillReadArgs),
     Export(SkillsExportArgs),
     Check(SkillsCheckArgs),
 }
 
 #[derive(Clone, Debug, Args)]
-/// Arguments that identify a bundled skill by name.
-pub struct SkillNameArgs {
+/// Optional embedded directory to inspect without loading unrelated guides.
+pub struct SkillListArgs {
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, Args)]
+/// Read a skill or reference as Markdown, or as a structured JSON envelope.
+pub struct SkillReadArgs {
     pub name: String,
+    pub path: Option<String>,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Clone, Debug, Args)]

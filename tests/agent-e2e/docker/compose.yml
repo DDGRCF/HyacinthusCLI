@@ -1,0 +1,75 @@
+# 改动说明：PostgreSQL按TCP健康检查等待初始化完成，固定SOP v5镜像并保持测试服务、Pi/CLI和地图直连。
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: isolated-test-only
+      POSTGRES_DB: hyacinthus_test
+    volumes: [test-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U postgres -d hyacinthus_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 768m
+  redis:
+    image: redis:7.4.11-alpine3.21
+    command: [redis-server, --save, '', --appendonly, 'no']
+    mem_limit: 128m
+  object-store:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: [server, /data]
+    environment:
+      MINIO_ROOT_USER: skills-test-storage
+      MINIO_ROOT_PASSWORD: isolated-storage-only
+    volumes: [test-objects:/data]
+    mem_limit: 512m
+  object-store-init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    environment: &internal-network
+      NO_PROXY: localhost,127.0.0.1,::1,backend,worker,db,redis,front-admin,object-store,apis.map.qq.com
+      no_proxy: localhost,127.0.0.1,::1,backend,worker,db,redis,front-admin,object-store,apis.map.qq.com
+    entrypoint: [/bin/sh, -c]
+    command:
+      - "until mc alias set isolated http://object-store:9000 skills-test-storage isolated-storage-only; do sleep 1; done; mc mb --ignore-existing isolated/hyacinthus-assets"
+    depends_on: [object-store]
+    mem_limit: 128m
+  backend:
+    image: hyacinthus-skills-e2e-backend:20261009-sop-v5
+    env_file: ["${SKILLS_E2E_PRIVATE_DIR:?required}/backend.env"]
+    environment: *internal-network
+    ports: ["127.0.0.1:18012:8000"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
+      object-store-init: {condition: service_completed_successfully}
+    mem_limit: 1g
+  worker:
+    image: hyacinthus-skills-e2e-backend:20261009-sop-v5
+    command: [/app/worker]
+    env_file: ["${SKILLS_E2E_PRIVATE_DIR:?required}/backend.env"]
+    environment: *internal-network
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
+      object-store-init: {condition: service_completed_successfully}
+    mem_limit: 1g
+  front-admin:
+    image: ddgrcf/hyacinthus-front-admin:20260913-170817
+    volumes: ["./admin-nginx.conf:/etc/nginx/conf.d/default.conf:ro,z"]
+    ports: ["127.0.0.1:18013:80"]
+    depends_on: [backend]
+    mem_limit: 256m
+  pi:
+    image: hyacinthus-skills-e2e-pi:20261009-sop-v5
+    environment: *internal-network
+    env_file: ["${SKILLS_E2E_PRIVATE_DIR:?required}/pi.env"]
+    volumes:
+      - "${SKILLS_E2E_PRIVATE_DIR:?required}/mimo-auth.json:/home/node/.pi/agent/auth.json:ro,z"
+      - "${SKILLS_E2E_WORKSPACE:?required}:/workspace:z"
+    depends_on: [backend, worker]
+    mem_limit: 1g
+volumes:
+  test-db:
+  test-objects:

@@ -1,4 +1,4 @@
-// 改动说明：分页聚合限制页数、体积与延迟，并检测重复游标以避免循环请求和无界内存占用。
+// 改动说明：分页聚合拒绝缺失或重复游标，保留页数、体积与延迟限制。
 use std::collections::BTreeSet;
 use std::thread;
 use std::time::Duration;
@@ -74,8 +74,15 @@ pub fn get_all(
         }
         pages.push(page);
 
-        if !has_more || next_page_token.is_none() {
+        if !has_more {
             break;
+        }
+        if next_page_token.is_none() {
+            return Err(CliError::api(
+                "backend reports more pages without a continuation token; use the command's skip/limit pagination",
+                Some("PAGINATION_TOKEN_MISSING".to_string()),
+                None,
+            ));
         }
         let Some(token) = next_page_token.as_ref() else {
             break;
