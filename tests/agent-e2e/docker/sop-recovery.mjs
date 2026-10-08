@@ -1,4 +1,4 @@
-// 改动说明：缺地址场景必须明确停止并拒绝直接导入；严格解析先留响应，再按公开模式字段验收。
+// 改动说明：验证缺地址停止、严格公开结果、学历说明真实回读、批次键重放及延期限制。
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -41,13 +41,16 @@ export async function recoveryCases(ctx){const subcases=[];let committed;
    const response=await containerCLI(control,[...argv,'--yes']);assert.equal(response.exitCode,0);const receipt=JSON.parse(response.stdout);assert.equal(receipt.ok,true);return receipt.data;
   };
   const firstKey=`${ctx.runId}-E1g-B1`,secondKey=`${ctx.runId}-E1g-B2`;
-  const strictText=contactFieldText(first.requirement_code);
+  const strictText=contactFieldText(first.requirement_code).replace('需求方学历：\n','需求方学历：本科在读\n').replace('要求的学历：本科\n','要求的学历：本科/在读\n');
   const strictResponse=await containerCLI(control,['requirements','parse','--text',strictText,'--strict']);
   await ctx.evidence('E1','strict-parse-response.json',{actor:'test-controller',type:'real-CLI-API-Worker-engineering',modelReceivedPayload:false,response:strictResponse});
   assert.equal(strictResponse.exitCode,0);const strictParsed=JSON.parse(strictResponse.stdout);
   await ctx.evidence('E1','strict-parse-protocol.json',{actor:'test-controller',type:'real-CLI-API-Worker-engineering',modelReceivedPayload:false,result:strictParsed});
   assert.equal(strictParsed.ok,true);assert.equal(strictParsed.data.summary.mode,'strict');assert.equal(strictParsed.data.rows.length,1);assert.equal(strictParsed.data.rows[0].source,'strict');assert.deepEqual(strictParsed.data.rows[0].errors,[]);assert.equal(strictParsed.data.rows[0].parsed.requirement_code,first.requirement_code);
+  assert.equal(strictParsed.data.rows[0].parsed.condition.requester_education_note,'本科在读');assert.equal(strictParsed.data.rows[0].parsed.condition.required_education_note,'在读');
   const firstReceipt=await submit(first,firstKey,strictParsed.data);assert.equal(firstReceipt.created,1);assert.equal(firstReceipt.failed,0);
+  const firstDetail=await ctx.adminRead(firstReceipt.created_ids[0]);assert.equal(firstDetail.condition.requester_education_note,'本科在读');assert.equal(firstDetail.condition.required_education_note,'在读');
+  await ctx.evidence('E1','education-notes-readback.json',{actor:'independent-admin',modelReceivedPayload:false,detail:firstDetail});
   const wrongReplay=await submit(second,firstKey);assert.equal(wrongReplay.idempotent_replay,true);assert.deepEqual(wrongReplay.created_ids,firstReceipt.created_ids);
   const search=async code=>{const response=await containerCLI(control,['requirements','search','--keyword',code,'--scope','all']);assert.equal(response.exitCode,0);return JSON.parse(response.stdout).data.items.filter(r=>r.requirement_code===code);};
   assert.equal((await search(second.requirement_code)).length,0,'Same key unexpectedly wrote the changed second batch');
@@ -58,7 +61,7 @@ export async function recoveryCases(ctx){const subcases=[];let committed;
   const extension=await containerCLI(control,['requirements','extend',first.requirement_code,'--expires-at',target,'--dry-run']);assert.equal(extension.exitCode,0);
   await ctx.evidence('E1','default-expiry-limit-approval.json',{actor:'test-controller',purpose:'characterize ignored requested expiry',preview:JSON.parse(extension.stdout)});
   const extended=await containerCLI(control,['requirements','extend',first.requirement_code,'--expires-at',target,'--yes']);assert.equal(extended.exitCode,0);const actualExpiry=JSON.parse(extended.stdout).data.expires_at;assert.ok(Number.isFinite(Date.parse(actualExpiry)),'Extension response lacks a valid expiry');assert.notEqual(Date.parse(actualExpiry),Date.parse(target));
-  const evidence={actor:'test-controller',type:'real-CLI-protocol',modelReceivedPayload:false,strictParseDirectImport:true,independentBatchKeys:true,sameKeyChangedPayloadReplaysOriginal:true,createdRows:2,requestedExpiryIgnored:{requested:target,actual:actualExpiry},firstReceipt,wrongReplay,secondReceipt};
+  const evidence={actor:'test-controller',type:'real-CLI-protocol',modelReceivedPayload:false,strictParseDirectImport:true,educationNotesPersisted:true,independentBatchKeys:true,sameKeyChangedPayloadReplaysOriginal:true,createdRows:2,requestedExpiryIgnored:{requested:target,actual:actualExpiry},firstReceipt,wrongReplay,secondReceipt};
   await ctx.evidence('E1','independent-batch-and-expiry-limit.json',evidence);return evidence;
  });
  assert.ok(subcases.every(s=>s.status==='passed'),subcases.filter(s=>s.status!=='passed').map(s=>`${s.id}: ${s.reason}`).join('; '));return {subcases};}

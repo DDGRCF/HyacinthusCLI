@@ -1,4 +1,4 @@
-<!-- 改动说明：同步延期默认期限与匹配状态、导入同键重放、目录诊断和次数时长字段限制。 -->
+<!-- 改动说明：合并 raw 地图诊断展示，明确后端 errors 裁决、定位验证及现有导入限制。 -->
 # Hyacinthus CLI
 
 Agent-oriented CLI for 风信子家教中心 backend operations. The CLI supports Hermes, Codex, Claude Code, Pi, and direct `hyacinthus-cli` authorization identities with a stable, structured, auditable command surface.
@@ -369,3 +369,9 @@ scripts/package.sh x86_64-unknown-linux-gnu
 ```
 
 Shell 安装器同样向已存在的 Agent 目录自动安装并核对 Skills；`HYACINTHUS_CLI_SKILLS_DIR` 指定相对或绝对目标目录，`HYACINTHUS_CLI_SKIP_SKILLS=1` 跳过。
+
+### Address confidence
+
+Requirement geocoding is owned by the server. Complete-address geocoding runs first; lower-confidence results may use POI suggestions for additional evidence. A failed suggestion request does not erase an existing forward coordinate.
+
+`requirements import-raw` exposes `geocoding` with each parsed row's index, address, location and `geo_diagnostic`, and retains coordinates and diagnostics on skipped rows. Backend `errors` decide admission; warnings and address confidence do not add a CLI threshold. Imported business rows exclude the top-level parser diagnostic. Before writing, the server verifies the source address or reuses a valid verified location; client coordinates alone do not authorize a write. No CLI loop guesses addresses or retries completed rows automatically.
