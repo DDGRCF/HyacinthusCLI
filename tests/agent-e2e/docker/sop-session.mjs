@@ -1,4 +1,4 @@
-// 改动说明：共享容器中按用例创建正常Pi会话，复用真实浏览器授权和文件队列批准记录。
+// 改动说明：逐轮隔离任务文件，按任务续接授权；诊断只继续诊断，业务批准绑定真实预览。
 import assert from 'node:assert/strict';
 import { appendFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -10,6 +10,13 @@ import { sharedAuthorization } from '../lib/reply.mjs';
 import { redactWithSecrets } from '../lib/policy.mjs';
 import { SOP_POLICY as P, confirmationRequested } from './sop-policy.mjs';
 import { createContainerBroker } from './container-broker.mjs';
+import { isolateWorkspace } from './workspace-isolation.mjs';
+/** Select an authorization continuation that preserves the task and any existing business approval. */
+export function authorizationContinuation(caseId,approved,configured){
+ if(configured!==undefined){assert.ok(typeof configured==='string'&&configured.trim(),'Authorization continuation must be nonempty text');return configured;}
+ if(caseId==='B2')return '已通过原始链接批准CLI访问权限。请继续检查当前测试实例是否可用，并告诉我发现的问题。';
+ return approved?'已通过原始链接批准CLI访问权限。此前已确认的业务预览仍有效，请严格按已批准的原内容继续。':'已通过原始链接批准CLI访问权限。请继续原任务；如果涉及业务写入，请完成预览并等待我的业务确认。';
+}
 /** Open the Agent's exact authorization URL in the deployed admin UI, retaining credentials only in memory. */
 export function browserApprover(password) {
  let browser,context;
@@ -44,17 +51,20 @@ export async function openPi(control,approver,{secrets=[]}={}){
  /** Exchange one actual user turn and persist only redacted observations. */
  async function turn(prompt){
  if(++userTurns>P.maxTurns)throw new Error('Session user-turn budget exceeded');
+ const restore=await isolateWorkspace(control.cwd);
+ try{
  const start=broker.events.length;const reply=await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>{waiting=undefined;reject(new Error('Pi turn budget exceeded'));},P.turnMs);waiting={resolve:r=>{clearTimeout(timeout);waiting=undefined;resolve(r);},reject:e=>{clearTimeout(timeout);waiting=undefined;reject(e);}};child.stdin.write(`${JSON.stringify({prompt})}\n`);});
  conversation.push({prompt,...reply});await writeFile(path.join(control.evidence,'conversation.json'),JSON.stringify(safe(conversation),null,2));await writeFile(path.join(control.evidence,'tools.json'),JSON.stringify(safe(tools),null,2));
  if(reply.event==='failure'||reply.error||reply.stopReason==='error')throw new Error(reply.error||'Pi model failure');return {reply,events:broker.events.slice(start)};
+ }finally{await restore();}
  }
  /** Perform only authorization handoffs; return once the Agent ends a real business turn. */
- async function task(prompt){let next=prompt;for(let round=0;round<P.maxTurns;round++){
+ async function task(prompt,{authorizationReply}={}){let next=prompt;for(let round=0;round<P.maxTurns;round++){
  const {reply,events}=await turn(next);let handoff;
  for(const e of events.toReversed()){const h=e.result?.ok?e.result.data:e.result?.error?.detail;if(h?.authorize_url){handoff=h;break;}}
  if(!handoff)return reply;
  assert.ok(sharedAuthorization(reply,handoff.authorize_url),'Agent did not share the original authorization URL');assert.ok((handoff.required_scopes||[]).every(s=>control.scopes.includes(s)),'Unrelated authorization scope');assert.ok(!authLinks.has(handoff.authorize_url),'Repeated completed authorization handoff');
- await approver.approve(handoff.authorize_url,control.evidence);authLinks.add(handoff.authorize_url);next=approvals.length?'已通过原始链接批准CLI访问权限。此前已确认的业务预览仍有效，请严格按已批准的原内容继续。':'已通过原始链接批准CLI访问权限。业务写入需要另外确认；请继续完成预览，等待我的业务确认。';
+ await approver.approve(handoff.authorize_url,control.evidence);authLinks.add(handoff.authorize_url);next=authorizationContinuation(control.caseId,approvals.length>0,authorizationReply);
  }throw new Error('User turn budget exceeded');}
  /** Approve the latest actual preview after caller has verified source fields and pre-write state. */
  async function approve(prompt){const preview=broker.events.findLast(e=>e.preview&&!e.writes&&e.exitCode===0);assert.ok(preview,'No full actual dry-run preview');confirmationRequested(conversation.at(-1),preview.preview.request.body.confirmed_rows?.length);assert.ok(!broker.events.some(e=>e.writes),'A write preceded user approval');broker.approve(preview);approvals.push({at:new Date().toISOString(),sessionId:discovery.sessionId,fingerprint:preview.fingerprint,input:preview.input,preview:preview.preview,prompt});await writeFile(path.join(control.evidence,'approval.json'),JSON.stringify(safe(approvals),null,2));return task(prompt);}

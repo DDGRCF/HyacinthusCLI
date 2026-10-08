@@ -1,7 +1,7 @@
 # Change note: remove dependencies used only by the managed runtime guard.
 [package]
 name = "hyacinthus"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2021"
 description = "Agent-oriented CLI for Hyacinthus backend operations"
 license = "MIT"

@@ -1,4 +1,4 @@
-<!-- 改动说明：保留 Skill 交付与验收说明，批量导入只按后端 errors 裁决，移除置信度机制并保留协议与授权校验。 -->
+<!-- 改动说明：同步延期默认期限与匹配状态、导入同键重放、目录诊断和次数时长字段限制。 -->
 # Hyacinthus CLI
 
 Agent-oriented CLI for 风信子家教中心 backend operations. The CLI supports Hermes, Codex, Claude Code, Pi, and direct `hyacinthus-cli` authorization identities with a stable, structured, auditable command surface.
@@ -7,7 +7,7 @@ Agent-oriented CLI for 风信子家教中心 backend operations. The CLI support
 
 - The backend is the source of truth for permissions, validation, business rules, idempotency, and audit logs.
 - The CLI communicates over HTTP and never connects directly to the database, Redis, MinIO, or message queues.
-- Default output is JSON envelope format for AI Agent parsing.
+- For machine parsing, pass `--format json` explicitly; a profile can change the default format.
 - Mutating commands support dry-run where possible and require `--yes` for real execution.
 - Write and high-risk capabilities use a structured confirmation protocol with exit code `10`.
 
@@ -85,17 +85,18 @@ hyacinthus skills check --dir ./.tmp/agent-skills
 hyacinthus requirements options
 hyacinthus requirements search --keyword 高一数学
 hyacinthus requirements extend KKH347 --yes
-hyacinthus requirements extend KKH347 --expires-at 2027-07-10T12:00:00+08:00 --yes
 hyacinthus requirements parse --file input.txt
-hyacinthus requirements catalog create-missing --file parsed.json --dry-run
-hyacinthus requirements catalog create-missing --file parsed.json --yes
+hyacinthus requirements catalog create-missing --subject <missing-subject> --dry-run
+hyacinthus requirements catalog create-missing --subject <missing-subject> --yes
 hyacinthus requirements catalog reorder --target subjects --ids 3,1,2 --yes
 hyacinthus requirements import --file confirmed.json --idempotency-key cli-demo --yes
 ```
 
 Batch parsing/import has no row-confidence threshold or `--min-confidence` option. The backend alone decides business validity: `errors` block rows; `warnings` are displayed but never block. `can_auto_commit` and `needs_confirmation` must agree with `errors`; missing or contradictory required verdict fields are protocol errors. `--yes` authorizes a write and never bypasses backend errors. Dry-run previews the payload without promising backend acceptance; submission still returns partial failures and import-raw skip summaries with the caller's stable idempotency key.
 
-Raw requirement parsing maps recognized field names (including supported aliases) into the canonical 16-field schema. Backend table parsing supports CSV/XLSX, but CLI `--file` reads UTF-8 TXT/CSV, not binary XLSX. Columns and labelled text may use any column count or order; absent optional fields remain empty. Unknown fields and conflicting aliases receive row-level diagnostics rather than a column-count rejection. Required business data is still validated before commit; free-form natural-language input remains supported. For multiple labelled records with reordered fields, separate records with a blank line; ambiguous boundaries are flagged instead of guessing which record owns a value.
+Raw requirement parsing maps recognized field names (including supported aliases) into the canonical 21-field text/CSV template. These Chinese labels are input text labels, not import JSON keys: user and administrator contacts belong to `confirmed_rows[].ext`, and teacher occupation belongs to `condition.required_occupation`. Backend table parsing supports CSV/XLSX, but CLI `--file` reads UTF-8 TXT/CSV, not binary XLSX. Columns and labelled text may use any column count or order; absent optional fields remain empty. Unknown and non-identity duplicate fields produce a non-blocking `FIELD_RECOGNITION_NOTICE`; table details are aggregated at the parse result's `field_recognition`, while text details belong to each row. Duplicate identifiers are errors. Required business data is still validated before commit; free-form natural-language input remains supported. Separate reordered labelled records with a blank line.
+
+Default lenient parsing does not emit `SUBJECT_NAME_UNMAPPED:<name>` or `GRADE_NAME_UNMAPPED:<name>`. Compare source names with `requirements options`, then create approved missing names through explicit `--subject` / `--grade`. Catalog `--file` extracts only those named diagnostics; it does not discover missing names from a normal lenient result.
 
 The broader Agent API index is maintained in `docs/requirements/agent-cli/08-agent-api-index.md` in the main repository. For this CLI's current command and capability surface, use `hyacinthus --help` and `hyacinthus capability list`; the backend index may describe a different revision.
 
@@ -103,7 +104,11 @@ The broader Agent API index is maintained in `docs/requirements/agent-cli/08-age
 
 `requirements parse --dry-run` only previews the request. `requirements import-raw --dry-run` still submits a real parse job and polls it, but does not import requirements. Its `--file` argument reads UTF-8 text (TXT/CSV), not a binary XLSX upload; the current manifest declares no file-upload capabilities.
 
-`requirements extend --expires-at` accepts RFC 3339 timestamps. A time without an offset is interpreted as +08:00; omit the option to use the server’s default extension period.
+For review before writing, use `parse` once, save and review `confirmed_rows`, then run `import --dry-run` and `import --yes` against the same file and stable key. Parse does not generate `weekly_frequency_min/max` or `session_duration_minutes_min/max`; fill these four fields in `confirmed_rows` to preserve source frequency and duration. Reusing an import key with a changed payload replays the original receipt without checking the content; use a new key for a different batch or revised payload. Each `import-raw` invocation creates a new parse job; its dry-run `import_summary` is a request preview, not import statistics. Recovery through `parse-job` returns a task object whose `result` contains the parse data.
+
+Map resolution runs during the parse job to produce candidate coordinates, then import/upload_run resolves the submitted address again or reuses an existing requirement's verified location before writing. Client-supplied parse coordinates do not authorize a write. Ordinary import has no geography run handle; report map failures from `failed_rows`, and use upload-run outcomes for the persistent workflow.
+
+Both `batch_extend_v2` and single-row `requirements extend` use the server’s default expiry; supplied `expires_at` is not applied. A requested deadline cannot currently be set through either command. Single-row extension restores `open` and clears matching; batch extension preserves `matched`. See the bundled [batch and geography guide](skills/hyacinthus-cli/references/batch-and-geo.md).
 
 ## Environment Variables
 
@@ -229,10 +234,9 @@ hyacinthus auth check --scope "requirements:read requirements:parse requirements
 ```bash
 hyacinthus requirements extend KKH347 --dry-run
 hyacinthus requirements extend KKH347 --yes
-hyacinthus requirements extend KKH347 --expires-at 2027-07-10T12:00:00+08:00 --yes
 ```
 
-Without `--expires-at`, the backend uses the same default extension rule as the admin requirement list: it refreshes `expires_at` from the configured default validity window and reactivates expired requirements. With `--expires-at`, the backend sets the deadline to that future datetime.
+The backend refreshes `expires_at` from its configured default validity window, restores `open`, and clears matching and invalidation flags. `--expires-at` is accepted but not applied; batch extension also uses the default window and preserves `matched`. Report the actual returned deadline.
 
 Successful output data:
 
@@ -304,7 +308,7 @@ The Docker acceptance setup and natural-language MiMo/Pi suite live in `tests/ag
 
 The saved-mail processing workflow is bundled as `tutoring-job-mail-upload`; its source is now `skills/tutoring-job-mail-upload/SKILL.md`, rather than a standalone directory under `~/Tests`.
 
-[tests/agent-e2e/README.md](tests/agent-e2e/README.md) describes the real-Pi suite. After normal Skill installation, the user's first message is only “帮我上传一下邮件里的家教岗位。” Pi discovers the Skill, initiates authorization, processes every row in a 30-job saved-mail batch, previews and requests approval, imports, reads back and handles the same mail again without duplicates. The default suite runs the installed Pi SDK and real CLI in the same dedicated Docker container; the test runner never generates the Agent's confirmed payload. The full SOP initializes only that Docker project's guarded `hyacinthus_test` once; selected runs preserve it and rerun dependencies. Current SOP and cleanup are documented in [tests/agent-e2e/SOP.md](tests/agent-e2e/SOP.md); actual results and HTML are archived under `/tmp/hyacinthus-sop-runs/<run_id>/`. The separately labeled host mode remains diagnostic.
+[tests/agent-e2e/README.md](tests/agent-e2e/README.md) describes the real-Pi suite. After normal Skill installation, the user's first message is only “帮我上传一下邮件里的家教岗位。” Pi discovers the Skill, initiates authorization, processes every row in a 30-job saved-mail batch, previews and requests approval, imports, reads back and handles the same mail again without duplicates. The default suite runs the installed Pi SDK and real CLI in the same dedicated Docker container; the test runner never generates the Agent's confirmed payload. The current 21-field SOP v4 initializes only that Docker project's guarded `hyacinthus_test` once; selected runs preserve it and rerun dependencies. Current SOP and cleanup are documented in [tests/agent-e2e/SOP.md](tests/agent-e2e/SOP.md); actual results and HTML are archived under `/tmp/hyacinthus-sop-runs/<run_id>/`. The separately labeled host mode remains diagnostic.
 
 ```bash
 cd tests/agent-e2e

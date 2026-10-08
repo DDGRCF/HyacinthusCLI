@@ -1,4 +1,4 @@
-# 改动说明：保留导入幂等、授权与字段 schema；confirmed_rows.ext 补充用户联系方式 user_contact_phone/user_contact_wechat（string|null，仅 warning 口径）。
+# 改动说明：对齐21字段与 ext 联系方式，修正持久上传为写入前定位或复用已有有效定位。
 version: "2026-09-20"
 backend_min_version: "0.1.0"
 capabilities:
@@ -53,7 +53,7 @@ capabilities:
             - strict
             - lenient
           default: lenient
-          description: CSV/XLSX和标签文本按字段名及可识别别名映射到16字段规范，允许任意列数/顺序，缺失可选字段留空；未知/重复/冲突提供行级诊断，业务必填校验不变。默认 lenient，不调用 AI。
+          description: CSV/XLSX和标签文本按字段名及可识别别名映射到21字段整理规范，允许任意列数/顺序，缺失可选字段留空；未知/非编号重复字段聚合为非阻断 FIELD_RECOGNITION_NOTICE，重复编号为 error。默认 lenient，不调用 AI；CLI --file 只读取 UTF-8 TXT/CSV，不上传二进制 XLSX。
     response_schema:
       type: object
       required:
@@ -271,7 +271,7 @@ capabilities:
                     type:
                       - string
                       - "null"
-                    description: 需求方或学生性别。
+                    description: 与 requester_role 对应的需求方性别；家长发布时，学生性别保留在 description，不代填家长性别。
                   requester_education_level:
                     type:
                       - string
@@ -419,7 +419,7 @@ capabilities:
                 type:
                   - object
                   - "null"
-                description: 需求扩展字段；Agent 导入会补默认 priority/admin contact，并写入压缩后的 geo_diagnostic 与 geo_location_source。用户联系方式（用户联系方式/用户电话/用户微信）拆分写入 user_contact_phone、user_contact_wechat。
+                description: 需求扩展字段；用户和管理员联系方式均放在此对象，管理员联系方式至少一项合法且非空，不由 confirmed import 凭空补出。保留解析所得 priority；后端补默认 priority 并写入已验证地理诊断。
                 properties:
                   user_contact_phone:
                     type:
@@ -431,6 +431,16 @@ capabilities:
                       - string
                       - "null"
                     description: 用户联系方式微信（string|null）；为空静默，格式非法仅 warning（USER_CONTACT_WECHAT_INVALID），不阻断提交。
+                  admin_contact_phone:
+                    type:
+                      - string
+                      - "null"
+                    description: 管理员电话；与 admin_contact_wechat 至少一项合法且非空，非法由后端报 ADMIN_CONTACT_PHONE_INVALID。
+                  admin_contact_wechat:
+                    type:
+                      - string
+                      - "null"
+                    description: 管理员微信；与 admin_contact_phone 至少一项合法且非空，非法由后端报 ADMIN_CONTACT_WECHAT_INVALID。
     response_schema:
       type: object
       required:
@@ -475,7 +485,7 @@ capabilities:
 
   - id: requirements.extend
     title: 延期需求
-    description: Agent 专用需求延期能力，按需求编号刷新默认截止时间或设置指定截止时间。
+    description: 按需求编号刷新默认截止时间，恢复 open 并清除匹配；当前后端未使用请求 expires_at。
     domain: requirements
     command: hyacinthus requirements extend
     method: POST
@@ -510,7 +520,7 @@ capabilities:
             - string
             - "null"
           format: date-time
-          description: RFC 3339 延期时间；CLI 输入未带时区时按 +08:00 解释；为空时使用系统默认延期时间。
+          description: 接受 RFC 3339；CLI 未带时区按 +08:00 解释。当前后端未应用此值，实际使用默认有效期。
     response_schema:
       type: object
       required:
@@ -528,8 +538,6 @@ capabilities:
     examples:
       - title: 使用默认延期时间
         command: hyacinthus requirements extend KKH347 --yes
-      - title: 手动设置延期到指定时间
-        command: hyacinthus requirements extend KKH347 --expires-at 2027-07-10T12:00:00+08:00 --yes
 
   - id: requirements.search
     title: 搜索需求
@@ -2042,7 +2050,7 @@ capabilities:
 
   - id: requirements.upload_run
     title: 创建或续读岗位上传运行单
-    description: 最多100条的持久化写入通道；先提交岗位，再由后台异步解析地图，断线后以 client_run_id 续读相同结果。
+    description: 最多100条的持久化写入通道；先解析地址或复用已有有效定位，再写入通过行，断线后以 client_run_id 续读相同结果。
     domain: requirements
     command: hyacinthus capability run requirements.upload_run
     method: POST
@@ -2191,7 +2199,7 @@ capabilities:
 
   - id: requirements.batch_extend_v2
     title: 批量延期并复用坐标
-    description: 最多100条按准确编号延期，保持现有业务内容和已验证坐标，不调用地图。
+    description: 最多100条按准确编号使用默认有效期延期，保留 matched 状态和已验证坐标，不调用地图；当前未使用逐行 expires_at。
     domain: requirements
     command: hyacinthus capability run requirements.batch_extend_v2
     method: POST

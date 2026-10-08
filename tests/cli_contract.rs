@@ -4269,7 +4269,7 @@ fn tutoring_mail_skill_preserves_agent_workflow_contract() {
     assert_eq!(value["ok"], true);
     for rule in [
         "已保存的邮件原文",
-        "auth wait",
+        "../hyacinthus-cli/references/auth.md",
         "confirmed_rows",
         "requirements search",
         "errors.csv",

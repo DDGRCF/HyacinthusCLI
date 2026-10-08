@@ -28,7 +28,7 @@ function scenario(extraEnv, verify) {
     execFileSync('bash', [installer], { cwd: root, encoding: 'utf8', env: {
       PATH: `${bins}:${process.env.PATH}`, HOME: home, HYACINTHUS_CLI_INSTALL_DIR: path.join(root, 'installed'),
       HYACINTHUS_CLI_TARGET: 'x86_64-unknown-linux-gnu', SHELL_FIXTURE_ARCHIVE: archive,
-      HYACINTHUS_CONFIG_DIR: path.join(root, 'config'), HYACINTHUS_CLI_LATEST_VERSION: '0.1.15',
+      HYACINTHUS_CONFIG_DIR: path.join(root, 'config'), HYACINTHUS_CLI_LATEST_VERSION: '0.1.16',
       ...extraEnv,
     } });
     verify(root, home);

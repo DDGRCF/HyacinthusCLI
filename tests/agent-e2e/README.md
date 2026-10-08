@@ -1,6 +1,6 @@
 # 默认入口：共同 Docker SOP
 
-当前默认真实 Agent 验收为 `npm run test:agent -- --mode docker --sop full`，详细操作见 [SOP.md](SOP.md)。下面原宿主流程保留作 `test:agent:host` 诊断，不计入同容器验收。全部编译使用 job=1。
+当前默认真实 Agent 验收为 `npm run test:agent -- --mode docker --sop full`，当前为21字段v4，详细操作见 [SOP.md](SOP.md)。下面原宿主流程保留作 `test:agent:host` 诊断，不计入同容器验收。全部编译使用 job=1。
 
 # Pi 驱动 CLI 的邮件批量上传验收
 

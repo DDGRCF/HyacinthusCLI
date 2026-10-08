@@ -56,7 +56,7 @@ const config = {
 };
 await secretFile('backend.env', Object.entries(config).map(([key, value]) => `${key}=${value}`).join('\n') + '\n');
 await secretFile('driver.env', `HYACINTHUS_E2E_ADMIN_PASSWORD=${password}\n`);
-await secretFile('pi.env', 'HYACINTHUS_BASE_URL=http://backend:8000\nHYACINTHUS_PROFILE=pi-skills-acceptance\nHYACINTHUS_CONFIG_DIR=/home/node/.config/hyacinthus\nHYACINTHUS_CLI_LATEST_VERSION=0.1.15\n');
+await secretFile('pi.env', 'HYACINTHUS_BASE_URL=http://backend:8000\nHYACINTHUS_PROFILE=pi-skills-acceptance\nHYACINTHUS_CONFIG_DIR=/home/node/.config/hyacinthus\nHYACINTHUS_CLI_LATEST_VERSION=0.1.16\n');
 await copyFile(path.join(repo, 'backend/scripts/run.sh'), path.join(privateDir, 'run.sh'));
 await chmod(path.join(privateDir, 'run.sh'), 0o755);
 await writeFile(envFile, `SKILLS_E2E_PRIVATE_DIR=${privateDir}\nSKILLS_E2E_WORKSPACE=${workspace}\n`, { mode: 0o600 });

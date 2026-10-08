@@ -1,4 +1,4 @@
-// 改动说明：验证通用与邮件统一20字段、完整预览交付及当前后端schema契约。
+// 改动说明：验证邮件引用唯一21字段规范、完整预览交付及当前后端schema契约。
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -120,9 +120,9 @@ fn priority_rule_preview_saves_full_data_when_stdout_is_reduced() {
     assert_eq!(saved["request"]["body"]["priority"], 5);
 }
 
-/// Mail and general guides must publish the same ordered twenty fields.
+/// Mail uses the general guide as the single source of the ordered twenty-one fields.
 #[test]
-fn mail_and_general_guides_share_the_current_twenty_fields() {
+fn mail_and_general_guides_share_the_current_twenty_one_fields() {
     let labels = [
         "编号",
         "年级",
@@ -141,24 +141,22 @@ fn mail_and_general_guides_share_the_current_twenty_fields() {
         "地址",
         "要求",
         "备注",
-        "用户联系方式",
+        "用户电话",
+        "用户微信",
         "管理员电话",
         "管理员微信",
     ];
     let mail =
         String::from_utf8(run(&["skills", "read", "tutoring-job-mail-upload"]).stdout).unwrap();
-    let fields: Vec<&str> = mail
-        .lines()
-        .filter_map(|line| {
-            let columns: Vec<&str> = line.split('|').collect();
-            if columns.get(1)?.trim().parse::<usize>().is_ok() {
-                Some(columns.get(2)?.trim())
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert_eq!(fields, labels);
+    let field_reference = "../hyacinthus-cli/references/requirements-format.md";
+    assert!(mail.contains(field_reference));
+    let dir = tempfile::tempdir().unwrap();
+    export(dir.path());
+    let exported_reference = dir
+        .path()
+        .join("tutoring-job-mail-upload")
+        .join(field_reference);
+    assert!(exported_reference.is_file());
     assert!(!mail.contains("16字段"));
     let general = String::from_utf8(
         run(&[
@@ -170,12 +168,16 @@ fn mail_and_general_guides_share_the_current_twenty_fields() {
         .stdout,
     )
     .unwrap();
-    let canonical = labels
-        .iter()
-        .map(|label| format!("`{label}`"))
-        .collect::<Vec<_>>()
-        .join("、");
-    assert!(general.contains(&canonical));
+    let fields: Vec<&str> = general
+        .lines()
+        .filter_map(|line| {
+            let columns: Vec<&str> = line.split('|').collect();
+            columns.get(1)?.trim().parse::<usize>().ok()?;
+            Some(columns.get(2)?.trim().trim_matches('`'))
+        })
+        .collect();
+    assert_eq!(fields, labels);
+    assert_eq!(fs::read_to_string(exported_reference).unwrap(), general);
     let example = general
         .split_once("```text\n")
         .unwrap()

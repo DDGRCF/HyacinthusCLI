@@ -1,19 +1,45 @@
-<!-- 改动说明：统一 CLI 入口按需加载本指南，保留业务约束并对齐实际命令。 -->
-# 批次与地图运行单
+# 批次和地图
 
-用于持久批次上传、批量延期、上传前只读预检与地图复核。每一步先 `capability schema <id>`，依 request_schema、required_scopes 与 risk_level 构造参数；专用语义命令存在时优先用专用命令。
+用于持久上传、批量延期和地图复核。先读[公共规则](shared.md)、`schema <id>`；普通解析导入用[解析和导入](requirements-import.md)。
 
-| 步骤 | capability ID | 实际作用 |
+## 能力
+
+| ID（均以 requirements. 开头） | 用途 | scope |
 | --- | --- | --- |
-| 查编号和版本 | `requirements.identity_lookup` | 只读返回 new/update/duplicate 与当前版本；以 schema 中批次数限制为准 |
-| 校验结构和身份动作 | `requirements.preflight_v2` | 只读预检，不写需求、不调用地图 |
-| 写入并保存运行单 | `requirements.upload_run` | 用稳定 client_run_id、client_row_id 提交或续读同批结果 |
-| 查询地图运行单 | `requirements.geocode_run` | 按返回的 geo_run_id 读取逐行地图状态 |
-| 人工复核或重新排队 | `requirements.geocode_release` | 写操作，提交已确认坐标或按契约重新排队 |
-| 批量延期 | `requirements.batch_extend_v2` | 按准确编号延期，复用已有坐标，不重新调用地图 |
+| identity_lookup | 查 new/update/duplicate 和 current_revision_key | requirements:read |
+| preflight_v2 | 只读检查结构与身份，不解析地图 | requirements:parse |
+| upload_run | 写前解析/复用定位，再写通过行并保存运行单 | requirements:write |
+| geocode_run | 读取返回的地图运行单 | requirements:read |
+| geocode_release | 提交人工定位或重排地图任务 | requirements:write |
+| batch_extend_v2 | 默认延期，复用已有坐标 | requirements:write |
 
-例如 `hyacinthus capability run requirements.identity_lookup --data @tasks/<run_id>/identity.json`。不要照抄虚构运行单 UUID；从真实回执取得 upload_run_id、geo_run_id 和逐行句柄。
+```bash
+hyacinthus capability run requirements.identity_lookup --data @tasks/<run_id>/identity.json
+hyacinthus capability run requirements.preflight_v2 --data @tasks/<run_id>/preflight.json
+hyacinthus capability run requirements.upload_run --data @tasks/<run_id>/upload.json --dry-run
+hyacinthus capability run requirements.upload_run --data @tasks/<run_id>/upload.json --yes --output tasks/<run_id>/result.json
+```
 
-先完成所需授权，再查询身份与预检；确认写入范围后预览 upload_run，批准后提交，保存完整运行单和逐行结果。地图后续用同一 geo_run_id 查询，不重复上传已写入需求。needs_review 的行展示原因，取得具体地址/坐标复核后再 release；不能仅因为用户批准导入就自行批准疑似错误坐标。
+当前查身份/预检最多200行，上传/延期/复核100行。dry-run 只预览，不替代真实 preflight；输出行为见[结果指南](output-risk.md)。
 
-断线后保存并复用 client_run_id 与原 payload 续读，不为同批随机生成新键。批量延期前核对编号与当前版本，确认目标时间，不更改已有业务条件。业务写入成功、write_failed、geo_pending、geo_needs_review 和 geo_resolved 分开汇报；具体状态与计数以实际 schema/回执为准。
+## 请求与恢复
+
+preflight.json 顶层只放 rows；upload.json 另加 client_run_id，可按 schema 加 instance_id。不要把上传请求原样用于预检。
+
+upload_run/preflight_v2 的 rows[] 用 `client_row_id`、可选 `revision_key/operation_key` 和嵌套 `requirement`。requirement 按[业务行格式](requirements-format.md#json-构造规则)构造；内嵌 schema 只标 object，预览通过不代表业务通过。
+
+upload_run/batch_extend_v2 用稳定 client_run_id/client_row_id，不加普通导入的 idempotency_key。同请求断线后用原能力、原键、原内容续读，改变内容会冲突。revision_key 是来源修订证据，**不是并发锁**；duplicate 要求提交修订键与已保存的相同，不能只凭编号认定。
+
+## 地图在哪一步
+
+upload_run 包括 online 在内，**先定位或复用有效定位，再写入**。定位失败行 write_status=failed；即使 geo_status=needs_review/unavailable，也不能算已入库。
+
+按 row_outcomes 汇报：write_status 为 pending/created/updated/extended/failed，geo_status 为 pending/resolved/needs_review/invalid/unavailable/not_required。write_failed/geo_pending 是计数。只有真实返回非空 geo_run_id 才查询 geocode_run，runner 不自动轮询全流程。
+
+geocode_release 用真实 geo_run_id，按 rows[].row_id 或 requirement_code 选行；row_id 是运行单行 ID，不是需求 ID。人工复核后传 `location:{lng,lat}`，可附 confirmed_address/diagnostic；未传 location 表示重排。
+
+release 只选择 write_status=created/updated 的真实行，**不会重试需求写入失败**。它逐行提交，后续行报错时前面的行可能已生效；错误或回执不明时先用 geocode_run 读取原运行单，再处理未完成行，不套用 upload_run 的稳定键重放保证。写入失败行保存回执，修正后另建子批次，按[确认和恢复规则](output-risk.md)提交。
+
+## 批量延期限制
+
+batch_extend_v2 和单条 extend 虽接收 expires_at，当前都使用后端默认有效期，不能指定截止日期。批量延期保留 matched 状态；单条延期恢复 open 并取消匹配，不能互相替代。按真实 expires_at、extended/write_failed 报告，不按预览推断日期已生效。

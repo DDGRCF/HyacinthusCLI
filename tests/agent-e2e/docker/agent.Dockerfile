@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=cli-build /out/hyacinthus /usr/local/bin/hyacinthus
 COPY cli/npm/hyacinthus-cli /opt/hyacinthus-installer
 COPY cli/tests/agent-e2e/docker/pi-runner.mjs /opt/acceptance/pi-runner.mjs
+COPY cli/tests/agent-e2e/docker/turn-metrics.mjs /opt/acceptance/turn-metrics.mjs
 COPY cli/tests/agent-e2e/lib/reply.mjs /opt/acceptance/reply.mjs
 COPY cli/tests/agent-e2e/lib/cli-proxy.mjs cli/tests/agent-e2e/lib/file-queue.mjs cli/tests/agent-e2e/lib/policy.mjs /opt/acceptance/
 RUN mkdir -p /workspace /home/node/.pi/agent /home/node/.config/hyacinthus \

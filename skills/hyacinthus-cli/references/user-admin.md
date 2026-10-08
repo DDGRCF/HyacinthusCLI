@@ -1,19 +1,21 @@
-<!-- 改动说明：统一 CLI 入口按需加载本指南，保留业务约束并对齐实际命令。 -->
 # 用户资料和后台状态
+
+按[公共规则](shared.md)准备授权，写入遵循[确认规则](output-risk.md)。
 
 ## 个人资料
 
-查看当前授权用户用 `hyacinthus user me`，先读 `schema users.me_read`。这里的用户是当前 profile 授权用户，不根据邮件发件人或 Agent 名称猜用户。
-
-修改自己的资料先读 `schema users.me_update` 和 `user update --help`，按用户明确提供的字段预览，例如：
-
 ```bash
+hyacinthus user me
 hyacinthus user update --display-name 张老师 --contact-wechat fxz-teacher --dry-run
 hyacinthus user update --data @tasks/<run_id>/profile.json --dry-run
 ```
 
-当前更新需要 users:read 与 users:write。已有授权覆盖本次修改时使用同样参数执行 `--yes`，随后 `user me` 回读。省略字段表示保留还是清空以实际 schema/help 为准，不猜测默认。手机号、邮箱和微信是用户资料，不塞进需求 confirmed_rows，除非该需求字段契约明确接受。
+me 读当前授权用户，需要 `users:read`；update 需要 `users:read/users:write`。按批准执行同样参数 `--yes`，再 me 回读。
 
-## 后台基础状态
+JSON：`display_name` 在顶层；性别、生日、简介、默认地址/坐标、紧急联系人放 `profile`；微信等放 `profile.ext`。例如 `{"profile":{"ext":{"contact_wechat":"fxz-teacher"}}}`。这里不是需求导入的 ext；身份手机号、邮箱、密码、账号状态不属于此更新接口。
 
-`hyacinthus admin status` 是只读基础状态，需 admin:read；先读 `schema admin.status`。如实展示接口返回的信息，不能推断它执行了部署、重启、数据库维护或诊断了所有服务。
+profile 的 NullablePatch 字段省略保留、null 清空。`profile.ext: null` 清空整个扩展对象；只清微信用 `profile.ext.contact_wechat: null`。其他字段按 `schema users.me_update`，不要一律用 null 清空。
+
+## 后台状态
+
+`hyacinthus admin status` 需要 `admin:read`，只读基础状态；按实际返回汇报，不表示执行了部署或维护。

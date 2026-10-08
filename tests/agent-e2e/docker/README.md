@@ -2,15 +2,15 @@
 
 <!-- 改动说明：统一指向当前 Docker SOP，移除不可直接执行的历史六项入口。 -->
 
-完整操作、固定样本和判定标准见 [SOP.md](../SOP.md)，机器清单为 [sop-v3.json](../cases/sop-v3.json)。所有编译使用 **job=1**。
+完整操作、固定样本和判定标准见 [SOP.md](../SOP.md)，机器清单为 [sop-v4.json](../cases/sop-v4.json)。所有编译使用 **job=1**。
 
 ## 一次运行
 
 在仓库根目录构建：
 
 ```bash
-docker build --network host -f docker/backend.Dockerfile --build-arg CARGO_BUILD_JOBS=1 -t hyacinthus-skills-e2e-backend:20261006 .
-docker build --network host -f cli/tests/agent-e2e/docker/agent.Dockerfile -t hyacinthus-skills-e2e-pi:20261007-v5 .
+docker build --network host -f docker/backend.Dockerfile --build-arg CARGO_BUILD_JOBS=1 -t hyacinthus-skills-e2e-backend:20261008-sop-v4 .
+docker build --network host -f cli/tests/agent-e2e/docker/agent.Dockerfile -t hyacinthus-skills-e2e-pi:20261008-sop-v4 .
 ```
 
 进入 `cli/tests/agent-e2e`：

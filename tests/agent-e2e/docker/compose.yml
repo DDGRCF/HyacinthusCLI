@@ -1,4 +1,4 @@
-# 改动说明：部署独立测试服务和共用Pi/CLI，内网及腾讯地图直连以避开容器中不可用的宿主代理。
+# 改动说明：固定SOP v4当前镜像并部署独立测试服务和共用Pi/CLI，内网及腾讯地图直连以避开容器中不可用的宿主代理。
 services:
   db:
     image: postgis/postgis:16-3.4
@@ -36,7 +36,7 @@ services:
     depends_on: [object-store]
     mem_limit: 128m
   backend:
-    image: hyacinthus-skills-e2e-backend:20261006
+    image: hyacinthus-skills-e2e-backend:20261008-sop-v4
     env_file: ["${SKILLS_E2E_PRIVATE_DIR:?required}/backend.env"]
     environment: *internal-network
     ports: ["127.0.0.1:18012:8000"]
@@ -46,7 +46,7 @@ services:
       object-store-init: {condition: service_completed_successfully}
     mem_limit: 1g
   worker:
-    image: hyacinthus-skills-e2e-backend:20261006
+    image: hyacinthus-skills-e2e-backend:20261008-sop-v4
     command: [/app/worker]
     env_file: ["${SKILLS_E2E_PRIVATE_DIR:?required}/backend.env"]
     environment: *internal-network
@@ -62,7 +62,7 @@ services:
     depends_on: [backend]
     mem_limit: 256m
   pi:
-    image: hyacinthus-skills-e2e-pi:20261007-v5
+    image: hyacinthus-skills-e2e-pi:20261008-sop-v4
     environment: *internal-network
     env_file: ["${SKILLS_E2E_PRIVATE_DIR:?required}/pi.env"]
     volumes:

@@ -1,7 +1,7 @@
-// 改动说明：独立核对Pi轨迹、统一20字段和联系角色、批准、落库及真实汇报。
+// 改动说明：独立核对Pi轨迹、统一21字段和四类联系角色、批准、落库及真实汇报。
 import assert from 'node:assert/strict';
 /** The ordered published mail normalization contract shared by TXT and CSV checks. */
-export const NORMALIZED_LABELS=['编号','年级','科目','需求方角色','需求方性别','需求方学历','要求的性别','要求的学历','要求的学校','学校的资质','授课方式','要求的资格','薪酬','时间','地址','要求','备注','用户联系方式','管理员电话','管理员微信'];
+export const NORMALIZED_LABELS=['编号','年级','科目','需求方角色','需求方性别','需求方学历','要求的性别','要求的学历','要求的学校','学校的资质','授课方式','要求的资格','薪酬','时间','地址','要求','备注','用户电话','用户微信','管理员电话','管理员微信'];
 
 /** Split denied events: blocked write paths are violations; blocked read/auth probes only need visibility. */
 export function deniedAttempts(events) {
@@ -73,7 +73,11 @@ export function verifyRows(items, expected) {
     assert.ok(item.grade_names.includes('初一'), `Wrong grade: ${row.code}`);
     assert.equal(Number(item.compensation.amount_min), row.amount, `Wrong compensation: ${row.code}`);
     assert.equal(item.ext.admin_contact_phone, '13800138000', `Contact not saved: ${row.code}`);
-    assert.equal(item.condition.requester_gender, 'male', `Student gender mixed up: ${row.code}`);
+    for (const field of ['user_contact_phone', 'user_contact_wechat', 'admin_contact_wechat']) {
+      assert.equal(item.ext[field] ?? null, null, `Invented contact: ${row.code}/${field}`);
+    }
+    assert.equal(item.condition.requester_gender ?? null, null, `Invented parent gender: ${row.code}`);
+    assert.match(item.description, /男生|学生.{0,6}男/, `Student gender lost: ${row.code}`);
     assert.equal(item.condition.required_gender, 'female', `Teacher gender mixed up: ${row.code}`);
     assert.ok(item.condition.required_education_levels.includes('bachelor'), `Teacher education lost: ${row.code}`);
     assert.ok(item.description.trim(), `Missing description: ${row.code}`);
@@ -112,7 +116,7 @@ export function verifyApproval(request, preview, expectedCodes, messageId, reply
   assert.doesNotMatch(reply, /确认失败|无法导入|不能导入|不要导入|不能批准|请勿批准/);
 }
 
-/** Check the current 20-label contract, source fields and separation of user/admin contacts. */
+/** Check the current 21-label contract, source fields and separation of user/admin contacts. */
 export function verifyNormalized(text, expected) {
   const labels = NORMALIZED_LABELS;
   const rows = [];
@@ -133,21 +137,24 @@ export function verifyNormalized(text, expected) {
     assert.match(row['年级'], /初一|七年级/);
     assert.match(row['科目'], /数学/);
     assert.match(row['需求方角色'], /家长/);
-    assert.match(row['需求方性别'], /男/);
+    assert.equal(row['需求方性别'], '');
+    assert.match(row['要求'], /男生|学生.{0,6}男/);
     assert.equal(row['需求方学历'], '');
     assert.match(row['要求的性别'], /女/);
     assert.match(row['要求的学历'], /本科/);
     assert.equal(row['要求的学校'], '');
     assert.equal(row['学校的资质'], '');
     assert.match(row['授课方式'], /^(online|线上)$/);
-    assert.match(row['要求的资格'], /经验/);
+    assert.equal(row['要求的资格'], '');
+    assert.match(row['要求'], /家教经验|有经验/);
     assert.match(row['薪酬'], new RegExp(`\\b${expected[index].amount}\\b`));
     assert.match(row['薪酬'], /小时/);
     assert.match(row['时间'], /周六|星期六/);
     assert.match(row['时间'], /14[:：]00/);
     assert.match(row['时间'], /16[:：]00/);
     assert.match(`${row['时间']} ${row['要求']} ${row['备注']}`, /一对一/);
-    assert.equal(row['用户联系方式'], '');
+    assert.equal(row['用户电话'], '');
+    assert.equal(row['用户微信'], '');
     assert.equal(row['管理员电话'], '13800138000');
     assert.equal(row['管理员微信'], '');
     assert.ok(!row['备注'].includes('13800138000'),'Administrator contact was duplicated in remarks');
