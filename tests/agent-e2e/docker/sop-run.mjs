@@ -1,4 +1,4 @@
-// 改动说明：学校来源SOP v5逐例留证，并以宿主只读凭据边界、单次快照与实际容器挂载执行E2门禁，空结果按条件验收并在失败后继续清理。
+// 改动说明：学校来源SOP v5逐例留证，并以宿主只读凭据边界、单次快照与实际容器挂载执行E2门禁，空结果按条件验收并在失败后继续清理；selected恢复API/Worker后强制刷新管理端代理。
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises';
@@ -14,7 +14,7 @@ import { createAdminRequirementReader } from './admin-readback.mjs';
 import { verifyNormalized, verifyReport, NORMALIZED_LABELS } from '../lib/verify.mjs';
 import { sourceRows, mailFixture, normalizedLabelText, prefixRuleMatches, verifyReplayReport, verifyRunReuse } from './sop-verify.mjs';
 import { redact, redactWithSecrets, POLICY as E2E_POLICY } from '../lib/policy.mjs';
-import { verifyEmptySearch, cleanupSteps, safeChildOutput, captureChild, prepareSecrets } from './sop-lifecycle.mjs';
+import { restoreSelectedServices, verifyEmptySearch, cleanupSteps, safeChildOutput, captureChild, prepareSecrets } from './sop-lifecycle.mjs';
 import { writeSopReport } from './sop-report.mjs';
 import { recoveryCases } from './sop-recovery.mjs';
 import { schoolQueryCase } from './sop-schools.mjs';
@@ -97,7 +97,7 @@ try{
  credentialBaseline=await captureCredentialSource(hostCredentialPath,credentialSnapshotPath);
  await evidence('E2','credential-baseline.json',{...credentialBaseline,hostBoundary:hostCredentialBoundary});
  if(kind==='full')await child(process.execPath,[path.join(import.meta.dirname,'prepare.mjs'),'--credential-snapshot',credentialSnapshotPath]);
- else {const geo=await mapEnvironment(repo);const env=path.join(base,'private/backend.env');await writeFile(env,withoutMapSecrets(await readFile(env,'utf8'))+'\n'+Object.entries(geo).filter(([key])=>MAP_SECRET_KEYS.includes(key)).map(([key,value])=>`${key}=${value}`).join('\n')+'\n',{mode:0o600});execFileSync('docker',['compose','--env-file',path.join(base,'compose.env'),'-p',P.project,'-f',path.join(import.meta.dirname,'compose.yml'),'up','-d','backend','worker'],{stdio:'ignore'});execFileSync('docker',['start',P.container],{stdio:'ignore'});}
+ else {const geo=await mapEnvironment(repo);const env=path.join(base,'private/backend.env');await writeFile(env,withoutMapSecrets(await readFile(env,'utf8'))+'\n'+Object.entries(geo).filter(([key])=>MAP_SECRET_KEYS.includes(key)).map(([key,value])=>`${key}=${value}`).join('\n')+'\n',{mode:0o600});await restoreSelectedServices(argv=>execFileSync('docker',argv,{stdio:'ignore'}),['compose','--env-file',path.join(base,'compose.env'),'-p',P.project,'-f',path.join(import.meta.dirname,'compose.yml')]);execFileSync('docker',['start',P.container],{stdio:'ignore'});}
  await waitReadyStack();
  await writeFile(path.join(output,'backend-map-probe.json'),JSON.stringify(await probeBackendMap(P.api),null,2));
  const password=(await readFile(path.join(base,'private/driver.env'),'utf8')).trim().slice('HYACINTHUS_E2E_ADMIN_PASSWORD='.length);sensitive.push(password);const modelAuth=JSON.parse(await readFile(path.join(base,'private/mimo-auth.json'),'utf8'));sensitive.push(modelAuth['xiaomi-token-plan-cn'].key);const geoConfig=await mapEnvironment(repo);sensitive.push(...MAP_SECRET_KEYS.map(key=>geoConfig[key]));await writeFile(path.join(output,'real-map-probe.json'),JSON.stringify(await probeMap(geoConfig),null,2));approver=browserApprover(password);adminRead=createAdminRequirementReader({api:P.api,admin:P.admin,password});

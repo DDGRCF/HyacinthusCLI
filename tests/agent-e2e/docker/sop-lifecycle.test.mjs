@@ -105,3 +105,19 @@ test('invalid or identical image IDs are rejected', async () => {
   const names = 'hyacinthus-skills-e2e-backend:test\nhyacinthus-skills-e2e-pi:test';
   for (const id of ['', 'not-an-image-id', `sha256:${'a'.repeat(64)}`]) await assert.rejects(verifyLocalSopImages(names, async () => id));
 });
+
+test('selected restore refreshes proxy after API/Worker without reset or Pi recreation', async () => {
+  const { restoreSelectedServices } = await import('./sop-lifecycle.mjs');
+  const calls = []; const prefix = ['compose', '--env-file', '/synthetic/compose.env', '-p', 'synthetic-sop', '-f', '/synthetic/compose.yml'];
+  await restoreSelectedServices(async argv => { calls.push(argv); }, prefix);
+  assert.deepEqual(calls, [[...prefix, 'up', '-d', 'backend', 'worker'],
+    [...prefix, 'up', '-d', '--no-deps', '--force-recreate', 'front-admin']]);
+  assert.ok(calls.every(argv => !argv.includes('reset') && !argv.includes('down') && !argv.includes('pi')));
+  assert.deepEqual(prefix, ['compose', '--env-file', '/synthetic/compose.env', '-p', 'synthetic-sop', '-f', '/synthetic/compose.yml']);
+});
+test('selected backend restoration failure blocks proxy work and propagates the real failure', async () => {
+  const { restoreSelectedServices } = await import('./sop-lifecycle.mjs');
+  const calls = []; const failure = new Error('synthetic backend restoration failure');
+  await assert.rejects(restoreSelectedServices(async argv => { calls.push(argv); throw failure; }, ['compose']), error => error === failure);
+  assert.equal(calls.length, 1); assert.deepEqual(calls[0], ['compose', 'up', '-d', 'backend', 'worker']);
+});

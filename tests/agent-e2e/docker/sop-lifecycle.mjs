@@ -1,4 +1,4 @@
-// 改动说明：预检本地SOP镜像，按条件验证空结果，独立清理并捕获脱敏准备输出。
+// 改动说明：selected恢复后刷新Nginx代理，预检本地SOP镜像，按条件验证空结果，独立清理并捕获脱敏准备输出。
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -106,4 +106,10 @@ export async function captureChild(command, argv, { sanitize = safeChildOutput, 
       stdout: sanitize(Buffer.concat(output.stdout).toString()),
       stderr: sanitize(Buffer.concat(output.stderr).toString()) }));
   });
+}
+
+/** Restore API/Worker first, then refresh the retained Nginx container's static backend DNS. */
+export async function restoreSelectedServices(runDocker, composeArgs) {
+  await runDocker([...composeArgs, 'up', '-d', 'backend', 'worker']);
+  await runDocker([...composeArgs, 'up', '-d', '--no-deps', '--force-recreate', 'front-admin']);
 }
