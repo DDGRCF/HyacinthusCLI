@@ -1,4 +1,4 @@
-// 改动说明：执行主Skill紧凑能力示例并核对完整ID，保留邮件、预览与schema交付回归。
+// 改动说明：核对随包退出码与实现，并执行主Skill能力示例及邮件、预览、schema交付回归。
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -36,6 +36,42 @@ fn data(args: &[&str]) -> Value {
 /// Export the exact binary's complete skill tree to a disposable directory.
 fn export(dir: &Path) {
     data(&["skills", "export", "--dir", dir.to_str().unwrap()]);
+}
+
+/// The bundled exit-code table must contain exactly the implemented CLI outcomes.
+#[test]
+fn bundled_exit_code_table_matches_implemented_constants() {
+    let reference = String::from_utf8(
+        run(&[
+            "skills",
+            "read",
+            "hyacinthus-cli",
+            "references/output-risk.md",
+        ])
+        .stdout,
+    )
+    .unwrap();
+    let documented: std::collections::BTreeSet<i32> = reference
+        .lines()
+        .filter_map(|line| line.strip_prefix("| "))
+        .filter_map(|line| line.split_once('|').map(|(code, _)| code.trim()))
+        .flat_map(|codes| codes.split('/'))
+        .filter_map(|code| code.trim().parse().ok())
+        .collect();
+    let mut implemented: std::collections::BTreeSet<i32> = include_str!("../src/output.rs")
+        .lines()
+        .filter(|line| line.starts_with("pub const EXIT_"))
+        .map(|line| {
+            line.split_once(" = ")
+                .unwrap()
+                .1
+                .trim_end_matches(';')
+                .parse()
+                .unwrap()
+        })
+        .collect();
+    implemented.insert(0);
+    assert_eq!(documented, implemented);
 }
 
 /// Reduced stdout must not prevent the complete parse/import preview from being saved.
