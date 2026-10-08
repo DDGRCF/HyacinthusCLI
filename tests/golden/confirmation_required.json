@@ -1,13 +1,33 @@
 {
   "error": {
     "code": "VALIDATION_FAILED",
-    "detail": {"skipped_rows": [{"index": 1, "address_detail": null, "requirement_code": null, "confirmation_reasons": ["DESCRIPTION_REQUIRED"], "errors": ["DESCRIPTION_REQUIRED"], "warnings": [], "title": "高一数学"}]},
+    "detail": {
+      "skipped_rows": [
+        {
+          "index": 1,
+          "address_detail": null,
+          "requirement_code": null,
+          "confirmation_reasons": [
+            "DESCRIPTION_REQUIRED"
+          ],
+          "errors": [
+            "DESCRIPTION_REQUIRED"
+          ],
+          "warnings": [],
+          "title": "高一数学",
+          "location": null,
+          "geo_diagnostic": null
+        }
+      ]
+    },
     "hint": null,
     "message": "parse rows contain backend errors; correct them and submit explicit confirmed_rows; --yes only authorizes the write",
     "retryable": false,
     "risk": null,
     "type": "validation"
   },
-  "meta": { "profile": null },
+  "meta": {
+    "profile": null
+  },
   "ok": false
 }

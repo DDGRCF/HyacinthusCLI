@@ -116,10 +116,10 @@ jobs:
           cat > RELEASE_NOTES.md <<'EOF'
           Hyacinthus CLI release.
 
-          Install through the private npm wrapper:
+          Install from the public GitHub release; the script verifies checksums and installs bundled Skills:
 
           ```bash
-          GITHUB_TOKEN=github_pat_xxx npx @ddgrcf/hyacinthus-cli install --version ${{ needs.validate.outputs.release_tag }}
+          curl -fsSL https://raw.githubusercontent.com/DDGRCF/HyacinthusCLI/${{ needs.validate.outputs.release_tag }}/scripts/install.sh | HYACINTHUS_CLI_VERSION=${{ needs.validate.outputs.release_tag }} bash
           ```
 
           Or download the matching archive from this release and verify it with `SHA256SUMS`.

@@ -28,7 +28,7 @@ Install from a GitHub release:
 curl -fsSL https://raw.githubusercontent.com/DDGRCF/HyacinthusCLI/main/scripts/install.sh | bash
 ```
 
-Install from the private GitHub release through the npm wrapper:
+With access to the npm package, install through its authenticated GitHub wrapper:
 
 ```bash
 GITHUB_TOKEN=github_pat_xxx npx @ddgrcf/hyacinthus-cli install --skills-target pi
@@ -36,7 +36,7 @@ npx @ddgrcf/hyacinthus-cli skills install --target hermes
 npx @ddgrcf/hyacinthus-cli skills install --target pi
 ```
 
-The npm wrapper does not contain the Rust binary. It uses `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token` to read the private `DDGRCF/HyacinthusCLI` release assets, download the matching archive, verify the `.sha256` checksum, and install `hyacinthus` into `~/.local/bin` by default. Alpine environments are detected as `x86_64-unknown-linux-musl`; other Linux x86_64 environments use `x86_64-unknown-linux-gnu`.
+The npm wrapper does not contain the Rust binary. It currently requires `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token` to download release assets, verify the `.sha256` checksum, and install `hyacinthus` into `~/.local/bin` by default. GitHub releases are public; the shell installer above does not require this token. Alpine environments are detected by the npm wrapper as `x86_64-unknown-linux-musl`; other Linux x86_64 environments use `x86_64-unknown-linux-gnu`.
 
 `skills read` emits raw Markdown by default; `--json` or explicit `--format json` returns the normal JSON envelope. `skills list [name/path]` lists one embedded directory level.
 

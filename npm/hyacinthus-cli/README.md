@@ -1,7 +1,7 @@
-<!-- 改动说明：安装 CLI 联动可发现的版本一致 Skills，支持自动发现、显式目标和完整引用检查。 -->
+<!-- 改动说明：同步21字段邮件流程、延期限制及公开GitHub与npm访问方式，保留完整Skills安装说明。 -->
 # @ddgrcf/hyacinthus-cli
 
-Private npm wrapper for installing the Hyacinthus CLI from private GitHub Releases.
+npm wrapper for installing the Hyacinthus CLI through authenticated GitHub release downloads.
 
 The npm package does not contain the Rust binary. It uses `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token` to download release assets from `DDGRCF/HyacinthusCLI`.
 
@@ -17,20 +17,19 @@ Supported skill targets are `hermes`, `codex`, `claude`, and `pi`. Pi's default 
 
 An explicit `--dir` takes precedence and also supports generic destinations without a target; if `--target` is supplied it must be supported even with `--dir`. `nullclaw` is rejected, and `NULLCLAW_HOME` is not used. Claw/PicoClaw hosting is not provided. The Rust CLI preserves `hyacinthus-cli` as the direct-terminal authorization identity and supports `pi` for Pi Agent authorization.
 
-Bundled exports also include `tutoring-job-mail-upload`, the saved-mail → 16-field text → authorized, reviewed batch-import workflow. The wrapper exports the skills embedded in the installed Rust binary; use a release containing this skill, not a separate copy under `~/Tests`.
+Bundled exports also include `tutoring-job-mail-upload`, the saved-mail → 21-field text → authorized, reviewed batch-import workflow. The wrapper exports the skills embedded in the installed Rust binary.
 
-The token must be able to read the private `DDGRCF/HyacinthusCLI` repository.
+The wrapper currently requires a GitHub token even though `DDGRCF/HyacinthusCLI` releases are public. The shell installer in the CLI README can download public releases without a token. npm package access is separate from GitHub authentication.
 
 After installation, use the installed `hyacinthus` binary directly:
 
 ```bash
 hyacinthus requirements extend KKH347 --yes
-hyacinthus requirements extend KKH347 --expires-at 2027-07-10T12:00:00 --yes
 ```
 
 Installed release binaries default to the production API at `https://www.fxzjjzx.cn`; normal production use does not need `--base-url`. Set `HYACINTHUS_BASE_URL` or a profile `--base-url` only when intentionally targeting development or staging.
 
-The extension command requires `requirements:write`. Without `--expires-at`, it uses the backend default requirement extension window.
+The extension command requires `requirements:write` and currently uses the backend default extension window. The backend accepts but does not apply `--expires-at`; report the returned actual expiry. Single extension restores open status and clears an existing match.
 
 Publish this wrapper from this directory:
 

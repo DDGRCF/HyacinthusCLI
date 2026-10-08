@@ -44,10 +44,10 @@ hyacinthus doctor --strict
 
 Pi 标记或非空 `PI_CODING_AGENT_DIR` 优先于其他 Agent home；默认 `pi-agent`，自定义目录为 `pi-<目录名>`。显式 `--profile`、`HYACINTHUS_PROFILE` 优先。SDK 可设置 Pi 目录或配置 `client_type: pi`。
 
-未安装时：
+未安装时用 GitHub 安装脚本，自动导出 Skills 到已有 Agent 目录：
 
 ```bash
-npx @ddgrcf/hyacinthus-cli install --skills-target codex
+curl -fsSL https://raw.githubusercontent.com/DDGRCF/HyacinthusCLI/main/scripts/install.sh | bash
 ```
 
-target 可为 `codex|claude|hermes|pi`，目录可用 `--skills-dir`。仅安装 Pi 技能用 `npx @ddgrcf/hyacinthus-cli skills install --target pi`。安装后新会话加载新增 Skills。
+有 npm 包访问权限时也可用 `npx @ddgrcf/hyacinthus-cli install --skills-target codex`；此安装器下载时还需 GitHub token。target 可为 `codex|claude|hermes|pi`，目录可用 `--skills-dir`。已有 CLI 时用 `hyacinthus skills export --dir <agent-skills-dir>` 更新 Skills，安装后新会话加载。
