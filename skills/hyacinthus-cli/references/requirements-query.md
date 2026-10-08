@@ -13,7 +13,7 @@ hyacinthus requirements search --keyword HZ260514701 --scope all
 
 1. keyword 是模糊匹配。查编号逐项核对 `requirement_code`；找“初一数学”可搜数学，再核对 `subject_names/grade_names`。
 2. 用 `skip/limit` 分页，当前 limit 上限100。`has_more: true` 时下一页取返回的 skip + limit；本页筛选无目标仍继续。
-3. 翻页结束（has_more=false）仍无匹配时，报告本范围无匹配并结束查询，不用 options 或新权限验证空结果。失败按真实错误处理。
+3. 翻页结束（has_more=false）仍无匹配时，报告本次关键词和范围无匹配并结束；不换关键词、范围或权限重查。失败按真实错误处理。
 
 search 只返回摘要，不含完整薪酬、条件、授课方式和时间；不能声称这些字段已回读核对。批量身份查询见[批次指南](batch-and-geo.md)。
 

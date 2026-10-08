@@ -1,4 +1,4 @@
-// 改动说明：覆盖完整data空结果及不足投影拒绝，保留TCP、代理恢复和清理验证。
+// 改动说明：完整空结果后继续检索、看帮助或缺参数都拒绝，保留投影及基础设施验证。
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -24,10 +24,16 @@ test('database health waits for TCP after the temporary initialization socket', 
   assert.match(compose, /pg_isready -h 127\.0\.0\.1 -U postgres -d hyacinthus_test/);
 });
 
-test('math followed by grade remains correct and records the two extra CLI calls', () => {
-  const actual = verifyEmptySearch([search('数学'), search('初一'), { action: 'requirements search', outputText: 'help' }], conditions);
-  assert.equal(actual.keyword, '数学'); assert.equal(actual.extraCliCallsAfterEmpty, 2);
-  assert.equal(actual.emptyResultEndsTask, false);
+test('a complete empty result rejects further keyword queries', () => {
+  assert.throws(() => verifyEmptySearch([search('数学'), search('初一')], conditions), /continued CLI calls/);
+});
+test('help after a complete empty result still violates task termination', () => {
+  const help = {action:'requirements search',argv:['requirements','search','--help'],exitCode:0};
+  assert.throws(() => verifyEmptySearch([search('数学'), help], conditions), /continued CLI calls/);
+});
+test('a failed extra invocation after a complete empty result is not ignored', () => {
+  const missing = {action:'requirements search',argv:['requirements','search','--scope','active'],exitCode:2,result:{ok:false}};
+  assert.throws(() => verifyEmptySearch([search('数学'), missing], conditions), /continued CLI calls/);
 });
 test('grade alone is exhaustive for a required condition', () => {
   const actual = verifyEmptySearch([search('初一')], conditions);

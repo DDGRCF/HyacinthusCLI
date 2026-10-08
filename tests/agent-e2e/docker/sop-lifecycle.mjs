@@ -1,4 +1,4 @@
-// 改动说明：按真实完整输出验证空结果，保留专项代理恢复、镜像预检和独立清理。
+// 改动说明：要求完整空结果后停止CLI调用，保留真实输出、代理恢复和独立清理验证。
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -50,7 +50,7 @@ export async function prepareSecrets(privateDir, mapSecretKeys, read = readFile)
   return [...new Set(values.filter(Boolean))];
 }
 
-/** Select exhaustive empty evidence for one requested condition, and count later CLI work. */
+/** Require exhaustive empty evidence for a requested condition and immediate query termination. */
 export function verifyEmptySearch(events, { keywords, scope = 'active' }) {
   assert.ok(Array.isArray(keywords) && keywords.length, 'Missing requested search conditions');
   const searches = events.filter(event => event.action === 'requirements search' && cliData(event));
@@ -62,6 +62,7 @@ export function verifyEmptySearch(events, { keywords, scope = 'active' }) {
     && Array.isArray(data.items) && data.items.length === 0;});
   assert.ok(index >= 0, 'No exhaustive empty query for a requested condition');
   assert.ok(!events.some(event => event.denied || event.writes), 'Query attempted a denied action or business write');
+  assert.equal(index, events.length - 1, 'Agent continued CLI calls after a complete empty result');
   const query = events[index];
   return { queryEventId: query.id, keyword: cliData(query).keyword, scope,
     returned: 0, emptyResultEndsTask: index === events.length - 1,
