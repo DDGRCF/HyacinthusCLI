@@ -36,7 +36,7 @@ hyacinthus doctor --strict
 
 逐项读成功输出的 `data.checks`；strict 失败读 `error.detail.checks`。默认 doctor 可能在检查失败时仍返回 `ok: true`。`--offline` 跳过连接检查，仍检查 token。
 
-只检查实例时复用已有授权；尚未授权可申请最小的 `requirements:read`。无需 `admin:read` 或 `admin status`。连接失败保留环境，报告具体检查项和错误。
+只检查实例时复用已有授权；尚未授权可申请最小的 `requirements:read`。读完 doctor 检查项后报告并结束，不额外查询需求/options或扩业务权限；通过仅表示这些检查通过，不代表全部业务功能已验收。无需 `admin:read` 或 `admin status`。连接失败保留环境，报告具体检查项和错误。
 
 ## 身份和安装
 

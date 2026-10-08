@@ -32,7 +32,7 @@ metadata:
 
 ```bash
 hyacinthus --help
-hyacinthus --no-notice --jq '.data.capabilities | map({id,title})' capability list
+hyacinthus --no-notice --jq '.data.capabilities[].id' capability list
 hyacinthus schema <capability_id>
 hyacinthus <命令组> --help
 hyacinthus --no-notice skills read hyacinthus-cli references/requirements-import.md

@@ -1,4 +1,4 @@
-// 改动说明：验证邮件引用唯一21字段规范、完整预览交付及当前后端schema契约。
+// 改动说明：执行主Skill紧凑能力示例并核对完整ID，保留邮件、预览与schema交付回归。
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -415,4 +415,51 @@ fn explicit_read_json_overrides_table_format() {
     ]);
     assert_eq!(content["name"], "hyacinthus-cli");
     assert!(content["content"].as_str().unwrap().starts_with("---\n"));
+}
+
+/// Execute the bundled compact example and require every capability ID from the full list.
+#[test]
+fn main_skill_compact_capability_example_returns_every_registered_id() {
+    let source = run(&["skills", "read", "hyacinthus-cli"]);
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stdout)
+    );
+    let skill = String::from_utf8(source.stdout).unwrap();
+    let example = skill
+        .lines()
+        .find(|line| {
+            line.starts_with("hyacinthus --no-notice --jq '") && line.ends_with("' capability list")
+        })
+        .expect("compact capability example");
+    let expression = example
+        .strip_prefix("hyacinthus --no-notice --jq '")
+        .unwrap()
+        .strip_suffix("' capability list")
+        .unwrap();
+    let compact = run(&["--format", "json", "--jq", expression, "capability", "list"]);
+    assert!(
+        compact.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compact.stdout)
+    );
+    let projected: Value = serde_json::from_slice(&compact.stdout).unwrap();
+    let full = data(&["--format", "json", "capability", "list"]);
+    let mut actual: Vec<&str> = projected
+        .as_array()
+        .expect("compact ID array")
+        .iter()
+        .map(|id| id.as_str().expect("string ID"))
+        .collect();
+    let mut expected: Vec<&str> = full["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|capability| capability["id"].as_str().unwrap())
+        .collect();
+    assert!(!expected.is_empty());
+    actual.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(actual, expected);
 }
