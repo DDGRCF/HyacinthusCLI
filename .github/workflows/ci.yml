@@ -1,3 +1,4 @@
+# 改动说明：所有Rust编译固定单job，保留既有验证及发布流程。
 name: CI
 
 on:
@@ -5,6 +6,9 @@ on:
   push:
     branches:
       - main
+
+env:
+  CARGO_BUILD_JOBS: "1"
 
 jobs:
   rust:

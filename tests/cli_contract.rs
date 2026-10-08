@@ -1,4 +1,4 @@
-// 改动说明：保留 Skills 与字段交付回归；验证批量导入以后端 errors/准入标志裁决、warnings 不阻断且无置信度阈值。
+// 改动说明：验证学校查询、完整来源和本地参数门禁；保留 Skills 与导入准入回归。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -654,7 +654,7 @@ fn capability_list_returns_embedded_manifest() {
     let value = run_json(&["capability", "list"]);
 
     assert_eq!(value["ok"], true);
-    assert_eq!(value["data"]["version"], "2026-09-20");
+    assert_eq!(value["data"]["version"], "2026-10-08");
     assert!(value["data"]["capabilities"]
         .as_array()
         .unwrap()
@@ -676,6 +676,7 @@ fn capability_list_returns_embedded_manifest() {
         .iter()
         .any(|capability| capability["id"] == "admin.status"));
     for id in [
+        "catalog.schools.search",
         "requirements.upload_run",
         "requirements.geocode_run",
         "requirements.geocode_release",
@@ -698,7 +699,7 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 26);
+    assert_eq!(value["data"]["capability_count"], 27);
     assert_eq!(value["meta"]["source"], "embedded");
 }
 
@@ -4147,7 +4148,7 @@ fn jq_filters_success_envelope() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value, "2026-09-20");
+    assert_eq!(value, "2026-10-08");
 }
 
 #[test]
@@ -5729,6 +5730,169 @@ fn mock_recorded(
         requests
     });
     (base_url, handle)
+}
+
+/// Build a school response containing all source versions and reviewed file digests.
+fn school_catalog_response() -> serde_json::Value {
+    let data_files = [
+        "official_schools.csv",
+        "school_tiers.csv",
+        "school_aliases.csv",
+        "school_sources.csv",
+        "school_supplements.csv",
+        "school_tier_mappings.csv",
+    ]
+    .map(|file| serde_json::json!({"file": file, "sha256": "a".repeat(64)}));
+    serde_json::json!({"code":0,"message":"success","data":{
+        "items":[{"id":1,"school_code":"10335","name":"浙江大学","aliases":["浙大"],
+            "province":"浙江省","city":"杭州市","education_level":"本科",
+            "is_985":true,"is_211":true,"is_double_first_class":true,"match_kind":"alias",
+            "source_url":"https://www.moe.gov.cn/schools","source_version":"2026-06-17",
+            "synced_at":"2026-10-08T00:00:00Z","qualification_evidence":[
+                {"qualification":"985","listed_name":"浙江大学","source_url":"https://www.moe.gov.cn/985","source_version":"2006"}
+            ]}],
+        "total":1,"skip":0,"limit":20,"has_more":false,
+        "catalog":{"coverage":"普通高校及单独收录的军校","sources":[
+            {"kind":"official_schools","url":"https://www.moe.gov.cn/schools","version":"2026-06-17"},
+            {"kind":"985","url":"https://www.moe.gov.cn/985","version":"2006"},
+            {"kind":"211","url":"https://www.moe.gov.cn/211","version":"2005"},
+            {"kind":"double_first_class","url":"https://www.moe.gov.cn/double","version":"2022"}
+        ],"data_files":data_files}
+    }})
+}
+
+/// Preserve every source field in both the CLI envelope and a requested output file.
+#[test]
+fn school_query_uses_read_scope_and_preserves_source_snapshot() {
+    let fixture = school_catalog_response();
+    let (base_url, server) = mock_recorded(vec![(200, fixture.to_string())], None);
+    let output_dir = tempfile::tempdir().unwrap();
+    let output_file = output_dir.path().join("schools.json");
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base_url,
+            "requirements",
+            "catalog",
+            "schools",
+            "--keyword",
+            " 浙大 ",
+            "--exact",
+            "--province",
+            " 浙江省 ",
+            "--tier",
+            "211",
+            "--id",
+            "1",
+            "--output",
+            output_file.to_str().unwrap(),
+        ],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:read"),
+        ],
+        0,
+    );
+    assert_eq!(value["data"], fixture["data"]);
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(output_file).unwrap()).unwrap();
+    assert_eq!(saved, fixture["data"]);
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert!(request.starts_with("GET /api/v1/agent/catalog/schools?"));
+    for parameter in [
+        "keyword=%E6%B5%99%E5%A4%A7",
+        "exact=true",
+        "school_id=1",
+        "tier=211",
+        "limit=20",
+        "skip=0",
+    ] {
+        assert!(
+            request.contains(parameter),
+            "missing {parameter}: {request}"
+        );
+    }
+    assert!(request.to_lowercase().contains("x-agent-key: test-token"));
+}
+
+/// Reject invalid school filters locally before contacting the backend.
+#[test]
+fn school_query_rejects_invalid_filters_before_http() {
+    for flags in [
+        vec!["--exact"],
+        vec!["--id", "0"],
+        vec!["--limit", "0"],
+        vec!["--limit", "101"],
+        vec!["--keyword", " "],
+        vec!["--province", " "],
+    ] {
+        let mut args = vec!["requirements", "catalog", "schools"];
+        args.extend(flags);
+        assert_local_failure(&args, 2);
+    }
+}
+
+/// Incomplete provenance is a contract error even when the backend reports success.
+#[test]
+fn school_query_rejects_missing_source_evidence() {
+    for field in ["sources", "data_files"] {
+        let mut fixture = school_catalog_response();
+        fixture["data"]["catalog"][field] = serde_json::json!([]);
+        let (base_url, server) = mock_recorded(vec![(200, fixture.to_string())], None);
+        let value = run_json_expect_code(
+            &[
+                "--base-url",
+                &base_url,
+                "requirements",
+                "catalog",
+                "schools",
+            ],
+            &[
+                ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+                ("HYACINTHUS_AGENT_SCOPES", "requirements:read"),
+            ],
+            1,
+        );
+        assert_eq!(value["error"]["code"], "RESPONSE_SCHEMA_MISMATCH");
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+}
+
+/// Native offset pagination cannot be confused with generic continuation-token collection.
+#[test]
+fn school_page_all_is_rejected_before_http() {
+    let value = assert_local_failure(
+        &["capability", "run", "catalog.schools.search", "--page-all"],
+        2,
+    );
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("does not support --page-all"));
+}
+
+/// Never describe a cursor page as complete when the backend omitted its continuation token.
+#[test]
+fn page_all_rejects_missing_continuation_token() {
+    let (base_url,server)=mock_recorded(vec![(200,serde_json::json!({"code":0,"message":"success","data":{"items":[1],"total":2,"has_more":true}}).to_string())],None);
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base_url,
+            "api",
+            "GET",
+            "/api/v1/agent/items",
+            "--page-all",
+        ],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_RAW_API", "1"),
+        ],
+        1,
+    );
+    assert_eq!(value["error"]["code"], "PAGINATION_TOKEN_MISSING");
+    assert_eq!(server.join().unwrap().len(), 1);
 }
 
 /// A successful task fixture with the actual parse response schema shape.

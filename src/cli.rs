@@ -1,4 +1,4 @@
-// 改动说明：保留统一 Skills 入口，移除需求 parse/import-raw 的本地置信度阈值参数。
+// 改动说明：增加学校目录只读查询，支持正式名、别名、标识码、资质和精确匹配。
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -547,10 +547,54 @@ pub struct RequirementsCatalogCommand {
 }
 
 #[derive(Clone, Debug, Subcommand)]
-/// Catalog maintenance operations for subjects and grades.
+/// Catalog reads and maintenance operations for schools, subjects and grades.
 pub enum RequirementsCatalogSubcommand {
+    Schools(RequirementsCatalogSchoolsArgs),
     CreateMissing(RequirementsCatalogCreateMissingArgs),
     Reorder(RequirementsCatalogReorderArgs),
+}
+
+/// Selects an independently recorded school qualification.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum SchoolQualification {
+    #[value(name = "985")]
+    Project985,
+    #[value(name = "211")]
+    Project211,
+    #[value(name = "double_first_class")]
+    DoubleFirstClass,
+}
+
+impl fmt::Display for SchoolQualification {
+    /// Format the qualification token accepted by the backend schema.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Project985 => "985",
+            Self::Project211 => "211",
+            Self::DoubleFirstClass => "double_first_class",
+        })
+    }
+}
+
+/// Searches synchronized school facts while preserving ambiguous candidates and provenance.
+#[derive(Clone, Debug, Args)]
+pub struct RequirementsCatalogSchoolsArgs {
+    #[arg(long)]
+    pub keyword: Option<String>,
+    #[arg(long = "id")]
+    pub school_id: Option<i64>,
+    #[arg(long)]
+    pub province: Option<String>,
+    #[arg(long, value_enum)]
+    pub tier: Option<SchoolQualification>,
+    #[arg(long)]
+    pub exact: bool,
+    #[arg(long, default_value_t = 0)]
+    pub skip: u64,
+    #[arg(long, default_value_t = 20)]
+    pub limit: u64,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
 }
 
 #[derive(Clone, Debug, Args)]

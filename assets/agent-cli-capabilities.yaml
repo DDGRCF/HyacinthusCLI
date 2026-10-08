@@ -1,5 +1,5 @@
-# 改动说明：对齐21字段与 ext 联系方式，修正持久上传为写入前定位或复用已有有效定位。
-version: "2026-09-20"
+# 改动说明：增加有来源快照的学校查询；保留21字段、联系方式与写前定位契约。
+version: "2026-10-08"
 backend_min_version: "0.1.0"
 capabilities:
   - id: requirements.batch_parse
@@ -2337,3 +2337,185 @@ capabilities:
     examples:
       - title: 提交前一次只读预检
         command: hyacinthus capability run requirements.preflight_v2 --data @preflight.json
+
+  - id: catalog.schools.search
+    title: 学校及资质查询
+    description: 只读查询当前同步学校目录；返回正式名、审核别名、标识码、三个独立资质事实和带文件摘要的来源快照。多候选不自动选择，未收录不能推断无资质，学校事实不自动加入招聘要求。
+    domain: catalog
+    command: hyacinthus requirements catalog schools
+    method: GET
+    path: /api/v1/agent/catalog/schools
+    required_scopes:
+    - requirements:read
+    risk_level: read
+    supports_dry_run: false
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: 0.1.0
+    introduced_in: 0.1.16
+    request_schema:
+      type: object
+      required: []
+      properties:
+        keyword:
+          type: string
+          minLength: 1
+          maxLength: 200
+        school_id:
+          type: integer
+          minimum: 1
+        province:
+          type: string
+          minLength: 1
+          maxLength: 200
+        tier: &id004
+          type: string
+          enum:
+          - '985'
+          - '211'
+          - double_first_class
+        exact: &id003
+          type: boolean
+        skip:
+          type: integer
+          minimum: 0
+          maximum: 4294967295
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+    response_schema:
+      type: object
+      required:
+      - items
+      - total
+      - skip
+      - limit
+      - has_more
+      - catalog
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - school_code
+            - name
+            - aliases
+            - province
+            - city
+            - education_level
+            - is_985
+            - is_211
+            - is_double_first_class
+            - match_kind
+            - source_url
+            - source_version
+            - synced_at
+            - qualification_evidence
+            properties:
+              id: &id005
+                type: integer
+              school_code: &id002
+                type:
+                - string
+                - 'null'
+              name: &id001
+                type: string
+              aliases:
+                type: array
+                items: *id001
+              province: *id002
+              city: *id002
+              education_level: *id002
+              is_985: *id003
+              is_211: *id003
+              is_double_first_class: *id003
+              match_kind:
+                type: string
+                enum:
+                - id
+                - name
+                - alias
+                - code
+                - partial
+                - listed
+              source_url: *id001
+              source_version: *id001
+              synced_at: *id001
+              qualification_evidence:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - qualification
+                  - listed_name
+                  - source_url
+                  - source_version
+                  properties:
+                    qualification: *id004
+                    listed_name: *id001
+                    source_url: *id001
+                    source_version: *id001
+                  additionalProperties: false
+            additionalProperties: false
+        total: *id005
+        skip: *id005
+        limit: *id005
+        has_more: *id003
+        catalog:
+          type: object
+          required:
+          - coverage
+          - sources
+          - data_files
+          properties:
+            coverage: *id001
+            sources:
+              type: array
+              items:
+                type: object
+                required:
+                - kind
+                - url
+                - version
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                    - official_schools
+                    - '985'
+                    - '211'
+                    - double_first_class
+                  url: *id001
+                  version: *id001
+                additionalProperties: false
+              minItems: 4
+              maxItems: 4
+              uniqueItems: true
+            data_files:
+              type: array
+              items:
+                type: object
+                required:
+                - file
+                - sha256
+                properties:
+                  file: *id001
+                  sha256:
+                    type: string
+                    pattern: ^[0-9a-f]{64}$
+                additionalProperties: false
+              minItems: 6
+              maxItems: 6
+              uniqueItems: true
+          additionalProperties: false
+      additionalProperties: false
+    examples:
+    - title: 按审核别名精确查询学校及来源
+      command: hyacinthus requirements catalog schools --keyword 浙大 --exact
+    - title: 查询浙江省211高校并保留分页
+      command: hyacinthus requirements catalog schools --province 浙江省 --tier 211 --limit 20

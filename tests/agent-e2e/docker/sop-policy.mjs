@@ -1,4 +1,4 @@
-// 改动说明：同容器验收允许真实只读config list及任务内identity_lookup，统一预算和批准指纹。
+// 改动说明：同容器验收允许只读学校目录与命令help，保持实际授权最小范围及写入批准指纹。
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 export const SOP_POLICY = Object.freeze({ project:'hyacinthus-skills-acceptance', container:'hyacinthus-skills-acceptance-pi-1',
@@ -28,10 +28,11 @@ export function callKind(argv, scopes) {
   const local=without(argv,['--format','--jq','-q','--request-id']);
   const args=local.filter(a=>!['--no-notice','--verbose'].includes(a));
   if(args.some(a=>['--base-url','--profile','--token','--instance-id'].some(f=>a===f||a.startsWith(`${f}=`))))throw new Error('Test instance and profile cannot be overridden');
-  const action=args.slice(0,args[0]==='requirements'&&args[1]==='priority-rules'?3:2).join(' ');
-  const safe=['config show','config list','auth status','auth check','auth scopes','auth login','auth wait','auth revoke','auth token','requirements search','requirements options','requirements parse','requirements parse-job','requirements import','requirements priority-rules list','requirements priority-rules add','user me','user update','capability list','capability schema','capability diff','skills list','skills read'];
+  const action=args.slice(0,args[0]==='requirements'&&['priority-rules','catalog'].includes(args[1])?3:2).join(' ');
+  if(args.includes('--help')||args.includes('-h'))return {action,writes:false};
+  const safe=['config show','config list','auth status','auth check','auth scopes','auth login','auth wait','auth revoke','auth token','requirements search','requirements options','requirements parse','requirements parse-job','requirements import','requirements catalog schools','requirements priority-rules list','requirements priority-rules add','user me','user update','capability list','capability schema','capability diff','skills list','skills read'];
   const identityLookup=args[0]==='capability'&&args[1]==='run'&&args[2]==='requirements.identity_lookup'&&scopes.includes('requirements:read');
-  if(!identityLookup&&!args.includes('--help')&&!args.includes('-h')&&!['schema','doctor','help','--version'].includes(args[0])&&!safe.includes(action))throw new Error(`Unrequested CLI action: ${action}`);
+  if(!identityLookup&&!['schema','doctor','help','--version'].includes(args[0])&&!safe.includes(action))throw new Error(`Unrequested CLI action: ${action}`);
   if(action==='auth token'&&args[2]!=='status')throw new Error('Token disclosure is not permitted');
   if(action==='auth login') { const required=(flag(argv,'--scope')||'').split(/[,\s]+/).filter(Boolean); if(!required.length||required.some(s=>!scopes.includes(s)))throw new Error('Authorization exceeds this task scopes'); if(args.includes('--wait'))throw new Error('Share the authorization link before waiting'); }
   const writes=['requirements import','user update','requirements priority-rules add'].includes(action)&&!args.includes('--dry-run')&&!args.includes('--help');

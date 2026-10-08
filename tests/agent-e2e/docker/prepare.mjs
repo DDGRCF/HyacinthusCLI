@@ -1,10 +1,15 @@
-// 改动说明：生成独立测试环境与单一 MiMo 临时凭据，通过受保护 Rust 脚本初始化专用 Docker 测试库。
+// 改动说明：复用单次MiMo凭据快照和宿主只读边界，通过受保护Rust脚本初始化测试库并同步学校目录。
 import { readFile, writeFile, mkdir, copyFile, chmod, readdir, rename } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { mapEnvironment, probeMap } from './geo-fixture.mjs';
+import { enterCredentialBoundary, captureCredentialSource, selectedCredential } from './credential-boundary.mjs';
+import { fileURLToPath } from 'node:url';
+
+const hostCredentialPath = path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi/agent'), 'auth.json');
+await enterCredentialBoundary(hostCredentialPath, fileURLToPath(import.meta.url));
 
 const repo = path.resolve(import.meta.dirname, '../../../..');
 const artifacts = path.join(repo, '.tmp/e2e/skills-alignment');
@@ -31,12 +36,13 @@ try { const lock=JSON.parse(await readFile(path.join(artifacts,'sop.lock'),'utf8
 await mkdir(privateDir, { recursive: true, mode: 0o700 });
 await mkdir(workspace, { recursive: true });
 // Fail before modifying any Docker state if the explicitly selected provider is unavailable.
-const hostAgent = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi/agent');
-const auth = JSON.parse(await readFile(path.join(hostAgent, 'auth.json'), 'utf8'));
-const provider = auth['xiaomi-token-plan-cn'];
-if (provider?.type !== 'api_key' || !provider.key) throw new Error('The local MiMo Token Plan CN API key is unavailable');
+const snapshotPath = path.join(privateDir, 'mimo-auth.json');
+const snapshotFlag = process.argv.indexOf('--credential-snapshot');
+if (snapshotFlag >= 0) {
+  if (process.argv[snapshotFlag + 1] !== snapshotPath) throw new Error('Preparation must use the task private credential snapshot');
+  selectedCredential(await readFile(snapshotPath));
+} else await captureCredentialSource(hostCredentialPath, snapshotPath);
 const mapConfig=await mapEnvironment(repo);await probeMap(mapConfig);
-await secretFile('mimo-auth.json', JSON.stringify({ 'xiaomi-token-plan-cn': provider }));
 const password = randomBytes(24).toString('hex');
 const temporary = () => randomBytes(32).toString('base64url');
 const config = {
@@ -73,6 +79,7 @@ docker(['up', '-d', 'db', 'redis']);
 const guarded = ['run', '--rm', '-v', `${privateDir}/run.sh:/app/scripts/run.sh:ro,z`, '-e', 'HYACINTHUS_ADMIN_BINARY=/app/admin', '--entrypoint', '/bin/bash', 'backend', '/app/scripts/run.sh', 'admin'];
 docker([...guarded, 'reset', '--database', 'test', '--confirm', 'hyacinthus_test']);
 docker([...guarded, 'seed', '--database', 'test', '--set', 'e2e', '--confirm', 'hyacinthus_test']);
+docker([...guarded, 'sync-school-catalog', '--data-dir', '/app/data/schools']);
 docker(['up', '-d', 'backend', 'worker', 'front-admin', 'pi']);
 let ready = false;
 for (let attempt = 0; attempt < 60; attempt += 1) {

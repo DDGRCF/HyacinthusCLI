@@ -19,6 +19,7 @@
 | `requirements.priority_rules.refresh` | `requirements priority-rules refresh` | [priority-rules.md](priority-rules.md) |
 | `requirements.priority_rules.import` | `requirements priority-rules import-json` | [priority-rules.md](priority-rules.md) |
 | `requirements.options` | `requirements options` | [catalog.md](catalog.md) |
+| `catalog.schools.search` | `requirements catalog schools` | [catalog.md](catalog.md) |
 | `catalog.create_missing` | `requirements catalog create-missing` | [catalog.md](catalog.md) |
 | `catalog.reorder` | `requirements catalog reorder` | [catalog.md](catalog.md) |
 | `users.me_read` | `user me` | [user-admin.md](user-admin.md) |

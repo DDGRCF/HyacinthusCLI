@@ -1,16 +1,15 @@
+<!-- 改动说明：同步SOP v5版本、21字段及15项/7子项数量，区分当前Docker验收与宿主诊断入口。 -->
 # 默认入口：共同 Docker SOP
 
-当前默认真实 Agent 验收为 `npm run test:agent -- --mode docker --sop full`，当前为21字段v4，详细操作见 [SOP.md](SOP.md)。下面原宿主流程保留作 `test:agent:host` 诊断，不计入同容器验收。全部编译使用 job=1。
+当前默认真实 Agent 验收为 `npm run test:agent -- --mode docker --sop full`，使用21字段及学校来源查询v5，执行清单为 [sop-v5.json](cases/sop-v5.json)。详细操作见 [SOP.md](SOP.md)。下面原宿主流程保留作 `test:agent:host` 诊断，不计入同容器验收。全部编译使用 job=1。
 
-# Pi 驱动 CLI 的邮件批量上传验收
-
-<!-- 改动说明：补充复用现有 Docker 测试端口和私密凭据的运行入口；全 Pi 自然语言验收不重建库，并输出实测 HTML。 -->
+# 原宿主模式：Pi 驱动 CLI 的邮件批量上传诊断
 
 ## 一次正常用户流程
 
 1. CLI 将两个正式 Skills 及全部引用文件 安装到 Pi 的普通 `skills` 目录；Pi 自动发现它们，不给测试 Agent 注入完整操作脚本。
 2. 首轮用户只发：**“帮我上传一下邮件里的家教岗位。”** 没有真实邮箱工具时，用户补充指定当前目录的 `saved_mail.txt`。
-3. Pi 自己选 Skill、保存来源、整理全部 30 条为固定 20 字段、发起 CLI 授权。用户模拟器只批准 Pi 展示的原始链接；Pi 续接同一会话。
+3. Pi 自己选 Skill、保存来源、整理全部 30 条为固定 21 字段、发起 CLI 授权。用户模拟器只批准 Pi 展示的原始链接；Pi 续接同一会话。
 4. Pi 调用真实 API/Worker 解析并 dry-run，展示 30 条摘要并请求批次批准。宿主绑定预览 payload 哈希和幂等键，批准后才允许执行真实导入。
 5. Pi 自己逐条回读和如实汇报；独立验收再核对30个编号、薪酬、教师/学生条件、科目/年级、联系方式和时间。再次上传同一邮件不得重复创建。
 
@@ -91,4 +90,4 @@ pi
 
 `docker/compose.yml` 部署专用 PostgreSQL/PostGIS、Redis、API、Worker、管理端和 Pi。Pi 在容器内通过正式安装器安装 Skills，使用本机 MiMo Token Plan 的单一 provider 临时凭据；不挂载宿主 Agent 配置或业务环境。
 
-当前标准入口是 `npm run test:agent -- --mode docker --sop full`，由 `docker/sop-run.mjs` 执行14个顶层用例及6个恢复子项。结果在 `/tmp/hyacinthus-sop-runs/<run_id>/`，最新报告为 `/tmp/hyacinthus-sop-latest.html`。业务契约、构建、初始化、固定用户回复和清理见 [SOP.md](SOP.md) 与 [docker/README.md](docker/README.md)。`docker/acceptance.mjs` 是历史六项脚本，不再作为标准入口。
+当前标准入口是 `npm run test:agent -- --mode docker --sop full`，由 `docker/sop-run.mjs` 按v5清单执行15个顶层用例及7个恢复子项（E1a～g），包括C3学校查询。结果在 `/tmp/hyacinthus-sop-runs/<run_id>/`，最新报告为 `/tmp/hyacinthus-sop-latest.html`。已有结果可用 `npm run test:report -- --run <run_id>` 重新生成报告；该命令不执行验收。业务契约、构建、初始化、固定用户回复和清理见 [SOP.md](SOP.md) 与 [docker/README.md](docker/README.md)。`docker/acceptance.mjs` 是历史六项脚本，不再作为标准入口。

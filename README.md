@@ -1,4 +1,4 @@
-<!-- 改动说明：合并 raw 地图诊断展示，明确后端 errors 裁决、定位验证及现有导入限制。 -->
+<!-- 改动说明：保留 raw 地图诊断及后端 errors 裁决说明，同步SOP v5验收与既有结果报告入口。 -->
 # Hyacinthus CLI
 
 Agent-oriented CLI for 风信子家教中心 backend operations. The CLI supports Hermes, Codex, Claude Code, Pi, and direct `hyacinthus-cli` authorization identities with a stable, structured, auditable command surface.
@@ -308,16 +308,15 @@ The Docker acceptance setup and natural-language MiMo/Pi suite live in `tests/ag
 
 The saved-mail processing workflow is bundled as `tutoring-job-mail-upload`; its source is now `skills/tutoring-job-mail-upload/SKILL.md`, rather than a standalone directory under `~/Tests`.
 
-[tests/agent-e2e/README.md](tests/agent-e2e/README.md) describes the real-Pi suite. After normal Skill installation, the user's first message is only “帮我上传一下邮件里的家教岗位。” Pi discovers the Skill, initiates authorization, processes every row in a 30-job saved-mail batch, previews and requests approval, imports, reads back and handles the same mail again without duplicates. The default suite runs the installed Pi SDK and real CLI in the same dedicated Docker container; the test runner never generates the Agent's confirmed payload. The current 21-field SOP v4 initializes only that Docker project's guarded `hyacinthus_test` once; selected runs preserve it and rerun dependencies. Current SOP and cleanup are documented in [tests/agent-e2e/SOP.md](tests/agent-e2e/SOP.md); actual results and HTML are archived under `/tmp/hyacinthus-sop-runs/<run_id>/`. The separately labeled host mode remains diagnostic.
+[tests/agent-e2e/README.md](tests/agent-e2e/README.md) describes the real-Pi suite. After normal Skill installation, the user's first message is only “帮我上传一下邮件里的家教岗位。” Pi discovers the Skill, initiates authorization, processes every row in a 30-job saved-mail batch, previews and requests approval, imports, reads back and handles the same mail again without duplicates. The default suite runs the installed Pi SDK and real CLI in the same dedicated Docker container; the test runner never generates the Agent's confirmed payload. The current 21-field SOP v5 adds school identity, qualification and source checks and covers 15 top-level cases with seven E1 recovery subcases (E1a–g). It initializes only that Docker project's guarded `hyacinthus_test` once; selected runs preserve it and rerun dependencies. Current SOP, image builds and cleanup are documented in [tests/agent-e2e/SOP.md](tests/agent-e2e/SOP.md); actual results and HTML are archived under `/tmp/hyacinthus-sop-runs/<run_id>/`. The separately labeled host mode remains diagnostic.
 
 ```bash
 cd tests/agent-e2e
 npm ci --ignore-scripts
 npm test          # Offline guards only, not an Agent acceptance result.
-npm run list
-npm run preflight # Requires existing isolated services and test admin credentials.
-npm run test:agent
-npm run test:report # Current offline regression + actual Pi scenario + HTML report.
+# Build the current Docker images first; see SOP.md.
+npm run test:agent -- --mode docker --sop full
+npm run test:report -- --run <run_id> # Regenerate an existing run's HTML and render evidence.
 ```
 
 ## Tests

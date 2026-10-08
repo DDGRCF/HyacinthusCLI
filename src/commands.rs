@@ -1,4 +1,4 @@
-// 改动说明：raw 导入展示地图及失败行诊断，保持后端 errors 裁决、任务恢复和优先级规则完整预览。
+// 改动说明：新增有来源的学校事实查询，保留地图诊断、确认、恢复和优先级规则流程。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
@@ -14,9 +14,9 @@ use uuid::Uuid;
 use crate::cli::{
     AdminSubcommand, AuthLoginArgs, AuthSubcommand, AuthTokenSubcommand, AuthWaitArgs,
     CapabilitySubcommand, Cli, Command, ConfigSubcommand, RequirementsCatalogCreateMissingArgs,
-    RequirementsCatalogReorderArgs, RequirementsCatalogSubcommand, RequirementsExtendArgs,
-    RequirementsImportArgs, RequirementsImportRawArgs, RequirementsParseArgs,
-    RequirementsParseJobArgs, RequirementsPriorityRuleAddArgs,
+    RequirementsCatalogReorderArgs, RequirementsCatalogSchoolsArgs, RequirementsCatalogSubcommand,
+    RequirementsExtendArgs, RequirementsImportArgs, RequirementsImportRawArgs,
+    RequirementsParseArgs, RequirementsParseJobArgs, RequirementsPriorityRuleAddArgs,
     RequirementsPriorityRuleExportJsonArgs, RequirementsPriorityRuleIdWriteArgs,
     RequirementsPriorityRuleImportJsonArgs, RequirementsPriorityRuleMatchesArgs,
     RequirementsPriorityRuleUpdateArgs, RequirementsPriorityRulesListArgs,
@@ -146,6 +146,9 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
                 requirements_priority_rules(cli, &command.command)
             }
             RequirementsSubcommand::Catalog(command) => match &command.command {
+                RequirementsCatalogSubcommand::Schools(args) => {
+                    requirements_catalog_schools(cli, args)
+                }
                 RequirementsCatalogSubcommand::CreateMissing(args) => {
                     requirements_catalog_create_missing(cli, args)
                 }
@@ -1654,6 +1657,53 @@ fn user_update(cli: &Cli, args: &UserUpdateArgs) -> CliResult<(Value, Value)> {
     Ok((
         data,
         json!({ "command": "user update", "capability": "users.me_update" }),
+    ))
+}
+
+/// Query school facts and their synchronized source evidence without changing recruitment conditions.
+fn requirements_catalog_schools(
+    cli: &Cli,
+    args: &RequirementsCatalogSchoolsArgs,
+) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        cli.instance_id,
+        cli.request_id.as_deref(),
+    )?;
+    let capability = manifest::find_capability("catalog.schools.search")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    let mut params = json!({"exact":args.exact,"skip":args.skip,"limit":args.limit});
+    for (name, value) in [
+        ("keyword", args.keyword.as_ref()),
+        ("province", args.province.as_ref()),
+    ] {
+        if let Some(value) = value {
+            let value = value.trim();
+            if value.is_empty() {
+                return Err(CliError::validation(format!("{name} must not be empty")));
+            }
+            params[name] = json!(value);
+        }
+    }
+    if args.exact && args.keyword.is_none() {
+        return Err(CliError::validation("--exact requires --keyword"));
+    }
+    if let Some(id) = args.school_id {
+        params["school_id"] = json!(id);
+    }
+    if let Some(tier) = args.tier {
+        params["tier"] = json!(tier.to_string());
+    }
+    validate_request_payload(&capability, &params)?;
+    let path = query::append_json_params(&capability.path, Some(&params))?;
+    let data = ApiClient::new(ctx)?.get(&path)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({"command":"requirements catalog schools","capability":"catalog.schools.search"}),
     ))
 }
 

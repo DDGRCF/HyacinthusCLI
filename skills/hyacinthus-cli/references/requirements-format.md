@@ -6,7 +6,7 @@ TXT 每个岗位一块，用“字段名：字段值”；CSV 每个岗位一行
 
 ## 字段规则
 
-“需求方”是学生、家长或机构；“要求的…”是教师条件。21字段是文本模板，JSON 使用下表的后端键；目录 ID 从 options 或已批准的创建回执选取，类型以 `schema requirements.batch_import` 为准。
+“需求方”是学生、家长或机构；“要求的…”是教师条件。21字段是文本模板，JSON 使用下表的后端键；科目/年级 ID 从 options 或已批准的创建回执选取，学校 ID 从[学校查询](catalog.md#查学校和资质)选取。类型以 `schema requirements.batch_import` 为准。
 
 | 顺序 | 中文字段 | JSON 字段 | 整理规则和类型 |
 | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ TXT 每个岗位一块，用“字段名：字段值”；CSV 每个岗位一行
 | 7 | `要求的性别` | `condition.required_gender` | 填教师性别要求，JSON 为单值。 |
 | 8 | `要求的学历` | `condition.required_education_levels`、`condition.required_education_note` | 保留学历限制和在读身份；大学生不等于本科毕业。levels 用后端学历值字符串数组，不写 null；在读等说明写 `required_education_note`。 |
 | 9 | `要求的学校` | `condition.required_school_names`、`condition.required_school_ids` | 填教师就读/毕业学校，保留多校选择关系；地址中的学校不算。names 为字符串数组，ids 为真实整数 ID 数组，均不写 null；层次写下一字段。 |
-| 10 | `学校的资质` | `condition.required_school_tiers` | 填明示的985、211、双一流等层次，不按校名推断。“211高校老师”只填211；教师资格证写要求。JSON：后端层次值字符串数组，不写 null。 |
+| 10 | `学校的资质` | `condition.required_school_tiers` | 填明示的985、211、双一流等层次，不按校名推断。“211高校老师”只填211；教师资格证写要求。JSON：明示985/211/双一流分别用 `985`/`211`/`double_first_class`，组成字符串数组，不写 null。 |
 | 11 | `授课方式` | `preferred_mode` | 线上/线下/混合对应 online/offline/hybrid，不从地址推断；整组声明须明确适用。JSON 不传 null，缺失或冲突先复核，不删字段触发默认。 |
 | 12 | `要求的资格` | `condition.required_occupation` | 职业身份：大学生/兼职→part_time_teacher，专职/全职→full_time_teacher，明示职业不限→any，未提供可为 null。经验、教师资格证写要求。 |
 | 13 | `薪酬` | `compensation` | 保留金额、范围、单位和附加条件，不猜单位、不换算。amount_min/max 为十进制字符串，单位写 billing_period/billing_unit_text，原文写 raw_text。 |
