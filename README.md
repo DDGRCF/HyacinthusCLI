@@ -1,4 +1,4 @@
-<!-- 改动说明：保留 raw 地图诊断及后端 errors 裁决说明，同步SOP v5验收与既有结果报告入口。 -->
+<!-- 改动说明：补齐学校查询与后端同步前提，保留SOP v5入口及 raw 地图 errors 裁决说明。 -->
 # Hyacinthus CLI
 
 Agent-oriented CLI for 风信子家教中心 backend operations. The CLI supports Hermes, Codex, Claude Code, Pi, and direct `hyacinthus-cli` authorization identities with a stable, structured, auditable command surface.
@@ -83,6 +83,9 @@ hyacinthus skills read hyacinthus-cli references/requirements-import.md
 hyacinthus skills export --dir ./.tmp/agent-skills
 hyacinthus skills check --dir ./.tmp/agent-skills
 hyacinthus requirements options
+hyacinthus requirements catalog schools --keyword 浙大 --exact
+hyacinthus requirements catalog schools --keyword 中国矿业大学
+hyacinthus requirements catalog schools --province 浙江省 --tier 211 --limit 20
 hyacinthus requirements search --keyword 高一数学
 hyacinthus requirements extend KKH347 --yes
 hyacinthus requirements parse --file input.txt
@@ -91,6 +94,8 @@ hyacinthus requirements catalog create-missing --subject <missing-subject> --yes
 hyacinthus requirements catalog reorder --target subjects --ids 3,1,2 --yes
 hyacinthus requirements import --file confirmed.json --idempotency-key cli-demo --yes
 ```
+
+School lookup requires `requirements:read`, an upgraded backend, and a catalog published by an administrator through the guarded Rust admin `sync-school-catalog` operation (`backend/scripts/run.sh admin ...`); a missing source snapshot returns `SCHOOL_CATALOG_SYNC_REQUIRED`. Results retain all candidates, independent qualification flags, and catalog source versions and file hashes. Confirm the school when an alias has multiple candidates; empty results do not prove a school does not exist or lacks qualifications, and school facts do not become recruitment requirements. Continue pages with `--skip` / `--limit` and `has_more`; if snapshot file hashes change, restart the query. See the bundled [school catalog guide](skills/hyacinthus-cli/references/catalog.md).
 
 Batch parsing/import has no row-confidence threshold or `--min-confidence` option. The backend alone decides business validity: `errors` block rows; `warnings` are displayed but never block. `can_auto_commit` and `needs_confirmation` must agree with `errors`; missing or contradictory required verdict fields are protocol errors. `--yes` authorizes a write and never bypasses backend errors. Dry-run previews the payload without promising backend acceptance; submission still returns partial failures and import-raw skip summaries with the caller's stable idempotency key.
 

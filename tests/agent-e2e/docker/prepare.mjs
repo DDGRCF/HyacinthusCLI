@@ -1,4 +1,4 @@
-// 改动说明：复用单次MiMo凭据快照和宿主只读边界，通过受保护Rust脚本初始化测试库并同步学校目录。
+// 改动说明：复用单次MiMo凭据快照和宿主只读边界，通过受保护Rust脚本初始化测试库并同步学校目录，Docker重置前只读预检本地SOP镜像。
 import { readFile, writeFile, mkdir, copyFile, chmod, readdir, rename } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -7,6 +7,7 @@ import os from 'node:os';
 import { mapEnvironment, probeMap } from './geo-fixture.mjs';
 import { enterCredentialBoundary, captureCredentialSource, selectedCredential } from './credential-boundary.mjs';
 import { fileURLToPath } from 'node:url';
+import { verifyLocalSopImages } from './sop-lifecycle.mjs';
 
 const hostCredentialPath = path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi/agent'), 'auth.json');
 await enterCredentialBoundary(hostCredentialPath, fileURLToPath(import.meta.url));
@@ -66,6 +67,12 @@ await secretFile('pi.env', 'HYACINTHUS_BASE_URL=http://backend:8000\nHYACINTHUS_
 await copyFile(path.join(repo, 'backend/scripts/run.sh'), path.join(privateDir, 'run.sh'));
 await chmod(path.join(privateDir, 'run.sh'), 0o755);
 await writeFile(envFile, `SKILLS_E2E_PRIVATE_DIR=${privateDir}\nSKILLS_E2E_WORKSPACE=${workspace}\n`, { mode: 0o600 });
+// Resolve only image names; do not dump expanded Compose configuration or private environments.
+const composeImages = execFileSync('docker', ['compose', '--env-file', envFile, '-p', project, '-f', compose, 'config', '--images'],
+  { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], cwd: repo });
+const localImages = await verifyLocalSopImages(composeImages, reference =>
+  execFileSync('docker', ['image', 'inspect', '--format', '{{.Id}}', reference], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+console.log(JSON.stringify({ stage: 'local-sop-image-preflight', images: localImages }));
 // Stop only this acceptance project's processes before resetting its own named volume database.
 docker(['down']);
 // Keep prior evidence outside the Agent mount so every complete run starts with an empty workspace.

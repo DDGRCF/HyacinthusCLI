@@ -1,6 +1,6 @@
-// 改动说明：学校来源SOP v5逐例留证，并以宿主只读凭据边界、单次快照与实际容器挂载执行E2门禁。
+// 改动说明：学校来源SOP v5逐例留证，并以宿主只读凭据边界、单次快照与实际容器挂载执行E2门禁，空结果按条件验收并在失败后继续清理。
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFile, writeFile, mkdir, readdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -13,7 +13,8 @@ import { installCheck, upgradeCheck, offlineCheck, rootCommand, guardedDirectory
 import { createAdminRequirementReader } from './admin-readback.mjs';
 import { verifyNormalized, verifyReport, NORMALIZED_LABELS } from '../lib/verify.mjs';
 import { sourceRows, mailFixture, normalizedLabelText, prefixRuleMatches, verifyReplayReport, verifyRunReuse } from './sop-verify.mjs';
-import { redact } from '../lib/policy.mjs';
+import { redact, redactWithSecrets, POLICY as E2E_POLICY } from '../lib/policy.mjs';
+import { verifyEmptySearch, cleanupSteps, safeChildOutput, captureChild, prepareSecrets } from './sop-lifecycle.mjs';
 import { writeSopReport } from './sop-report.mjs';
 import { recoveryCases } from './sop-recovery.mjs';
 import { schoolQueryCase } from './sop-schools.mjs';
@@ -42,7 +43,7 @@ const workspace=path.join(base,'workspace');
 const credentialSnapshotPath=path.join(base,'private/mimo-auth.json');
 const result={runId,sopVersion:spec.version,specPath:"cases/sop-v5.json",fixture:spec.fixture,kind,startedAt:new Date().toISOString(),model:'xiaomi-token-plan-cn/mimo-v2.6-pro',policy:P,cases:spec.cases.map(c=>({...c,status:'not_run'})),assumptions:['保存的合成邮件，不接入邮箱','API/Worker/CLI为当前源码；管理端为固定既有镜像','所有真实Pi与CLI执行共用唯一Pi容器']};
 const sessions=new Set();const profiles=new Set();let approver,adminRead,mailPi,fixture,beforeIds,firstHashes,globalFingerprint;
-let locked=false;let sensitive=[];let cancelled=false;let credentialBaseline,containerCredentialBoundary;
+let locked=false;let sensitive=[];let cancelled=false;let credentialBaseline,containerCredentialBoundary,preparationProcess;
 /** Stop new business cases on cancellation while retaining report and cleanup work. */
 function cancel(){cancelled=true;for(const pi of sessions)pi.cancel();}
 process.on('SIGINT',cancel);process.on('SIGTERM',cancel);
@@ -51,8 +52,17 @@ const suiteTimer=setTimeout(cancel,P.suiteMs);
 async function persist(){await mkdir(output,{recursive:true});await writeFile(path.join(output,'result.json'),JSON.stringify(redact(result),null,2));for(const entry of result.cases){await mkdir(path.join(output,'cases',entry.id),{recursive:true});await writeFile(path.join(output,'cases',entry.id,'case.json'),JSON.stringify(redact(entry),null,2));}}
 /** Scan every public text artifact, including model event streams and the generated report. */
 async function scanPublicEvidence(root){let files=0;for(const entry of await readdir(root,{withFileTypes:true})){const file=path.join(root,entry.name);if(entry.isDirectory())files+=await scanPublicEvidence(file);else if(/\.(json|ndjson|log|html|txt|csv|md)$/.test(entry.name)){const content=await readFile(file,'utf8');assert.ok(sensitive.every(value=>!value||!content.includes(value)),'A secret entered public evidence');assert.ok(!/(?:用户代码|用户码|授权码|user[ _-]*code)[：:\s*`]*[A-Z0-9]{4}-[A-Z0-9]{4}/i.test(content),'An authorization code entered public evidence');assert.ok(!/https?:\/\/[^\s"<>]+\/admin\/agent-auth\/authorize[^\s"<>]*user_code=/i.test(content),'An original authorization URL entered public evidence');files++;}}return files;}
-/** Invoke a child with real exit semantics without disclosing private environment contents. */
-async function child(command,argv){return new Promise((resolve,reject)=>{const p=spawn(command,argv,{stdio:'inherit'});p.on('error',reject);p.on('close',code=>code===0?resolve():reject(new Error(`${path.basename(command)} exited ${code}`)));});}
+/** Capture preparation diagnostics using only task-private redaction inputs; publish after cleanup. */
+async function child(command,argv){
+ const captured=await captureChild(command,argv,{maxOutputBytes:E2E_POLICY.maxOutputBytes});
+ try{sensitive.push(...await prepareSecrets(path.join(base,'private'),MAP_SECRET_KEYS));preparationProcess=redactWithSecrets(captured,sensitive);}
+ catch(error){preparationProcess={exitCode:captured.exitCode,signal:captured.signal,stdout:'<withheld: redaction inputs unavailable>',stderr:'<withheld: redaction inputs unavailable>',redactionError:safeChildOutput(error.message)};throw new Error('Preparation diagnostics could not be safely redacted');}
+ if(captured.spawnError||captured.exitCode!==0)throw new Error(`${path.basename(command)} exited ${captured.exitCode ?? captured.signal ?? 'spawn-error'}`);
+}
+/** Enumerate only this acceptance project's containers, distinguishing absence from Docker errors. */
+function projectContainerNames(){return execFileSync('docker',['ps','-a','--filter',`label=com.docker.compose.project=${P.project}`,'--format','{{.Names}}'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);}
+/** Remove one credential-bearing service without requiring a generated Compose env file. */
+function removeCredentialService(service){const ids=execFileSync('docker',['ps','-a','--filter',`label=com.docker.compose.project=${P.project}`,'--filter',`label=com.docker.compose.service=${service}`,'--format','{{.ID}}'],{encoding:'utf8'}).trim().split('\n').filter(Boolean);if(ids.length)execFileSync('docker',['rm','-f',...ids],{stdio:'ignore',timeout:30_000});return {service,removed:ids.length,absent:ids.length===0};}
 /** Wait for the real test database marker and Worker readiness after either full setup or selected service restoration. */
 async function waitReadyStack(){for(let attempt=0;attempt<60;attempt++){try{const ready=await fetch(`${P.api}/health/ready`);const worker=execFileSync('docker',['logs',`${P.project}-worker-1`],{encoding:'utf8',stdio:['ignore','pipe','pipe']});if(ready.status===200&&ready.headers.get('x-hyacinthus-test-database')==='hyacinthus_test'&&worker.includes('worker runtime started'))return;}catch{}await new Promise(resolve=>setTimeout(resolve,500));}throw new Error('Test API/database marker and Worker did not become ready');}
 /** Capture the immutable shared container and installed product fingerprints. */
@@ -102,7 +112,7 @@ try{
  if(!healthy){await pi.task('可以，请通过正常授权完成检查，申请本次检查所需的最小权限。');healthy=pi.broker.events.findLast(e=>e.action==='doctor'&&e.result?.ok&&e.result.data.checks.every(c=>c.status!=='fail'));}
  assert.ok(healthy,'No successful real doctor check');assert.ok(healthy.result.data.checks.every(c=>c.status!=='fail'));assert.ok(healthy.argv.includes('--strict'));
  const bad=await session('B2',{profile:'B2',folder:'B2-unavailable',evidenceSuffix:'unavailable',networkDenied:true});try{await bad.task('帮我检查当前测试实例是否可用，把发现的问题告诉我。');const failed=bad.broker.events.findLast(e=>e.action==='doctor'&&e.exitCode!==0);assert.ok(failed,'Network diagnosis omitted doctor --strict with a nonzero result');const checks=failed.result?.error?.detail?.checks;assert.equal(checks?.find(c=>c.name==='token_present')?.status,'pass','Network negative must retain valid authorization');assert.equal(checks?.find(c=>c.name==='capability_endpoint')?.status,'fail');assert.ok(!bad.broker.events.some(e=>e.writes));await evidence('B2','negative-events.json',bad.broker.events);}finally{await close(bad);}return {healthy:true,negativeStopsWrites:true,negativeKeepsValidToken:true,realNetworkSyscallsDenied:true,session_id:pi.discovery.sessionId};}finally{await close(pi);}});
- await run('B3',async()=>{const pi=await session('B3');try{await pi.task(spec.cases.find(c=>c.id==='B3').prompt);const query=pi.broker.events.findLast(e=>e.action==='requirements search'&&e.result?.ok);assert.ok(query,'No actual successful query');assert.equal(query.result.data.scope,'active');assert.equal(query.result.data.keyword,'数学');assert.equal(query.result.data.total,0);assert.ok(!pi.broker.events.some(e=>e.denied||e.writes));return {session_id:pi.discovery.sessionId,emptyResultEndsTask:true,returned:0};}finally{await close(pi);}});
+ await run('B3',async()=>{const pi=await session('B3');try{await pi.task(spec.cases.find(c=>c.id==='B3').prompt);return {session_id:pi.discovery.sessionId,...verifyEmptySearch(pi.broker.events,{keywords:['数学','初一']})};}finally{await close(pi);}});
  await run('C1',async()=>{const pi=await session('C1');try{const def=spec.cases.find(c=>c.id==='C1');await pi.task(def.prompt.replaceAll('{run_id}',runId));const before=await adminRead.currentUser();await evidence('C1','before.json',before);assert.notEqual(before.display_name,`SOP-${runId}`);await pi.approve(def.approval.replaceAll('{run_id}',runId));const after=await readCLI(pi,['user','me']);assert.equal(after.display_name,`SOP-${runId}`);await evidence('C1','after.json',after);return {session_id:pi.discovery.sessionId,previewBoundToWrite:true,actualName:after.display_name};}finally{await close(pi);}});
  await run('C2',async()=>{const pi=await session('C2');try{const def=spec.cases.find(c=>c.id==='C2');await pi.task(def.prompt.replaceAll('{run_id}',runId));const before=await adminRead.rules();assert.ok(!before.some(r=>r.pattern.includes(runId)));await evidence('C2','before.json',before);await pi.approve(def.approval);const after=await readCLI(pi,['requirements','priority-rules','list']);const rules=after.filter(r=>prefixRuleMatches(r,runId));assert.equal(rules.length,1);assert.equal(rules[0].priority,5);await evidence('C2','after.json',rules);return {session_id:pi.discovery.sessionId,rule:rules[0],matchValidation:'D3'};}finally{await close(pi);}});
  await run('C3',async()=>schoolQueryCase({definition:spec.cases.find(c=>c.id==='C3'),session,close,readCLI,evidence,runId}));
@@ -120,16 +130,38 @@ try{
 }catch(e){result.failure=redact(e.message);console.error(result.failure);for(const c of result.cases)if(selected.has(c.id)&&c.status==='not_run'&&c.id!=='E2'){c.status='blocked';c.reason=result.failure;}}
 finally{
  clearTimeout(suiteTimer);
- for(const pi of sessions)await close(pi).catch(e=>{result.sessionCleanupError=redact(e.message);});await approver?.close();
- if(locked){await run('E2',async()=>{const revocations=[];for(const profile of profiles){const control={profile,cwd:'/workspace'};const initial=await containerCLI(control,['auth','status']);const initialState=JSON.parse(initial.stdout);if(!initialState.data?.token_present){const local=await containerCLI(control,['auth','logout','--local-only']);assert.equal(local.exitCode,0,'Unauthenticated pending-state cleanup failed');revocations.push({profile,noGrant:true,pendingStateCleared:true,localOnly:true});continue;}const r=await containerCLI(control,['auth','logout']);let value;try{value=JSON.parse(r.stdout);}catch{};assert.equal(r.exitCode,0,'Profile revocation failed');assert.equal(value.ok,true);revocations.push({profile,exitCode:r.exitCode,ok:value?.ok,remote:value.data});const status=await containerCLI(control,['auth','status']);let s;try{s=JSON.parse(status.stdout);}catch{};assert.ok(!s?.data?.token_present,'Revoked profile still has token');}await evidence('E2','revocations.json',revocations);
- execFileSync('docker',['stop',P.container],{stdio:'ignore',timeout:30_000});
- const integrity=await inspectCredentialIntegrity(credentialBaseline,hostCredentialPath,credentialSnapshotPath);
- const initialContainerBoundary=containerCredentialBoundary;let finalHostBoundary,finalContainerBoundary;
- try{finalHostBoundary=readOnlyBoundary(hostCredentialBoundary.directories.map(item=>item.directory));finalContainerBoundary=environmentManifest().credentialBoundary;}catch{integrity.boundaryVerificationError='Final host or container credential boundary verification failed';}
- await evidence('E2','host-credential-integrity.json',{...integrity,hostBoundary:finalHostBoundary,containerBoundary:finalContainerBoundary});
- await unlink(credentialSnapshotPath).catch(e=>{if(e.code!=='ENOENT')throw e;});execFileSync('docker',['compose','--env-file',path.join(base,'compose.env'),'-p',P.project,'-f',path.join(import.meta.dirname,'compose.yml'),'rm','-sf','backend','worker'],{stdio:'ignore',timeout:30_000});const backendEnv=path.join(base,'private/backend.env');await writeFile(backendEnv,withoutMapSecrets(await readFile(backendEnv,'utf8')),{mode:0o600});await evidence('E2','map-credential-cleanup.json',{copiedFieldsRemoved:MAP_SECRET_KEYS,credentialServiceContainersRemoved:['backend','worker'],sourceConfigurationWritten:false,temporaryCopiesRemoved:true});
- requireCredentialIntegrity(integrity,finalHostBoundary,initialContainerBoundary);requireCredentialIntegrity(integrity,finalHostBoundary,finalContainerBoundary);
- const files=await scanPublicEvidence(output);await evidence('E2','redaction-check.json',{files,knownSecretMatches:0});return {knownSecretMatches:0,temporaryModelCredentialDeleted:true,hostCredentialDirectoryReadOnly:true,originalCredentialMounted:false,selectedProviderUnchanged:true,privateSnapshotUnchanged:true,hostWholeFileUnchanged:integrity.hostObservation.wholeFileUnchanged,otherProviderChanges:integrity.hostObservation.changedProviders,profiles:revocations.length,piStopped:true,temporaryMapCredentialsRemoved:true,apiWorkerContainersRemoved:true,retainedServices:['db','redis','object-store','front-admin']};}).catch(e=>{result.cleanupError=e.message;});await unlink(path.join(base,'sop.lock')).catch(()=>{});}
+ for(const pi of sessions)await close(pi).catch(e=>{result.sessionCleanupError=redact(e.message);});if(approver)await approver.close().catch(e=>{result.approverCleanupError=redact(e.message);});
+ if(locked){await run('E2',async()=>{
+ const revocations=[];let integrity,finalHostBoundary,finalContainerBoundary,piStopped=false,piAbsent=false;
+ const initialContainerBoundary=containerCredentialBoundary;
+ const steps=await cleanupSteps([
+  ...[...profiles].map(profile=>({name:`revoke:${profile}`,run:async()=>{const control={profile,cwd:'/workspace'};const initial=await containerCLI(control,['auth','status']);assert.equal(initial.exitCode,0,'Profile status failed');const state=JSON.parse(initial.stdout);if(!state.data?.token_present){const local=await containerCLI(control,['auth','logout','--local-only']);assert.equal(local.exitCode,0,'Unauthenticated pending-state cleanup failed');revocations.push({profile,noGrant:true,pendingStateCleared:true,localOnly:true});return;}const r=await containerCLI(control,['auth','logout']);assert.equal(r.exitCode,0,'Profile revocation failed');assert.equal(JSON.parse(r.stdout).ok,true);const status=await containerCLI(control,['auth','status']);assert.equal(status.exitCode,0,'Revocation readback failed');assert.ok(!JSON.parse(status.stdout).data?.token_present,'Revoked profile still has token');revocations.push({profile,exitCode:r.exitCode,ok:true});}})),
+  {name:'revocation-evidence',run:()=>evidence('E2','revocations.json',revocations)},
+  {name:'stop-pi',run:()=>{if(!projectContainerNames().includes(P.container)){piAbsent=true;return {absent:true};}execFileSync('docker',['stop',P.container],{stdio:'ignore',timeout:30_000});piStopped=true;return {stopped:true};}},
+  {name:'credential-integrity',run:async()=>{integrity=await inspectCredentialIntegrity(credentialBaseline,hostCredentialPath,credentialSnapshotPath);return integrity;}},
+  {name:'host-boundary',run:()=>{finalHostBoundary=readOnlyBoundary(hostCredentialBoundary.directories.map(item=>item.directory));return finalHostBoundary;}},
+  {name:'container-boundary',run:()=>{finalContainerBoundary=environmentManifest().credentialBoundary;return finalContainerBoundary;}},
+  {name:'integrity-evidence',run:()=>evidence('E2','host-credential-integrity.json',{...integrity,hostBoundary:finalHostBoundary,containerBoundary:finalContainerBoundary})},
+  {name:'delete-model-snapshot',run:async()=>{try{await unlink(credentialSnapshotPath);return {deleted:true};}catch(error){if(error.code!=='ENOENT')throw error;return {alreadyAbsent:true};}}},
+  {name:'remove-backend',run:()=>removeCredentialService('backend')},
+  {name:'remove-worker',run:()=>removeCredentialService('worker')},
+  {name:'clean-map-env',run:async()=>{const file=path.join(base,'private/backend.env');let content;try{content=await readFile(file,'utf8');}catch(error){if(error.code==='ENOENT')return {alreadyAbsent:true};throw error;}await writeFile(file,withoutMapSecrets(content),{mode:0o600});return {copiedFieldsRemoved:MAP_SECRET_KEYS};}},
+  ...(preparationProcess?[{name:'prepare-output-evidence',run:()=>evidence('E2','prepare-process.json',preparationProcess)}]:[]),
+  {name:'closed-sessions',run:()=>assert.ok(!result.sessionCleanupError&&!result.approverCleanupError,'Session or browser cleanup failed')},
+  {name:'isolation-gate',run:()=>{requireCredentialIntegrity(integrity??{},finalHostBoundary,initialContainerBoundary);requireCredentialIntegrity(integrity??{},finalHostBoundary,finalContainerBoundary);}},
+  {name:'public-evidence-scan',run:async()=>{const files=await scanPublicEvidence(output);await evidence('E2','redaction-check.json',{files,knownSecretMatches:0});return {files,knownSecretMatches:0};}},
+ ],value=>redactWithSecrets(safeChildOutput(value),sensitive));
+ const cleanup={steps,profiles:profiles.size,revocations:revocations.length,piStopped,piAbsent,
+  temporaryModelCredentialDeleted:steps.find(step=>step.name==='delete-model-snapshot')?.status==='passed',
+  temporaryMapCredentialsRemoved:steps.filter(step=>['remove-backend','remove-worker','clean-map-env'].includes(step.name)).every(step=>step.status==='passed'),
+  hostCredentialDirectoryReadOnly:!!finalHostBoundary,originalCredentialMounted:finalContainerBoundary?.originalCredentialMounted,
+  selectedProviderUnchanged:integrity?.selectedProviderUnchanged??false,privateSnapshotUnchanged:integrity?.snapshotUnchanged??false,
+  hostWholeFileUnchanged:integrity?.hostObservation?.wholeFileUnchanged,otherProviderChanges:integrity?.hostObservation?.changedProviders};
+ try{await evidence('E2','map-credential-cleanup.json',{steps:steps.filter(step=>['remove-backend','remove-worker','clean-map-env'].includes(step.name)),sourceConfigurationWritten:false,temporaryCopiesRemoved:cleanup.temporaryMapCredentialsRemoved});}catch(error){steps.push({name:'map-cleanup-evidence',status:'failed',error:redactWithSecrets(safeChildOutput(error.message),sensitive)});}
+ result.cases.find(entry=>entry.id==='E2').actual=cleanup;await evidence('E2','cleanup-steps.json',cleanup);
+ const failed=steps.filter(step=>step.status==='failed');assert.equal(failed.length,0,`E2 cleanup or proof failed: ${failed.map(step=>step.name).join(', ')}`);return cleanup;
+ });await unlink(path.join(base,'sop.lock')).catch(()=>{});}
+
  result.endedAt=new Date().toISOString();result.durationMs=Date.parse(result.endedAt)-Date.parse(result.startedAt);result.status=result.failure||result.cases.some(c=>selected.has(c.id)&&c.status!=='passed')?'failed':'passed';
  await persist();try{const checks=await writeSopReport(output,result);const files=await scanPublicEvidence(output);const cleanup=result.cases.find(c=>c.id==='E2');cleanup.actual={...cleanup.actual,renderChecks:checks,publicTextFiles:files};await evidence('E2','redaction-check.json',{files,knownSecretMatches:0,includesGeneratedReport:true,includesModelEventStreams:true});}catch(error){const cleanup=result.cases.find(c=>c.id==='E2');cleanup.status='failed';cleanup.reason=redact(error.message);result.status='failed';result.reportError=cleanup.reason;}
  await persist();await writeSopReport(output,result,{capture:false});console.log(`SOP ${result.status}: ${output}/report.html`);if(result.status!=='passed')process.exitCode=1;

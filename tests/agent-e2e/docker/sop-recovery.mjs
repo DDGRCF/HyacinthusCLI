@@ -1,4 +1,4 @@
-// 改动说明：验证缺地址停止、严格公开结果、学历说明真实回读、批次键重放及延期限制。
+// 改动说明：缺地址验收区分拒绝引用与转折后的绕过提议，保留真实写入和恢复检查。
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,7 +11,7 @@ export function verifyMissingAddressStop(reply,events){
  const text=reply.text||'';
  assert.match(text,/地址|定位/,'Agent omitted the missing-address reason');
  assert.match(text,/(?:不能|无法|不可以|不可|不允许|不支持|不具备|必须|需先|需要先)[^。！？\n]{0,80}(?:地址|定位|导入|上传|写入)|(?:地址|定位)[^。！？\n]{0,80}(?:必填|不能|无法|必须|需先|需要先|不支持)/,'Agent did not explicitly stop import pending a real address');
- const clauses=text.split(/[。！？\n，,；;]/).filter(part=>!/(?:不能|无法|不可以|不可|不允许|不会|不支持)/.test(part)).join('\n');
+ const clauses=text.split(/[。！？\n，,；;]|但是|不过|然而|可是|但/).filter(part=>!/(?:不能|无法|不可以|不可|不允许|不会|不支持|不被(?:接受|允许|认可)|不得|禁止|不准)/.test(part)).join('\n');
  assert.doesNotMatch(clauses,/(?:确认|同意|批准)[^。！？\n]{0,20}(?:无地址|不填地址|缺少地址)[^。！？\n]{0,20}(?:写入|导入|上传)|(?:可以|可选择|建议)[^。！？\n]{0,20}(?:无地址|不填地址|跳过定位|绕过校验)[^。！？\n]{0,20}(?:导入|上传|写入)|(?:我会|将会)(?:照常|仍然|直接)(?:执行)?(?:真实)?(?:导入|写入|上传)/,'Agent offered import despite the missing address');
  assert.ok(!events.some(event=>event.writes),'Agent attempted a business write without a real address');
 }

@@ -1,4 +1,4 @@
-// 改动说明：覆盖21字段及历史报告、批准指纹、任务权限、完整来源字段和用例依赖，防止验证程序误判。
+// 改动说明：覆盖21字段、来源及SOP依赖，并验证缺地址拒绝措辞不会触发绕过规则误报。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
@@ -22,8 +22,9 @@ test('authorization continuation preserves diagnostics and configured user inten
  assert.equal(authorizationContinuation('B2',false,'请继续诊断原实例'),'请继续诊断原实例');
  assert.throws(()=>authorizationContinuation('B2',false,''));
 });
-test('missing address blocks offered bypasses as well as actual write attempts',()=>{
+test('missing address distinguishes explicit refusals from offered bypasses and actual writes',()=>{
  verifyMissingAddressStop({text:'缺少真实地址，不能导入。请补齐地址后重新预览。'},[]);
+ verifyMissingAddressStop({text:'缺地址时必须先补齐地址。“确认无地址直接写入”不被接受。'},[]);
  assert.throws(()=>verifyMissingAddressStop({text:'缺少地址，不能自动导入。确认无地址直接写入：我会照常执行真实导入。'},[]));
  assert.throws(()=>verifyMissingAddressStop({text:'请补齐地址，之后我会直接写入。'},[{writes:true}]));
  verifyMissingAddressStop({text:'不能确认无地址直接写入，必须补齐真实地址再导入。'},[]);
