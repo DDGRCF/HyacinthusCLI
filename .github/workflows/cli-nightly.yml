@@ -1,4 +1,4 @@
-# Nightly CLI build packages Hyacinthus CLI archives for daily validation and manual runs.
+# Change: Keep nightly CLI builds at one Cargo job and package archives for daily validation and manual runs.
 name: CLI Nightly Build
 
 on:
@@ -36,6 +36,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: "1"
 
 jobs:
   build:

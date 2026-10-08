@@ -1,0 +1,131 @@
+// 改动说明：覆盖合法回读投影和关联任务恢复的拒绝边界，保留21字段验证。
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile, mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createServer } from 'node:http';
+import { redactWithSecrets } from '../lib/policy.mjs';
+import { callKind, requestFingerprint, confirmationRequested, caseWorkspace } from './sop-policy.mjs';
+import { requireApproval, realArguments, requestControl } from './container-broker.mjs';
+import { mailFixture, sourceRows, csvRecords, normalizedLabelText, prefixRuleMatches, verifyReplayReport, isHourlyBilling, verifyRunReuse, verifyReadbackCodes, parseResults } from './sop-verify.mjs';
+import { NORMALIZED_LABELS } from '../lib/verify.mjs';
+import { renderSopHtml } from './sop-report.mjs';
+import { archiveTaskArtifacts } from './sop-artifacts.mjs';
+import { createAdminRequirementReader } from './admin-readback.mjs';
+import { GEO_FIXTURE, MAP_SECRET_KEYS, withoutMapSecrets, probeBackendMap } from './geo-fixture.mjs';
+import { authorizationContinuation } from './sop-session.mjs';
+import { verifyMissingAddressStop } from './sop-recovery.mjs';
+test('readback accepts actual envelopes and explicit full data or items projections',()=>{
+ const expected=mailFixture('READ').expected;
+ const write={writes:true,exitCode:0,result:{ok:true,data:{created:30}}};
+ for(const projection of ['', '.', '.data', '.data.items']){
+  const reads=expected.map(({code})=>{const data={items:[{requirement_code:code}],total:1};return {action:'requirements search',exitCode:0,argv:projection?['--jq',projection]:[],result:projection==='.data'?data:projection==='.data.items'?data.items:{ok:true,data}};});
+  assert.equal(verifyReadbackCodes([write,...reads],expected,write).expectedCodes,30);
+ }
+ const first={action:'requirements search',exitCode:0,argv:['-q=.data'],result:{items:[{requirement_code:'A'}]}};
+ const second={action:'requirements search',exitCode:0,argv:[],result:{ok:true,data:{items:[{requirement_code:'B'}]}}};
+ assert.equal(verifyReadbackCodes([write,first,second],[{code:'A'},{code:'B'}],write).successfulSearches,2);
+ const saved={...first,argv:['--jq','.meta'],resultSource:'cli-output-file',result:{command:'search'},outputData:{items:[{requirement_code:'A'}]}};
+ verifyReadbackCodes([write,saved],[{code:'A'}],write);
+});
+test('readback rejects failed, denied, unrelated, malformed and insufficient projected output',()=>{
+ const write={writes:true,exitCode:0,result:{ok:true,data:{created:1}}};
+ const data={items:[{requirement_code:'A'}]};const search={action:'requirements search',exitCode:0,argv:['--jq','.data'],result:data};
+ for(const change of [{exitCode:2},{denied:true},{action:'skills read'},{result:{ok:false,...data}},{argv:[]},{argv:['--jq','.meta']},{argv:['--jq','.data.total'],result:1},{argv:['--jq','.data.items'],result:{requirement_code:'A'}},{argv:['--jq','.data.items[]','--help'],result:{requirement_code:'A'}},{result:{}},{result:{items:{}}},{result:{items:[{}]}},{result:{items:[{requirement_code:'A-extra'}]}},{result:{items:[]}}])assert.throws(()=>verifyReadbackCodes([write,{...search,...change}],[{code:'A'}],write),/every code/);
+});
+test('readback requires post-write coverage and cannot replace a missing code with duplicates',()=>{
+ const write={writes:true,exitCode:0,result:{ok:true,data:{created:2}}};
+ const search={action:'requirements search',exitCode:0,argv:[],result:{ok:true,data:{items:[{requirement_code:'A'}]}}};
+ assert.throws(()=>verifyReadbackCodes([search,write],[{code:'A'}],write),/every code/);
+ assert.throws(()=>verifyReadbackCodes([write,search,search],[{code:'A'},{code:'B'}],write),/every code/);
+ assert.throws(()=>verifyReadbackCodes([search],[{code:'A'}],write),/successful import/);
+ for(const change of [{exitCode:1},{writes:false},{denied:true},{result:{ok:false}}]){const failed={...write,...change};assert.throws(()=>verifyReadbackCodes([failed,search],[{code:'A'}],failed),/successful import/);}
+});
+test('readback accepts expanded row and code projections including a single collapsed result',()=>{
+ const write={writes:true,exitCode:0,result:{ok:true,data:{created:2}}};
+ for(const projection of ['.data.items[]','.data.items[].requirement_code']){
+  const values=projection.endsWith('requirement_code')?['A','B']:[{requirement_code:'A'},{requirement_code:'B'}];
+  const event={action:'requirements search',exitCode:0,argv:['--jq',projection],result:values};
+  verifyReadbackCodes([write,event],[{code:'A'},{code:'B'}],write);
+  verifyReadbackCodes([write,{...event,result:values[0]}],[{code:'A'}],write);
+  assert.throws(()=>verifyReadbackCodes([write,{...event,result:[]}],[{code:'A'}],write),/every code/);
+ }
+});
+test('parse evidence accepts complete output and recovery from the same earlier created job',()=>{
+ const data={rows:[{parsed:{requirement_code:'A'},errors:[]}],summary:{total:1}};
+ const direct={action:'requirements parse',exitCode:0,argv:['--jq','.data'],result:data};
+ assert.equal(parseResults([direct])[0].data,data);
+ const origin={action:'requirements parse',exitCode:1,argv:[],result:{ok:false,error:{detail:{job_created:true,job_id:'job-1'}}}};
+ const recovered={action:'requirements parse-job',exitCode:0,argv:['requirements','parse-job','job-1'],result:{ok:true,data:{job_id:'job-1',status:'succeeded',result:data}}};
+ assert.equal(parseResults([origin,recovered])[0].jobId,'job-1');
+ const projected={...recovered,argv:[...recovered.argv,'--jq','.data'],result:recovered.result.data};
+ assert.equal(parseResults([origin,projected])[0].data,data);
+ const saved={...direct,result:{total:1},resultSource:'cli-output-file',outputData:data};
+ assert.equal(parseResults([saved])[0].data,data);
+});
+test('parse recovery rejects unrelated, unfinished, failed, denied and partial job evidence',()=>{
+ const data={rows:[],summary:{total:0}};
+ const origin={action:'requirements parse',exitCode:1,argv:[],result:{ok:false,error:{detail:{job_created:true,job_id:'job-1'}}}};
+ const recovery={action:'requirements parse-job',exitCode:0,argv:[],result:{ok:true,data:{job_id:'job-1',status:'succeeded',result:data}}};
+ assert.deepEqual(parseResults([recovery]),[]);
+ assert.deepEqual(parseResults([recovery,origin]),[]);
+ for(const change of [{job_id:'other'},{status:'running'},{status:'failed'},{status:'cancelled'},{result:{summary:{}}},{result:null}])assert.deepEqual(parseResults([origin,{...recovery,result:{ok:true,data:{...recovery.result.data,...change}}}]),[]);
+ for(const change of [{exitCode:1},{denied:true},{argv:['--help']}])assert.deepEqual(parseResults([origin,{...recovery,...change}]),[]);
+ assert.deepEqual(parseResults([{...origin,denied:true},recovery]),[]);
+ assert.deepEqual(parseResults([{...origin,result:{ok:false,error:{detail:{job_id:'job-1'}}}},recovery]),[]);
+});
+test('authorization continuation preserves diagnostics and configured user intent',()=>{
+ assert.doesNotMatch(authorizationContinuation('B2',false),/预览|业务确认/);
+ assert.match(authorizationContinuation('B3',false),/原任务/);
+ assert.equal(authorizationContinuation('B2',false,'请继续诊断原实例'),'请继续诊断原实例');
+ assert.throws(()=>authorizationContinuation('B2',false,''));
+});
+test('missing address distinguishes explicit refusals from offered bypasses and actual writes',()=>{
+ verifyMissingAddressStop({text:'缺少真实地址，不能导入。请补齐地址后重新预览。'},[]);
+ verifyMissingAddressStop({text:'缺地址时必须先补齐地址。“确认无地址直接写入”不被接受。'},[]);
+ assert.throws(()=>verifyMissingAddressStop({text:'缺少地址，不能自动导入。确认无地址直接写入：我会照常执行真实导入。'},[]));
+ assert.throws(()=>verifyMissingAddressStop({text:'请补齐地址，之后我会直接写入。'},[{writes:true}]));
+ verifyMissingAddressStop({text:'不能确认无地址直接写入，必须补齐真实地址再导入。'},[]);
+});
+test('approval binds exact payload and stable key',()=>{const a=requestFingerprint('requirements import',{body:{confirmed_rows:[{requirement_code:'A'}],idempotency_key:'one'}});requireApproval(a,new Set([a]));for(const body of [{confirmed_rows:[{requirement_code:'B'}],idempotency_key:'one'},{confirmed_rows:[{requirement_code:'A'}],idempotency_key:'two'}])assert.throws(()=>requireApproval(requestFingerprint('requirements import',{body}),new Set([a])));});
+test('CLI output flags work but unrelated scopes and raw routes are rejected',()=>{assert.equal(callKind(['--no-notice','requirements','import','--file','tasks/x.json','--dry-run','--jq','.meta'],[]).writes,false);assert.throws(()=>callKind(['auth','login','--scope','admin:read'],['requirements:read']));assert.throws(()=>callKind(['capability','run','requirements.batch_import'],[]));assert.throws(()=>callKind(['requirements','search','--base-url','http://production'],[]));});
+test('fixture contains thirty unique ordered jobs',()=>{const {mail,expected}=mailFixture('RUN');assert.equal(expected.length,30);assert.equal(new Set(expected.map(e=>e.code)).size,30);assert.equal((mail.match(/编号：/g)||[]).length,30);assert.equal(expected[0].amount,100);assert.equal(expected.at(-1).amount,129);});
+test('verification rejects dropped duration and invented occupation',()=>{const row={requirement_code:'A',requirement_type:'tutoring',preferred_mode:'online',subject_ids:[1],grade_ids:[1],compensation:{currency:'CNY',amount_min:100,amount_max:100,billing_period:'hourly'},condition:{requester_role:'parent',requester_gender:null,required_gender:'female',required_education_levels:['bachelor'],required_occupation:null},description:'学生为男生，有家教经验',address_detail:'杭州市西湖区浙江大学紫金港校区',ext:{admin_contact_phone:'13800138000'},weekly_frequency_min:1,weekly_frequency_max:1,session_duration_minutes_min:120,session_duration_minutes_max:120,time_slots:[{weekday:6,start_minute:840,end_minute:960}]};sourceRows([row],[{code:'A',amount:100}]);assert.throws(()=>sourceRows([{...row,condition:{...row.condition,requester_gender:'male'}}],[{code:'A',amount:100}]),/Invented parent gender/);const parsed={...row,ext:{...row.ext,priority:5}};sourceRows([parsed],[{code:'A',amount:100}],{parsedRows:[parsed]});assert.throws(()=>sourceRows([row],[{code:'A',amount:100}],{parsedRows:[parsed]}),/Preview dropped parsed priority/);assert.throws(()=>sourceRows([{...row,ext:{...row.ext,priority:100}}],[{code:'A',amount:100}],{parsedRows:[parsed]}),/Preview dropped parsed priority/);assert.throws(()=>sourceRows([{...row,session_duration_minutes_min:null}],[{code:'A',amount:100}]));assert.throws(()=>sourceRows([{...row,condition:{...row.condition,required_occupation:'any'}}],[{code:'A',amount:100}]));});
+test('fourteen SOP entries have known acyclic dependencies and the current real map fixture',async()=>{const s=JSON.parse(await readFile(new URL('../cases/sop-v4.json',import.meta.url)));assert.equal(s.cases.length,14);assert.equal(s.fixture.normalized_fields,21);assert.equal(s.fixture.address,GEO_FIXTURE.address);assert.equal(s.fixture.map_provider,GEO_FIXTURE.provider);assert.equal(s.cases.find(c=>c.id==='E1').subcases.length,7);const visited=new Set();for(const c of s.cases){assert.ok(c.dependsOn.every(d=>visited.has(d)));visited.add(c.id);assert.ok(['engineering','pi','mixed','host'].includes(c.type));}});
+
+test('documented readonly diagnostics are never blocked by the container guard',()=>{for(const argv of [['config','show'],['config','list'],['auth','scopes'],['auth','check','--scope','requirements:read']])assert.equal(callKind(argv,[]).writes,false);assert.throws(()=>callKind(['config','list-profiles'],[]));});
+
+test('global notice flag is added exactly once for ordinary calls and write previews',()=>{const control={profile:'sop'};for(const preview of [false,true]){const args=realArguments(control,['--no-notice','requirements','import','--data','{}','--yes','--jq','.meta'],{preview});assert.equal(args.filter(a=>a==='--no-notice').length,1);if(preview){assert.ok(args.includes('--dry-run'));assert.ok(!args.includes('--jq'));}else assert.ok(args.includes('--jq'));}const setup=realArguments(control,['config','set-profile','sop','--base-url','http://backend:8000']);assert.equal(setup.filter(a=>a==='--base-url').length,1);});
+
+test('user confirmation must be visible and include the multirow count',()=>{confirmationRequested({assistantMessages:['已预览30条，请确认。']},30);assert.throws(()=>confirmationRequested({text:'已完成。'},30));assert.throws(()=>confirmationRequested({text:'请确认。'},30));});
+
+test('report never converts incomplete cases or a selected run into full acceptance',()=>{const result={runId:'TEST',kind:'selected',status:'passed',model:'test',cases:[{id:'D3',status:'blocked',reason:'<script>alert(1)</script>'}],durationMs:1};const html=renderSopHtml(result);assert.ok(html.includes('尚不能宣称完整SOP全部通过'));assert.ok(html.includes('未取得本轮完整通过证据'));assert.ok(!html.includes('<script>'));assert.ok(html.includes('&lt;script&gt;'));assert.ok(html.includes('job=1'));});
+
+test('business artifact archives redact values and exclude secret files, links and IPC',async()=>{const root=await mkdtemp(path.join(os.tmpdir(),'sop-archive-'));try{await mkdir(path.join(root,'tasks'),{recursive:true});await writeFile(path.join(root,'tasks/receipt.json'),' {"token":"never-public","created":1}');await writeFile(path.join(root,'tasks/auth.json'),'never-public');await symlink('/etc/passwd',path.join(root,'tasks/linked.txt'));await writeFile(path.join(root,'outside.txt'),'never-public');const entries=await archiveTaskArtifacts(root,path.join(root,'evidence'));assert.equal(entries.length,1);assert.equal(entries[0].path,'artifacts/receipt.json');assert.equal(entries[0].originalSha256.length,64);assert.ok(!(await readFile(path.join(root,'evidence/artifacts/receipt.json'),'utf8')).includes('never-public'));}finally{await rm(root,{recursive:true,force:true});}});
+
+test('normalized 21-column CSV supports quoted values but refuses source-metadata columns',()=>{assert.deepEqual(csvRecords('a,b\r\n"x,y","quoted ""value""\nnext"\r\n'),[['a','b'],['x,y','quoted "value"\nnext']]);const csv=NORMALIZED_LABELS.join(',')+'\n'+['A',...Array(20).fill('')].join(',')+'\n';assert.match(normalizedLabelText('normalized.csv',csv),/^编号：A\n年级：/);assert.throws(()=>normalizedLabelText('job_sources.csv','job_code,message_id\nA,M\n'),/twenty-one/);assert.throws(()=>csvRecords('"unclosed'));});
+
+test('copied map keys are removed while unrelated test runtime configuration is preserved',()=>{const text=['APP_ENV=test',...MAP_SECRET_KEYS.map(key=>`${key}=never-public`),'HYACINTHUS_DATABASE__URL=isolated-test'].join('\n');const cleaned=withoutMapSecrets(text);assert.ok(!cleaned.includes('never-public'));assert.ok(cleaned.includes('APP_ENV=test'));assert.ok(cleaned.includes('HYACINTHUS_DATABASE__URL=isolated-test'));});
+
+test('prefix rule accepts a literal escaped hyphen while rejecting broad or wrong rules',()=>{for(const pattern of ['^SOP123-','^SOP123\\-'])assert.ok(prefixRuleMatches({pattern,priority:5,enabled:true},'SOP123'));for(const pattern of ['SOP123-','^SOP123.*','^SOP12-','^SOP123[-]','^SOP123-|.*'])assert.equal(prefixRuleMatches({pattern,priority:5,enabled:true},'SOP123'),false);assert.equal(prefixRuleMatches({pattern:'^SOP123-',priority:4,enabled:true},'SOP123'),false);assert.equal(prefixRuleMatches({pattern:'^SOP123-',priority:5,enabled:false},'SOP123'),false);});
+
+test('backend map preflight requires actual successful normalized coordinates',async()=>{let status=200,data={code:0,data:{address:GEO_FIXTURE.address,lng:120.075662,lat:30.297893}};const server=createServer((req,res)=>{const url=new URL(req.url,'http://localhost');assert.equal(url.pathname,'/api/v1/geo/geocode');assert.equal(url.searchParams.get('address'),GEO_FIXTURE.address);res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));try{const api=`http://127.0.0.1:${server.address().port}`;assert.equal((await probeBackendMap(api)).actualBackend,true);status=502;data={code:5020,data:null};await assert.rejects(probeBackendMap(api),/HTTP 502/);status=200;data={code:0,data:{}};await assert.rejects(probeBackendMap(api),/no coordinates/);}finally{await new Promise(resolve=>server.close(resolve));}});
+
+test('model keys and known secrets are redacted from structured, escaped and plain tool output',()=>{const secret='fixture-private-provider-key';const value={key:secret,apiKey:secret,idempotency_key:'stable-request',events:[{text:`printed ${secret}`},{text:JSON.stringify({provider:{key:secret}})}]};const safe=redactWithSecrets(value,[secret]);assert.ok(!JSON.stringify(safe).includes(secret));assert.equal(safe.idempotency_key,'stable-request');assert.equal(safe.key,'<redacted>');assert.equal(redactWithSecrets('printed runtime-secret',['runtime-secret']),'printed <redacted>');});
+
+test('selected runs cannot inherit a previous mail folder and within-run replay keeps its folder',()=>{const first=caseWorkspace('/tmp/test','SOP1','mail'),next=caseWorkspace('/tmp/test','SOP2','mail');assert.notEqual(first.workspace,next.workspace);assert.deepEqual(first,caseWorkspace('/tmp/test','SOP1','mail'));assert.equal(first.cwd,'/workspace/SOP1/mail');assert.throws(()=>caseWorkspace('/tmp/test','SOP1','../mail'));});
+
+test('container requests allow physical case subdirectories and reject outside aliases',async()=>{const root=await mkdtemp(path.join(os.tmpdir(),'sop-cwd-'));try{const workspace=path.join(root,'mail');await mkdir(path.join(workspace,'tasks','nested'),{recursive:true});await symlink(root,path.join(workspace,'outside'));await symlink('tasks/nested',path.join(workspace,'inside'));const control={workspace,cwd:'/workspace/RUN/mail',profile:'case'};for(const suffix of ['tasks/nested','inside']){const actual=await requestControl(control,`${control.cwd}/${suffix}`);assert.equal(actual.workspace,path.join(workspace,'tasks','nested'));assert.equal(actual.cwd,`${control.cwd}/tasks/nested`);assert.equal(actual.workspaceBoundary,workspace);}for(const cwd of ['/workspace/RUN/mail-other','/workspace/RUN/mail/..','/workspace/RUN/mail/outside','relative'])await assert.rejects(requestControl(control,cwd));}finally{await rm(root,{recursive:true,force:true});}});
+
+test('replay report counts historical rows and rejects booleans, wrong sources and false new counts',()=>{const report={source_message_id:'MAIL',already_imported:30,new_created:0,failed:0};verifyReplayReport(report,'MAIL',30);for(const change of [{already_imported:true},{already_imported:29},{source_message_id:'OTHER'},{new_created:30},{failed:1}])assert.throws(()=>verifyReplayReport({...report,...change},'MAIL',30));});
+
+test('hour schema spelling and hourly parser spelling both preserve explicit hourly semantics',()=>{for(const value of ['hour','hourly'])assert.equal(isHourlyBilling(value),true);for(const value of [null,'lesson','day','monthly','per hour',''])assert.equal(isHourlyBilling(value),false);});
+
+test('same container reuse rejects changed products, failed source runs and changed identities',()=>{const fingerprint={container_id:'container',image_id:'image',cli_hash:'cli',skills_hash:'skills'};const previous={runId:'SOP1',kind:'full',status:'passed',fingerprint};const original=Array.from({length:30},(_,i)=>({id:i+1,requirement_code:`SOP1-${i}`,created_at:'2026-10-06T00:00:00Z'}));for(const field of Object.keys(fingerprint))assert.throws(()=>verifyRunReuse(previous,{...fingerprint,[field]:'changed'},original,original,[]));assert.throws(()=>verifyRunReuse({...previous,status:'failed'},fingerprint,original,original,[]));assert.throws(()=>verifyRunReuse(previous,fingerprint,original,[{...original[0],id:999},...original.slice(1)],[]));assert.throws(()=>verifyRunReuse(previous,fingerprint,original,[{...original[0],created_at:'later'},...original.slice(1)],[]));});
+
+test('independent administrator read renews an expired session once and does not retry forbidden reads',async()=>{let logins=0,reads=0,forbidden=false;const server=createServer((req,res)=>{res.setHeader('Content-Type','application/json');if(req.url.endsWith('/auth/sessions/password')){logins++;res.end(JSON.stringify({code:0,data:{access_token:`fixture-${logins}`,principal:{user_id:1}}}));return;}reads++;if(forbidden){res.writeHead(403);res.end('{}');return;}if(reads===1){res.writeHead(401);res.end('{}');return;}assert.equal(req.headers.authorization,'Bearer fixture-2');res.end(JSON.stringify({code:0,data:{id:31}}));});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));try{const api=`http://127.0.0.1:${server.address().port}`;const reader=createAdminRequirementReader({api,admin:api,password:'fixture-only'});assert.equal((await reader(31)).id,31);assert.equal(reader.authenticationCount(),2);assert.equal(reads,2);forbidden=true;await assert.rejects(reader(31),/Independent detail read failed/);assert.equal(logins,2);assert.equal(reads,3);}finally{await new Promise(resolve=>server.close(resolve));}});
+
+test('versioned reports preserve sixteen, twenty and twenty-one field evidence',()=>{for(const [sopVersion,count] of [['sop-v1',16],['sop-v2',16],['sop-v3',20],['sop-v4',21],['sop-v5',21]]){const html=renderSopHtml({runId:'TEST',kind:'full',status:'failed',model:'test',sopVersion,cases:[],durationMs:1});assert.ok(html.includes(`${count}字段`),sopVersion);if(sopVersion!=='sop-v1')assert.ok(html.includes('真实地图服务与后端取得定位'));}});
+
+test('identity lookup is permitted only as the registered task-scoped readonly action',()=>{assert.equal(callKind(['capability','run','requirements.identity_lookup','--data','{}'],['requirements:read']).writes,false);assert.throws(()=>callKind(['capability','run','requirements.identity_lookup','--data','{}'],[]));assert.throws(()=>callKind(['capability','run','requirements.upload_run','--data','{}'],['requirements:write']));});

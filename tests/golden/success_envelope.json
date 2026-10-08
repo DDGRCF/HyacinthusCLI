@@ -1,22 +1,27 @@
 {
   "data": [
     {
-      "description": "风信子家教中心 Hyacinthus CLI 通用规则：认证、输出协议、风险确认和能力发现。",
-      "name": "hyacinthus-shared",
-      "path": "skills/hyacinthus-shared/SKILL.md",
-      "version": "0.1.15"
+      "description": "使用风信子家教中心 Hyacinthus CLI 查询、整理、解析、导入和延期家教需求，查询学校及资质，管理科目年级与需求优先级规则，读取或修改个人资料、查询后台状态；也用于 CLI 配置、授权、权限、能力发现和故障诊断。处理家教岗位邮件时先使用 tutoring-job-mail-upload 的邮件流程。",
+      "metadata": {
+        "cliHelp": "hyacinthus --help",
+        "requires": {
+          "bins": [
+            "hyacinthus"
+          ]
+        }
+      },
+      "name": "hyacinthus-cli",
+      "path": "skills/hyacinthus-cli/SKILL.md",
+      "version": "0.1.16"
     },
     {
-      "description": "风信子家教中心需求处理规则：解析、复核、目录确认和导入流程。",
-      "name": "hyacinthus-requirements",
-      "path": "skills/hyacinthus-requirements/SKILL.md",
-      "version": "0.1.15"
-    },
-    {
-      "description": "风信子家教中心 Hyacinthus CLI Agent 运行规则：链接和二维码授权交接。",
-      "name": "hyacinthus-agent-runtime",
-      "path": "skills/hyacinthus-agent-runtime/SKILL.md",
-      "version": "0.1.15"
+      "description": "检查或整理家教岗位邮件；用户要求上传邮件里的家教岗位时，选择邮件、保存来源、按21字段整理，并通过 Hyacinthus CLI 授权、复核导入和回读。包含错误CSV、进度续接和重复上传处理。",
+      "metadata": {
+        "cliHelp": "hyacinthus --help"
+      },
+      "name": "tutoring-job-mail-upload",
+      "path": "skills/tutoring-job-mail-upload/SKILL.md",
+      "version": "0.1.16"
     }
   ],
   "meta": {

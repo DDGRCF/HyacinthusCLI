@@ -3,7 +3,7 @@
     "dry_run": true,
     "request": {
       "body": {
-        "mode": "strict",
+        "mode": "lenient",
         "preset_city": null,
         "preset_contact_phone": null,
         "preset_contact_wechat": null,

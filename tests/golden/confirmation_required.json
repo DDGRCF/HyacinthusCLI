@@ -1,15 +1,30 @@
 {
   "error": {
-    "code": "CONFIRMATION_REQUIRED",
-    "detail": null,
-    "hint": "add --yes to confirm",
-    "message": "requirements import contains rows needing confirmation requires confirmation",
-    "retryable": true,
-    "risk": {
-      "action": "requirements import contains rows needing confirmation",
-      "level": "write"
+    "code": "VALIDATION_FAILED",
+    "detail": {
+      "skipped_rows": [
+        {
+          "index": 1,
+          "address_detail": null,
+          "requirement_code": null,
+          "confirmation_reasons": [
+            "DESCRIPTION_REQUIRED"
+          ],
+          "errors": [
+            "DESCRIPTION_REQUIRED"
+          ],
+          "warnings": [],
+          "title": "高一数学",
+          "location": null,
+          "geo_diagnostic": null
+        }
+      ]
     },
-    "type": "confirmation_required"
+    "hint": null,
+    "message": "parse rows contain backend errors; correct them and submit explicit confirmed_rows; --yes only authorizes the write",
+    "retryable": false,
+    "risk": null,
+    "type": "validation"
   },
   "meta": {
     "profile": null

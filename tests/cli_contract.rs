@@ -1,4 +1,4 @@
-// Change note: read complete mock HTTP requests and declare closed connections with failure diagnostics.
+// 改动说明：验证学校查询、完整来源和本地参数门禁；保留 Skills 与导入准入回归。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -486,8 +486,9 @@ fn remote_requirements_options_capability() -> &'static str {
     r#"{"id":"requirements.options","title":"需求选项","description":"远端需求选项","domain":"requirements","command":"hyacinthus requirements options","method":"GET","path":"/api/v1/agent/requirements/options","required_scopes":["requirements:parse"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":false,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","request_schema":{"type":"object","properties":{}},"response_schema":{"type":"object","properties":{}},"examples":[]}"#
 }
 
-fn remote_required_source_capability() -> &'static str {
-    r#"{"id":"claw.skills_list","title":"Claw Skills","description":"远端 Claw Skills","domain":"claw","command":"hyacinthus claw skills list","method":"GET","path":"/api/v1/agent/claw/skills","required_scopes":["claw:read"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":false,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","request_schema":{"type":"object","required":["source"],"properties":{"source":{"type":"string","minLength":1}}},"response_schema":{"type":"array","items":{"type":"object"}},"examples":[]}"#
+/// Supply a remote requirements GET capability with a required query for schema validation.
+fn remote_required_keyword_capability() -> &'static str {
+    r#"{"id":"requirements.search","title":"需求搜索","description":"远端需求搜索","domain":"requirements","command":"hyacinthus requirements search","method":"GET","path":"/api/v1/agent/requirements/search","required_scopes":["requirements:read"],"risk_level":"read","supports_dry_run":false,"supports_idempotency":false,"supports_pagination":false,"supports_file_upload":false,"min_backend_version":"0.1.0","introduced_in":"0.1.0","request_schema":{"type":"object","required":["keyword"],"properties":{"keyword":{"type":"string","minLength":1}}},"response_schema":{"type":"array","items":{"type":"object"}},"examples":[]}"#
 }
 
 fn remote_manifest_with_options_capability() -> String {
@@ -565,11 +566,11 @@ fn error_envelopes_match_golden() {
             "requirements",
             "import",
             "--data",
-            r#"{"ok":true,"data":{"rows":[{"can_auto_commit":false,"needs_confirmation":true,"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}"#,
+            r#"{"ok":true,"data":{"rows":[{"errors":["DESCRIPTION_REQUIRED"],"confirmation_reasons":["DESCRIPTION_REQUIRED"],"can_auto_commit":false,"needs_confirmation":true,"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}"#,
             "--dry-run",
         ],
         &[],
-        10,
+        2,
     );
     assert_golden("confirmation_required.json", confirmation);
 }
@@ -602,7 +603,20 @@ fn dry_run_snapshots_match_golden() {
 }
 
 #[test]
-fn requirements_parse_lenient_flag_overrides_strict_default() {
+fn requirements_parse_defaults_to_lenient_and_strict_flag_overrides() {
+    let default_value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "--instance-id",
+        "1",
+        "requirements",
+        "parse",
+        "--text",
+        "高一数学，瓯海区，周末上课",
+        "--dry-run",
+    ]);
+    assert_eq!(default_value["data"]["request"]["body"]["mode"], "lenient");
+
     let value = run_json(&[
         "--base-url",
         "http://localhost:8000",
@@ -612,11 +626,11 @@ fn requirements_parse_lenient_flag_overrides_strict_default() {
         "parse",
         "--text",
         "高一数学，瓯海区，周末上课",
-        "--lenient",
+        "--strict",
         "--dry-run",
     ]);
 
-    assert_eq!(value["data"]["request"]["body"]["mode"], "lenient");
+    assert_eq!(value["data"]["request"]["body"]["mode"], "strict");
 }
 
 #[test]
@@ -640,7 +654,7 @@ fn capability_list_returns_embedded_manifest() {
     let value = run_json(&["capability", "list"]);
 
     assert_eq!(value["ok"], true);
-    assert_eq!(value["data"]["version"], "2026-09-04");
+    assert_eq!(value["data"]["version"], "2026-10-08");
     assert!(value["data"]["capabilities"]
         .as_array()
         .unwrap()
@@ -661,16 +675,21 @@ fn capability_list_returns_embedded_manifest() {
         .unwrap()
         .iter()
         .any(|capability| capability["id"] == "admin.status"));
-    assert!(value["data"]["capabilities"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|capability| capability["id"] == "claw.status"));
-    assert!(value["data"]["capabilities"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|capability| capability["id"] == "claw.skills_list"));
+    for id in [
+        "catalog.schools.search",
+        "requirements.upload_run",
+        "requirements.geocode_run",
+        "requirements.geocode_release",
+        "requirements.batch_extend_v2",
+        "requirements.identity_lookup",
+        "requirements.preflight_v2",
+    ] {
+        assert!(value["data"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|capability| capability["id"] == id));
+    }
 }
 
 #[test]
@@ -680,7 +699,7 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 22);
+    assert_eq!(value["data"]["capability_count"], 27);
     assert_eq!(value["meta"]["source"], "embedded");
 }
 
@@ -1191,7 +1210,7 @@ fn requirements_search_prechecks_missing_scope() {
         .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
         .env("HYACINTHUS_CLIENT_TYPE", "hermes")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
-        .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:parse")
         .output()
         .expect("requirements search missing scope");
     assert_eq!(output.status.code(), Some(3));
@@ -1801,7 +1820,10 @@ fn auth_status_reports_env_overrides_without_secrets() {
         &[
             ("HYACINTHUS_BASE_URL", "http://localhost:8000/"),
             ("HYACINTHUS_AGENT_TOKEN", "secret-token"),
-            ("HYACINTHUS_AGENT_SCOPES", "requirements:parse claw:read"),
+            (
+                "HYACINTHUS_AGENT_SCOPES",
+                "requirements:parse requirements:read",
+            ),
             ("HYACINTHUS_REQUEST_ID", "trace-auth"),
             ("HYACINTHUS_RAW_API", "1"),
         ],
@@ -2218,7 +2240,7 @@ fn auth_scopes_lists_manifest_scopes() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|scope| scope["scope"] == "claw:read"));
+        .any(|scope| scope["scope"] == "requirements:read"));
 }
 
 #[test]
@@ -2241,8 +2263,16 @@ fn auth_scopes_can_filter_by_domain() {
 #[test]
 fn auth_check_scope_uses_local_precheck() {
     let value = run_json_expect_code(
-        &["auth", "check", "--scope", "requirements:parse claw:read"],
-        &[("HYACINTHUS_AGENT_SCOPES", "requirements:parse,claw:read")],
+        &[
+            "auth",
+            "check",
+            "--scope",
+            "requirements:parse requirements:read",
+        ],
+        &[(
+            "HYACINTHUS_AGENT_SCOPES",
+            "requirements:parse,requirements:read",
+        )],
         0,
     );
 
@@ -2253,7 +2283,12 @@ fn auth_check_scope_uses_local_precheck() {
 #[test]
 fn auth_check_scope_accepts_wildcard_scope() {
     let value = run_json_expect_code(
-        &["auth", "check", "--scope", "requirements:parse claw:read"],
+        &[
+            "auth",
+            "check",
+            "--scope",
+            "requirements:parse requirements:read",
+        ],
         &[("HYACINTHUS_AGENT_SCOPES", "*")],
         0,
     );
@@ -2440,6 +2475,8 @@ fn requirements_import_prechecks_missing_scope() {
             "import",
             "--data",
             r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
+            "--idempotency-key",
+            "scope-precheck",
             "--dry-run",
         ])
         .env_clear()
@@ -2495,6 +2532,8 @@ fn profile_scopes_are_used_for_precheck() {
             "import",
             "--data",
             r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
+            "--idempotency-key",
+            "profile-precheck",
             "--dry-run",
         ])
         .env_clear()
@@ -2565,6 +2604,96 @@ fn wildcard_profile_scope_allows_precheck() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// Creates a production profile without requiring a redundant backend URL argument.
+#[test]
+fn set_profile_without_base_url_uses_builtin_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = cli()
+        .args(["--no-notice", "config", "set-profile", "production"])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .env("HYACINTHUS_BASE_URL", "http://localhost:9999")
+        .output()
+        .expect("create profile with default URL");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let config: serde_json::Value = serde_json::from_slice(
+        &fs::read(dir.path().join("config.json")).expect("read saved config"),
+    )
+    .expect("parse saved config");
+    assert_eq!(
+        config["profiles"]["production"]["base_url"],
+        "https://www.fxzjjzx.cn"
+    );
+    assert_eq!(config["active_profile"], "production");
+}
+
+/// Preserves a custom backend and bound credentials when only unrelated profile fields change.
+#[test]
+fn set_profile_without_base_url_preserves_origin_and_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_agent_profile(dir.path(), "http://localhost:8000");
+    let output = cli()
+        .args([
+            "--no-notice",
+            "config",
+            "set-profile",
+            "dev",
+            "--default-format",
+            "table",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("update profile without a URL override");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON response");
+    assert_eq!(result["data"]["credentials_cleared"], false);
+    let config: serde_json::Value = serde_json::from_slice(
+        &fs::read(dir.path().join("config.json")).expect("read saved config"),
+    )
+    .expect("parse saved config");
+    let profile = &config["profiles"]["dev"];
+    assert_eq!(profile["base_url"], "http://localhost:8000");
+    assert_eq!(profile["token"], "test-token");
+    assert_eq!(profile["scopes"][0], "requirements:parse");
+    assert_eq!(profile["client_instance_id"], "hermes-wechat-a");
+    assert_eq!(profile["default_format"], "table");
+}
+
+/// Rejects explicit invalid URL overrides without mutating a previously valid profile.
+#[test]
+fn set_profile_rejects_invalid_optional_base_url_without_writing() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_agent_profile(dir.path(), "http://localhost:8000");
+    let path = dir.path().join("config.json");
+    let before = fs::read(&path).expect("read original config");
+    for invalid in ["", "ftp://localhost", "https://example.com/path"] {
+        let output = cli()
+            .args([
+                "--no-notice",
+                "config",
+                "set-profile",
+                "dev",
+                "--base-url",
+                invalid,
+            ])
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", dir.path())
+            .output()
+            .expect("reject invalid URL");
+        assert_eq!(output.status.code(), Some(2), "invalid={invalid}");
+        assert_eq!(fs::read(&path).expect("read unchanged config"), before);
+    }
 }
 
 #[test]
@@ -2756,6 +2885,402 @@ fn hermes_home_inferrs_profile_and_generates_stable_identity() {
         .starts_with("hermes-hermes-hermes-wechat-a-"));
 }
 
+/// Pi markers/config override beat stale homes while explicit profile choices remain highest priority.
+#[test]
+fn pi_auth_profile_precedence_and_home_override() {
+    let dir = tempfile::tempdir().unwrap();
+    let seeded = cli()
+        .args(["config", "set-profile", "terminal"])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .output()
+        .expect("seed active profile");
+    assert!(seeded.status.success());
+
+    let cases = [
+        ("AI_AGENT", "pi", "pi-agent", "pi"),
+        ("PI_CODING_AGENT", "true", "pi-agent", "pi"),
+        ("PI_SESSION_ID", "session-a", "pi-agent", "pi"),
+        ("PI_SESSION_ID", "session-b", "pi-agent", "pi"),
+        (
+            "PI_CODING_AGENT_DIR",
+            " /tmp/pi-worker ",
+            "pi-pi-worker",
+            "pi",
+        ),
+        ("PI_CODING_AGENT_DIR", "/tmp/codex", "pi-codex", "pi"),
+    ];
+    for (key, value, expected_profile, expected_type) in cases {
+        let output = cli()
+            .args(["auth", "status"])
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", dir.path())
+            .env("HOME", dir.path())
+            .env("CODEX_HOME", "/tmp/stale-codex")
+            .env(key, value)
+            .output()
+            .expect("Pi auth status");
+        assert!(output.status.success(), "marker {key}={value}");
+        let data: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(data["data"]["profile"], expected_profile);
+        assert_eq!(data["data"]["client_type"], expected_type);
+    }
+
+    for (args, expected_profile, expected_type) in [
+        (vec!["auth", "status"], "hermes-manual", "hermes"),
+        (
+            vec!["--profile", "codex-manual", "auth", "status"],
+            "codex-manual",
+            "codex",
+        ),
+    ] {
+        let output = cli()
+            .args(args)
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", dir.path())
+            .env("HYACINTHUS_PROFILE", "hermes-manual")
+            .env("AI_AGENT", "pi")
+            .env("PI_CODING_AGENT_DIR", "/tmp/pi-worker")
+            .env("CODEX_HOME", "/tmp/stale-codex")
+            .output()
+            .expect("explicit profile precedence");
+        assert!(output.status.success());
+        let data: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(data["data"]["profile"], expected_profile);
+        assert_eq!(data["data"]["client_type"], expected_type);
+    }
+
+    for (key, value) in [
+        ("AI_AGENT", "api"),
+        ("PI_CODING_AGENT", "false"),
+        ("PI_SESSION_ID", "   "),
+        ("PI_CODING_AGENT_DIR", "   "),
+        ("NULLCLAW_HOME", "/tmp/nullclaw"),
+    ] {
+        let output = cli()
+            .args(["auth", "status"])
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", dir.path())
+            .env("HOME", dir.path())
+            .env(key, value)
+            .output()
+            .expect("non-Pi auth status");
+        assert!(output.status.success());
+        let data: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(data["data"]["profile"], "terminal");
+        assert_eq!(data["data"]["client_type"], "hyacinthus-cli");
+    }
+}
+
+/// Pi's short name must match a whole token, not api/spider substrings or numeric suffixes.
+#[test]
+fn profile_client_type_inference_requires_pi_token_boundaries() {
+    for (name, expected_type) in [
+        ("pi", "pi"),
+        ("PI-agent", "pi"),
+        ("worker_pi", "pi"),
+        ("worker.pi.agent", "pi"),
+        ("pi-codex", "pi"),
+        ("api-prod", "hyacinthus-cli"),
+        ("spider", "hyacinthus-cli"),
+        ("pipeline", "hyacinthus-cli"),
+        ("pi2", "hyacinthus-cli"),
+        ("2pi", "hyacinthus-cli"),
+        ("nullclaw-default", "hyacinthus-cli"),
+        ("hermes-local", "hermes"),
+        ("codex-local", "codex"),
+        ("claude-local", "claude"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let output = cli()
+            .args(["config", "set-profile", name])
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", dir.path())
+            .output()
+            .expect("infer profile client type");
+        assert!(output.status.success());
+        let config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.path().join("config.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            config["profiles"][name]["client_type"], expected_type,
+            "{name}"
+        );
+    }
+}
+
+/// Explicit NullClaw configuration is rejected without rewriting the legacy identity or token.
+#[test]
+fn nullclaw_client_type_and_legacy_config_are_unsupported() {
+    let dir = tempfile::tempdir().unwrap();
+    for client_type in ["nullclaw", "NullClaw", "picoclaw", "claw"] {
+        let output = cli()
+            .args([
+                "config",
+                "set-profile",
+                "legacy",
+                "--client-type",
+                client_type,
+            ])
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", dir.path())
+            .output()
+            .expect("reject unsupported client type");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("unsupported client_type"));
+        assert!(!dir.path().join("config.json").exists());
+    }
+    let legacy = serde_json::json!({
+        "active_profile": "legacy",
+        "profiles": {
+            "legacy": {
+                "name": "legacy",
+                "base_url": "http://localhost:8000",
+                "client_instance_id": "nullclaw-existing",
+                "client_display_name": "NullClaw",
+                "client_type": "nullclaw",
+                "default_instance_id": null,
+                "default_format": "json",
+                "token": "hat_legacy",
+                "scopes": ["requirements:parse"],
+                "raw_api_enabled": false
+            }
+        }
+    })
+    .to_string();
+    fs::write(dir.path().join("config.json"), &legacy).unwrap();
+    for args in [
+        vec!["auth", "status"],
+        vec!["config", "show", "--profile", "legacy"],
+        vec!["config", "set-profile", "legacy", "--client-type", "pi"],
+    ] {
+        let output = cli()
+            .args(args)
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", dir.path())
+            .env("AI_AGENT", "pi")
+            .output()
+            .expect("reject legacy NullClaw config");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("unsupported client_type: nullclaw")
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("config.json")).unwrap(),
+            legacy
+        );
+    }
+}
+
+/// Echo a generated Pi identity through create/poll/ack and verify saved-token HTTP reuse.
+fn mock_pi_auth_delivery() -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind Pi auth server");
+    let addr = listener.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let mut identity = serde_json::Value::Null;
+        for (index, expected_path) in [
+            "POST /api/v1/agent/auth/sessions HTTP/1.1",
+            "POST /api/v1/agent/auth/sessions/sess-pi/poll HTTP/1.1",
+            "POST /api/v1/agent/auth/sessions/sess-pi/ack HTTP/1.1",
+            "GET /api/v1/agent/auth/tokens/current HTTP/1.1",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_mock_request(&mut stream);
+            assert!(request.contains(*expected_path));
+            let data = if index == 2 {
+                serde_json::json!({
+                    "session_id": "sess-pi",
+                    "revision": 3,
+                    "status": "acknowledged",
+                    "result": "acknowledged"
+                })
+            } else if index == 3 {
+                let headers = request.to_ascii_lowercase();
+                assert!(headers.contains("x-agent-key: hat_pi_saved"));
+                assert!(headers.contains("x-agent-client-type: pi"));
+                assert!(headers.contains(&format!(
+                    "x-agent-client-instance: {}",
+                    identity["client_instance_id"].as_str().unwrap()
+                )));
+                serde_json::json!({
+                    "token_id": "token-pi",
+                    "client_instance_id": identity["client_instance_id"],
+                    "client_type": "pi",
+                    "scopes": ["requirements:parse"],
+                    "state": "active",
+                    "expires_at": "2027-05-10T00:00:00Z",
+                    "created_at": "2026-05-10T00:00:00Z",
+                    "updated_at": "2026-05-10T00:00:00Z",
+                    "revoked_at": null,
+                    "revocation_actor_kind": null,
+                    "revocation_reason": null
+                })
+            } else {
+                if index == 0 {
+                    identity =
+                        serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+                    assert_eq!(identity["client_type"], "pi");
+                    assert_eq!(identity["client_display_name"], "Pi (pi-agent)");
+                    assert!(identity["client_instance_id"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("pi-pi-agent-"));
+                }
+                let mut data = serde_json::json!({
+                    "session_id": "sess-pi",
+                    "revision": index + 1,
+                    "client_instance_id": identity["client_instance_id"],
+                    "client_display_name": identity["client_display_name"],
+                    "client_type": "pi",
+                    "required_scopes": ["requirements:parse"],
+                    "expires_at": "2027-05-10T00:00:00Z",
+                    "poll_interval_seconds": 0
+                });
+                if index == 0 {
+                    data["device_code"] =
+                        serde_json::json!("device-code-0123456789abcdef0123456789abcdef");
+                    data["user_code"] = serde_json::json!("PI-1234");
+                    data["verification_uri"] = serde_json::json!("http://auth/verify");
+                    data["authorize_url"] =
+                        serde_json::json!("http://auth/verify?user_code=PI-1234");
+                    data["qr_code_text"] = data["authorize_url"].clone();
+                    data["expires_in_seconds"] = serde_json::json!(600);
+                } else {
+                    data["status"] = serde_json::json!("approved");
+                    data["scopes"] = serde_json::json!(["requirements:parse"]);
+                    data["access_token"] = serde_json::json!("hat_pi_saved");
+                    data["token_type"] = serde_json::json!("agent");
+                }
+                data
+            };
+            let body =
+                serde_json::json!({"code": 0, "message": "success", "data": data}).to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+    });
+    (format!("http://{addr}"), handle)
+}
+
+/// Separate Pi login/wait processes retain identity and token binding despite changing shell sessions.
+#[test]
+fn pi_auth_saves_stable_identity_and_reuses_bound_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let (base_url, handle) = mock_pi_auth_delivery();
+    let login = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "auth",
+            "login",
+            "--scope",
+            "requirements:parse",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .env("HOME", dir.path())
+        .env("AI_AGENT", "pi")
+        .env("CODEX_HOME", "/tmp/stale-codex")
+        .env("PI_SESSION_ID", "session-a")
+        .output()
+        .expect("Pi login");
+    assert!(
+        login.status.success(),
+        "{}",
+        String::from_utf8_lossy(&login.stdout)
+    );
+    let first: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.path().join("config.json")).unwrap()).unwrap();
+    let identity = first["profiles"]["pi-agent"]["client_instance_id"].clone();
+    assert!(first["profiles"]["pi-agent"]["token"].is_null());
+
+    // Wrong identity must fail locally before consuming the server's next poll response.
+    let wrong = cli()
+        .args(["auth", "wait", "--poll-limit", "1"])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .env("AI_AGENT", "pi")
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "pi-wrong-instance")
+        .output()
+        .expect("reject wrong Pi identity");
+    assert_eq!(wrong.status.code(), Some(2));
+
+    let wait = cli()
+        .args(["auth", "wait", "--poll-limit", "1"])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .env("PI_CODING_AGENT", "true")
+        .env("PI_SESSION_ID", "session-b")
+        .env("CODEX_HOME", "/tmp/another-codex")
+        .output()
+        .expect("separate Pi auth wait");
+    assert!(
+        wait.status.success(),
+        "{}",
+        String::from_utf8_lossy(&wait.stdout)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&wait.stdout).unwrap();
+    assert_eq!(result["data"]["token_saved"], true);
+    assert_eq!(result["data"]["acknowledgement_pending"], false);
+    let saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.path().join("config.json")).unwrap()).unwrap();
+    assert_eq!(
+        saved["profiles"]["pi-agent"]["client_instance_id"],
+        identity
+    );
+    assert_eq!(saved["profiles"]["pi-agent"]["token"], "hat_pi_saved");
+    assert_eq!(
+        saved["profiles"]["pi-agent"]["scopes"],
+        serde_json::json!(["requirements:parse"])
+    );
+
+    let reused = cli()
+        .args(["auth", "token", "status"])
+        .env_clear()
+        .env("HYACINTHUS_CONFIG_DIR", dir.path())
+        .env("PI_SESSION_ID", "session-c")
+        .output()
+        .expect("reuse Pi token");
+    assert!(
+        reused.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reused.stdout)
+    );
+    handle.join().expect("Pi auth contract server");
+
+    for (key, value) in [
+        ("HYACINTHUS_CLIENT_INSTANCE_ID", "pi-other-instance"),
+        ("HYACINTHUS_CLIENT_TYPE", "codex"),
+        ("HYACINTHUS_BASE_URL", "http://localhost:1"),
+    ] {
+        let output = cli()
+            .args(["auth", "status"])
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", dir.path())
+            .env("AI_AGENT", "pi")
+            .env(key, value)
+            .output()
+            .expect("Pi token binding check");
+        assert!(output.status.success());
+        let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(status["data"]["token_present"], false);
+        assert!(status["data"]["scopes"].is_null());
+    }
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(
+            &fs::read_to_string(dir.path().join("config.json")).unwrap()
+        )
+        .unwrap(),
+        saved
+    );
+}
+
 #[test]
 fn set_profile_does_not_persist_global_output_format() {
     let dir = tempfile::tempdir().unwrap();
@@ -2865,7 +3390,8 @@ fn auth_token_status_uses_top_level_error_code() {
     assert_eq!(value["error"]["code"], "AUTH_AGENT_INVALID");
     let config_text = fs::read_to_string(dir.path().join("config.json")).expect("read config");
     let config_value: serde_json::Value = serde_json::from_str(&config_text).expect("config JSON");
-    assert!(config_value["profiles"]["dev"]["token"].is_null());
+    assert_eq!(config_value["profiles"]["dev"]["token"], "test-token");
+    assert_eq!(value["error"]["detail"]["credentials_cleared"], false);
 }
 
 /// Default logout must revoke the current token remotely before clearing local credentials.
@@ -2939,9 +3465,9 @@ fn auth_token_revoke_uses_canonical_current_route() {
     assert_eq!(value["data"]["remote_revoked"], true);
 }
 
-/// A terminal current credential is already unusable and must be removed locally without retry loops.
+/// An invalid submitted binding is not evidence that the actual credential is terminal.
 #[test]
-fn auth_token_revoke_clears_terminal_agent_credential() {
+fn auth_token_revoke_retains_credential_when_binding_is_invalid() {
     let base_url = mock_once_status(
         401,
         r#"{"code":4010,"error_code":"AUTH_AGENT_INVALID","message":"expired","data":null}"#,
@@ -2959,13 +3485,13 @@ fn auth_token_revoke_clears_terminal_agent_credential() {
         .output()
         .expect("terminal Agent token revoke");
 
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(3));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("revoke JSON");
-    assert_eq!(value["data"]["remote_revoked"], false);
-    assert_eq!(value["data"]["remote_terminal"], true);
+    assert_eq!(value["error"]["code"], "AUTH_AGENT_INVALID");
+    assert_eq!(value["error"]["detail"]["local_credentials_retained"], true);
     let config_text = fs::read_to_string(dir.path().join("config.json")).expect("read config");
     let config_value: serde_json::Value = serde_json::from_str(&config_text).expect("config JSON");
-    assert!(config_value["profiles"]["dev"]["token"].is_null());
+    assert_eq!(config_value["profiles"]["dev"]["token"], "test-token");
 }
 
 /// Failed current-token revoke must preserve both the backend code and local credentials.
@@ -3127,90 +3653,6 @@ fn auth_logout_rejects_unknown_profile() {
     let value: serde_json::Value = serde_json::from_slice(&logout.stdout).expect("json stdout");
     assert_eq!(value["error"]["type"], "validation");
     assert_eq!(value["error"]["message"], "unknown profile: missing");
-}
-
-#[test]
-fn claw_status_uses_agent_status_endpoint() {
-    let base_url = mock_once(
-        r#"{"code":0,"message":"success","data":{"provider":"picoclaw","control_plane":"broker","activated_instance_count":2,"current_observation_count":1,"attention_instance_count":1,"unobserved_instance_count":0,"provider_profile_count":1}}"#,
-    );
-    let output = cli()
-        .args(["--base-url", &base_url, "claw", "status"])
-        .env_clear()
-        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
-        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
-        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
-        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
-        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
-        .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
-        .output()
-        .expect("claw status");
-    assert!(
-        output.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["data"]["control_plane"], "broker");
-    assert_eq!(value["meta"]["capability"], "claw.status");
-}
-
-#[test]
-fn claw_status_prechecks_missing_scope() {
-    let base_url = mock_public_sequence(vec![
-        r#"{"code":0,"message":"success","data":{"session_id":"sess-claw-scope","revision":1,"device_code":"device-code-0123456789abcdef0123456789abcdef","client_instance_id":"hermes-wechat-a","client_display_name":"Hermes WeChat A","client_type":"hermes","user_code":"CLAW-1234","verification_uri":"http://auth/verify","authorize_url":"http://auth/verify?user_code=CLAW-1234","qr_code_text":"http://auth/verify?user_code=CLAW-1234","required_scopes":["claw:read"],"expires_at":"2026-05-10T00:00:00Z","expires_in_seconds":600,"poll_interval_seconds":0}}"#,
-    ]);
-    let output = cli()
-        .args(["--base-url", &base_url, "claw", "status"])
-        .env_clear()
-        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
-        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
-        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
-        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
-        .env("HYACINTHUS_AGENT_SCOPES", "admin:read")
-        .output()
-        .expect("claw status missing scope");
-    assert_eq!(output.status.code(), Some(3));
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["error"]["type"], "auth_required");
-    assert_eq!(value["error"]["detail"]["missing_scopes"][0], "claw:read");
-    assert_eq!(value["error"]["detail"]["session_id"], "sess-claw-scope");
-}
-
-#[test]
-fn claw_skills_list_uses_agent_endpoint() {
-    let base_url = mock_once(
-        r#"{"code":0,"message":"success","data":[{"id":1,"name":"hyacinthus-requirements","display_name":"需求导入","description":"parse/import","version":"0.1.0","source":"builtin","is_featured":true,"tags":["requirements"],"config_schema":null}]}"#,
-    );
-    let output = cli()
-        .args([
-            "--base-url",
-            &base_url,
-            "claw",
-            "skills",
-            "list",
-            "--source",
-            "builtin",
-        ])
-        .env_clear()
-        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
-        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
-        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
-        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
-        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
-        .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
-        .output()
-        .expect("claw skills list");
-    assert!(
-        output.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["data"][0]["name"], "hyacinthus-requirements");
-    assert_eq!(value["meta"]["capability"], "claw.skills_list");
 }
 
 #[test]
@@ -3706,7 +4148,7 @@ fn jq_filters_success_envelope() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value, "2026-09-04");
+    assert_eq!(value, "2026-10-08");
 }
 
 #[test]
@@ -3759,20 +4201,25 @@ fn skills_are_discoverable_from_cli() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|skill| skill["name"] == "hyacinthus-requirements"));
+        .any(|skill| skill["name"] == "hyacinthus-cli"));
     assert!(value["data"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|skill| skill["name"] == "hyacinthus-agent-runtime"));
+        .any(|skill| skill["name"] == "hyacinthus-cli"));
+    assert!(value["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|skill| skill["name"] == "tutoring-job-mail-upload"));
 }
 
 #[test]
 fn skill_content_is_rendered_by_name() {
-    let value = run_json(&["skills", "show", "hyacinthus-shared"]);
+    let value = run_json(&["skills", "read", "hyacinthus-cli", "--json"]);
 
     assert_eq!(value["ok"], true);
-    assert_eq!(value["data"]["name"], "hyacinthus-shared");
+    assert_eq!(value["data"]["name"], "hyacinthus-cli");
     assert!(value["data"]["content"]
         .as_str()
         .unwrap_or("")
@@ -3782,17 +4229,57 @@ fn skill_content_is_rendered_by_name() {
 /// 共享需求导入 skill 必须暴露当前字段名，供所有 agent 统一使用。
 #[test]
 fn requirements_skill_content_declares_current_batch_fields() {
-    let value = run_json(&["skills", "show", "hyacinthus-requirements"]);
+    let value = run_json(&[
+        "skills",
+        "read",
+        "hyacinthus-cli/references/requirements-format.md",
+        "--json",
+    ]);
     let content = value["data"]["content"].as_str().unwrap_or("");
 
     assert_eq!(value["ok"], true);
-    assert_eq!(value["data"]["name"], "hyacinthus-requirements");
-    assert!(content.contains("需求方性别"));
-    assert!(content.contains("老师性别要求"));
-    assert!(content.contains("老师学历要求"));
-    assert!(content.contains("老师学校要求"));
-    assert!(content.contains("老师资格要求"));
-    assert!(content.contains("不要再使用旧字段 `性别`"));
+    assert_eq!(value["data"]["name"], "hyacinthus-cli");
+    for field in [
+        "编号",
+        "年级",
+        "科目",
+        "需求方角色",
+        "需求方性别",
+        "需求方学历",
+        "要求的性别",
+        "要求的学历",
+        "要求的学校",
+        "学校的资质",
+        "要求的资格",
+        "薪酬",
+        "时间",
+        "地址",
+        "要求",
+        "备注",
+    ] {
+        assert!(content.contains(&format!("`{field}`")), "missing {field}");
+    }
+    assert!(content.contains("输入可以是任意列数、任意顺序"));
+}
+
+/// 邮件 Skill 必须区分中文整理文件、授权交接和 confirmed JSON 写入契约。
+#[test]
+fn tutoring_mail_skill_preserves_agent_workflow_contract() {
+    let value = run_json(&["skills", "read", "tutoring-job-mail-upload", "--json"]);
+    let content = value["data"]["content"].as_str().unwrap();
+    assert_eq!(value["ok"], true);
+    for rule in [
+        "已保存的邮件原文",
+        "../hyacinthus-cli/references/auth.md",
+        "confirmed_rows",
+        "requirements search",
+        "errors.csv",
+        "不得假称已访问真实邮箱",
+        "原幂等键",
+    ] {
+        assert!(content.contains(rule), "missing mail workflow rule: {rule}");
+    }
+    assert!(!content.contains("只有 CLI schema 明确支持全部16字段时才继续"));
 }
 
 #[test]
@@ -3816,10 +4303,14 @@ fn skills_export_and_check_round_trip() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["data"]["exported"].as_array().unwrap().len(), 3);
+    assert_eq!(value["data"]["exported"].as_array().unwrap().len(), 2);
     assert!(export_dir
         .path()
-        .join("hyacinthus-shared")
+        .join("tutoring-job-mail-upload/SKILL.md")
+        .exists());
+    assert!(export_dir
+        .path()
+        .join("hyacinthus-cli")
         .join("SKILL.md")
         .exists());
 
@@ -3875,8 +4366,8 @@ fn skills_check_reports_missing_files() {
 }
 
 #[test]
-fn import_parse_output_blocks_confirmation_rows_without_yes() {
-    let parse_output = r#"{"ok":true,"data":{"rows":[{"can_auto_commit":false,"needs_confirmation":true,"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}"#;
+fn import_parse_output_blocks_review_rows_even_with_yes() {
+    let parse_output = r#"{"ok":true,"data":{"rows":[{"errors":["DESCRIPTION_REQUIRED"],"confirmation_reasons":["DESCRIPTION_REQUIRED"],"can_auto_commit":false,"needs_confirmation":true,"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}"#;
     let output = cli()
         .args([
             "--base-url",
@@ -3887,6 +4378,9 @@ fn import_parse_output_blocks_confirmation_rows_without_yes() {
             "import",
             "--data",
             parse_output,
+            "--idempotency-key",
+            "review-rejected",
+            "--yes",
             "--dry-run",
         ])
         .env_clear()
@@ -3896,9 +4390,12 @@ fn import_parse_output_blocks_confirmation_rows_without_yes() {
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .output()
         .expect("import confirmation rows");
-    assert_eq!(output.status.code(), Some(10));
+    assert_eq!(output.status.code(), Some(2));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value["error"]["type"], "confirmation_required");
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("explicit confirmed_rows"));
 }
 
 #[test]
@@ -3913,6 +4410,8 @@ fn requirements_import_real_execution_requires_yes() {
             "import",
             "--data",
             r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
+            "--idempotency-key",
+            "write-confirmation",
         ])
         .env_clear()
         .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
@@ -3934,7 +4433,7 @@ fn requirements_import_real_execution_requires_yes() {
 #[test]
 fn requirements_import_yes_posts_to_backend() {
     let base_url = mock_once(
-        r#"{"code":0,"message":"success","data":{"created":1,"updated":0,"failed":0,"created_ids":[1],"updated_ids":[],"failed_rows":[]}}"#,
+        r#"{"code":0,"message":"success","data":{"created":1,"updated":0,"failed":0,"created_ids":[1],"updated_ids":[],"failed_rows":[],"idempotency_key":"yes-post","idempotent_replay":false}}"#,
     );
     let output = cli()
         .args([
@@ -3982,6 +4481,8 @@ fn import_dry_run_reports_idempotency_key() {
             "import",
             "--data",
             r#"[{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}]"#,
+            "--idempotency-key",
+            "stable-dry-run",
             "--dry-run",
         ])
         .env_clear()
@@ -4001,14 +4502,14 @@ fn import_dry_run_reports_idempotency_key() {
     let key = value["data"]["request"]["body"]["idempotency_key"]
         .as_str()
         .unwrap_or("");
-    assert!(key.starts_with("cli-"));
+    assert_eq!(key, "stable-dry-run");
 }
 
 #[test]
 fn requirements_import_raw_dry_run_allows_session_token_without_instance_id() {
     let base_url = mock_sequence(vec![
         r#"{"code":0,"message":"success","data":{"job_id":"job-1","status":"queued"}}"#,
-        r#"{"code":0,"message":"success","data":{"job_id":"job-1","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-1","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"errors":[],"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学"}}]}}}"#,
     ]);
     let output = cli()
         .args([
@@ -4054,7 +4555,7 @@ fn requirements_import_raw_dry_run_allows_session_token_without_instance_id() {
 fn requirements_import_raw_dry_run_preserves_catalog_ids_from_parse() {
     let base_url = mock_sequence(vec![
         r#"{"code":0,"message":"success","data":{"job_id":"job-2","status":"queued"}}"#,
-        r#"{"code":0,"message":"success","data":{"job_id":"job-2","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"初一-英语-男","description":"初一英语男生，需要辅导","subject_ids":[123],"grade_ids":[456],"geo_diagnostic":null,"weekly_frequency_min":1,"time_slots":null,"compensation":{"amount_min":"160","amount_max":"200"}}}]}}}"#,
+        r#"{"code":0,"message":"success","data":{"job_id":"job-2","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"errors":[],"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"requirement_type":"tutoring","title":"初一-英语-男","description":"初一英语男生，需要辅导","subject_ids":[123],"grade_ids":[456],"geo_diagnostic":null,"weekly_frequency_min":1,"time_slots":null,"compensation":{"amount_min":"160","amount_max":"200"}}}]}}}"#,
     ]);
     let output = cli()
         .args([
@@ -4157,7 +4658,7 @@ fn requirements_import_accepts_data_only_parse_output() {
         "requirements",
         "import",
         "--data",
-        r#"{"rows":[{"can_auto_commit":true,"needs_confirmation":false,"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学","compensation":{"amount_min":"90","amount_max":"1.2E2"},"time_slots":null}}],"summary":{"total":1}}"#,
+        r#"{"rows":[{"errors":[],"confirmation_reasons":[],"can_auto_commit":true,"needs_confirmation":false,"parsed":{"requirement_type":"tutoring","title":"高一数学","description":"高一数学","compensation":{"amount_min":"90","amount_max":"1.2E2"},"time_slots":null}}],"summary":{"total":1}}"#,
         "--idempotency-key",
         "parse-output-key",
         "--dry-run",
@@ -4408,7 +4909,7 @@ fn capability_run_get_validates_params_against_schema() {
     let body = Box::leak(
         format!(
             r#"{{"code":0,"message":"success","data":{}}}"#,
-            remote_required_source_capability()
+            remote_required_keyword_capability()
         )
         .into_boxed_str(),
     );
@@ -4419,7 +4920,7 @@ fn capability_run_get_validates_params_against_schema() {
             &base_url,
             "capability",
             "run",
-            "claw.skills_list",
+            "requirements.search",
             "--remote",
             "--dry-run",
         ])
@@ -4429,7 +4930,7 @@ fn capability_run_get_validates_params_against_schema() {
         .env("HYACINTHUS_CLIENT_TYPE", "hermes")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
-        .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:read")
         .output()
         .expect("remote capability required params");
     assert_eq!(output.status.code(), Some(2));
@@ -4437,7 +4938,7 @@ fn capability_run_get_validates_params_against_schema() {
     assert!(value["error"]["message"]
         .as_str()
         .unwrap_or("")
-        .contains("$.source is required"));
+        .contains("$.keyword is required"));
 }
 
 #[test]
@@ -4445,7 +4946,7 @@ fn capability_run_get_accepts_params_for_schema_validation() {
     let body = Box::leak(
         format!(
             r#"{{"code":0,"message":"success","data":{}}}"#,
-            remote_required_source_capability()
+            remote_required_keyword_capability()
         )
         .into_boxed_str(),
     );
@@ -4456,10 +4957,10 @@ fn capability_run_get_accepts_params_for_schema_validation() {
             &base_url,
             "capability",
             "run",
-            "claw.skills_list",
+            "requirements.search",
             "--remote",
             "--params",
-            r#"{"source":"builtin"}"#,
+            r#"{"keyword":"math"}"#,
             "--dry-run",
         ])
         .env_clear()
@@ -4468,7 +4969,7 @@ fn capability_run_get_accepts_params_for_schema_validation() {
         .env("HYACINTHUS_CLIENT_TYPE", "hermes")
         .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
         .env("HYACINTHUS_AGENT_TOKEN", "test-token")
-        .env("HYACINTHUS_AGENT_SCOPES", "claw:read")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:read")
         .output()
         .expect("remote capability params");
     assert!(
@@ -4480,7 +4981,7 @@ fn capability_run_get_accepts_params_for_schema_validation() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
     assert_eq!(
         value["data"]["request"]["path"],
-        "/api/v1/agent/claw/skills?source=builtin"
+        "/api/v1/agent/requirements/search?keyword=math"
     );
 }
 
@@ -4605,7 +5106,12 @@ fn requirements_parse_reports_cancelled_job() {
         value["error"]["message"],
         "requirement parse job was cancelled"
     );
-    assert_eq!(value["error"]["detail"]["status"], "cancelled");
+    assert_eq!(value["error"]["detail"]["cause"]["status"], "cancelled");
+    assert_eq!(value["error"]["detail"]["job_id"], "job-cancelled");
+    assert!(value["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .contains("requirements parse-job job-cancelled"));
 }
 
 /// Saved profile credentials must never follow a one-off backend origin override.
@@ -4903,9 +5409,9 @@ fn requirements_extend_rejects_invalid_deadline_locally() {
 fn requirements_import_projects_complete_backend_parser_draft() {
     let draft = serde_json::json!({
         "related_user_id": null, "requirement_code": "AUDIT-1", "target_role_id": null,
-        "requirement_type": null, "subject_ids": null, "grade_ids": null, "title": null,
+        "requirement_type": "tutoring", "subject_ids": null, "grade_ids": null, "title": null,
         "description": "audited parser row", "raw_text": null, "compensation": null,
-        "condition": null, "preferred_mode": null, "class_time_text": null,
+        "condition": null, "preferred_mode": "hybrid", "class_time_text": null,
         "weekly_frequency_min": 1, "weekly_frequency_max": 2,
         "session_duration_minutes_min": 60, "session_duration_minutes_max": 90,
         "time_slots": null, "address_detail": null, "location": null,
@@ -4913,10 +5419,18 @@ fn requirements_import_projects_complete_backend_parser_draft() {
         "ext": {"source": "audit"}
     });
     let source = serde_json::json!({"rows": [{"can_auto_commit": true,
-        "needs_confirmation": false, "parsed": draft}]})
+        "needs_confirmation": false, "errors": [], "confirmation_reasons": [], "parsed": draft}]})
     .to_string();
     let value = run_json_expect_code(
-        &["requirements", "import", "--data", &source, "--dry-run"],
+        &[
+            "requirements",
+            "import",
+            "--data",
+            &source,
+            "--idempotency-key",
+            "complete-draft",
+            "--dry-run",
+        ],
         &[
             ("HYACINTHUS_AGENT_TOKEN", "test-token"),
             ("HYACINTHUS_AGENT_SCOPES", "requirements:write"),
@@ -4925,16 +5439,16 @@ fn requirements_import_projects_complete_backend_parser_draft() {
     );
     let row = &value["data"]["request"]["body"]["confirmed_rows"][0];
     assert!(row.get("geo_diagnostic").is_none());
-    assert!(row.get("requirement_type").is_none());
-    assert!(row.get("preferred_mode").is_none());
+    assert_eq!(row["requirement_type"], "tutoring");
+    assert_eq!(row["preferred_mode"], "hybrid");
     assert_eq!(row["time_slots"], serde_json::json!([]));
     assert_eq!(row["weekly_frequency_max"], 2);
     assert_eq!(row["ext"]["source"], "audit");
 }
 
-/// Prevents a successful dry-run for unknown fields and invalid import deadlines.
+/// Dry-run previews business fields unchanged; only the backend may reject them on submission.
 #[test]
-fn requirements_import_rejects_invalid_closed_payload_before_http() {
+fn requirements_import_previews_business_fields_without_local_rules() {
     for field in [
         serde_json::json!({"geo_diagnostic": null}),
         serde_json::json!({"expires_at": "2027-02-30T12:00:00Z"}),
@@ -4946,14 +5460,22 @@ fn requirements_import_rejects_invalid_closed_payload_before_http() {
             .extend(field.as_object().unwrap().clone());
         let source = serde_json::json!({"confirmed_rows": [row]}).to_string();
         let value = run_json_expect_code(
-            &["requirements", "import", "--data", &source, "--dry-run"],
+            &[
+                "requirements",
+                "import",
+                "--data",
+                &source,
+                "--idempotency-key",
+                "closed-payload",
+                "--dry-run",
+            ],
             &[
                 ("HYACINTHUS_AGENT_TOKEN", "test-token"),
                 ("HYACINTHUS_AGENT_SCOPES", "requirements:write"),
             ],
-            2,
+            0,
         );
-        assert_eq!(value["ok"], false);
+        assert_eq!(value["data"]["request"]["body"]["confirmed_rows"][0], row);
     }
 }
 
@@ -4984,9 +5506,17 @@ fn requirements_search_rejects_oversized_page_locally() {
 /// Preserves exact decimal strings through parser output conversion into HTTP import payloads.
 #[test]
 fn requirements_import_preserves_decimal_precision() {
-    let source = r#"{"rows":[{"can_auto_commit":true,"needs_confirmation":false,"parsed":{"description":"audit","compensation":{"amount_min":"123456789012345.123456789"},"geo_diagnostic":null}}]}"#;
+    let source = r#"{"rows":[{"errors":[],"confirmation_reasons":[],"can_auto_commit":true,"needs_confirmation":false,"parsed":{"description":"audit","compensation":{"amount_min":"123456789012345.123456789"},"geo_diagnostic":null}}]}"#;
     let value = run_json_expect_code(
-        &["requirements", "import", "--data", source, "--dry-run"],
+        &[
+            "requirements",
+            "import",
+            "--data",
+            source,
+            "--idempotency-key",
+            "decimal-precision",
+            "--dry-run",
+        ],
         &[
             ("HYACINTHUS_AGENT_TOKEN", "test-token"),
             ("HYACINTHUS_AGENT_SCOPES", "requirements:write"),
@@ -5122,13 +5652,12 @@ fn user_update_accepts_complete_education_contract() {
     }
 }
 
-/// Accepts the backend's successful null key when generic import omits optional replay protection.
+/// Rejects generic imports without a stable key locally; no HTTP fallback is permitted.
 #[test]
-fn capability_import_accepts_nullable_idempotency_key_after_write() {
-    let base_url = mock_once_expect_request(
-        r#"{"code":0,"message":"success","data":{"created":1,"updated":0,"failed":0,"created_ids":[1],"updated_ids":[],"failed_rows":[],"idempotency_key":null,"idempotent_replay":false}}"#,
-        "POST /api/v1/agent/requirements/batch-import HTTP/1.1",
-    );
+fn capability_import_rejects_missing_idempotency_key_before_write() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
     let value = run_json_expect_code(
         &[
             "--base-url",
@@ -5144,10 +5673,1206 @@ fn capability_import_accepts_nullable_idempotency_key_after_write() {
             ("HYACINTHUS_AGENT_TOKEN", "test-token"),
             ("HYACINTHUS_AGENT_SCOPES", "requirements:write"),
         ],
+        2,
+    );
+    assert_eq!(value["error"]["code"], "VALIDATION_FAILED");
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
+/// Run against a listener that must receive no requests, making local failure observable.
+fn assert_local_failure(args: &[&str], expected_code: i32) -> serde_json::Value {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let mut full_args = vec!["--base-url", base_url.as_str()];
+    full_args.extend_from_slice(args);
+    let value = run_json_expect_code(
+        &full_args,
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "*"),
+        ],
+        expected_code,
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    value
+}
+
+/// Record and verify every request; optional final delivery sabotage reproduces a path race.
+fn mock_recorded(
+    responses: Vec<(u16, String)>,
+    sabotage: Option<std::path::PathBuf>,
+) -> (String, thread::JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let count = responses.len();
+    let handle = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for (index, (status, body)) in responses.into_iter().enumerate() {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                .unwrap();
+            requests.push(read_mock_request(&mut stream));
+            if index + 1 == count {
+                if let Some(path) = &sabotage {
+                    fs::create_dir(path).unwrap();
+                }
+            }
+            write!(stream, "HTTP/1.1 {status} mock\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}", body.len(), body).unwrap();
+        }
+        requests
+    });
+    (base_url, handle)
+}
+
+/// Build a school response containing all source versions and reviewed file digests.
+fn school_catalog_response() -> serde_json::Value {
+    let data_files = [
+        "official_schools.csv",
+        "school_tiers.csv",
+        "school_aliases.csv",
+        "school_sources.csv",
+        "school_supplements.csv",
+        "school_tier_mappings.csv",
+    ]
+    .map(|file| serde_json::json!({"file": file, "sha256": "a".repeat(64)}));
+    serde_json::json!({"code":0,"message":"success","data":{
+        "items":[{"id":1,"school_code":"10335","name":"浙江大学","aliases":["浙大"],
+            "province":"浙江省","city":"杭州市","education_level":"本科",
+            "is_985":true,"is_211":true,"is_double_first_class":true,"match_kind":"alias",
+            "source_url":"https://www.moe.gov.cn/schools","source_version":"2026-06-17",
+            "synced_at":"2026-10-08T00:00:00Z","qualification_evidence":[
+                {"qualification":"985","listed_name":"浙江大学","source_url":"https://www.moe.gov.cn/985","source_version":"2006"}
+            ]}],
+        "total":1,"skip":0,"limit":20,"has_more":false,
+        "catalog":{"coverage":"普通高校及单独收录的军校","sources":[
+            {"kind":"official_schools","url":"https://www.moe.gov.cn/schools","version":"2026-06-17"},
+            {"kind":"985","url":"https://www.moe.gov.cn/985","version":"2006"},
+            {"kind":"211","url":"https://www.moe.gov.cn/211","version":"2005"},
+            {"kind":"double_first_class","url":"https://www.moe.gov.cn/double","version":"2022"}
+        ],"data_files":data_files}
+    }})
+}
+
+/// Preserve every source field in both the CLI envelope and a requested output file.
+#[test]
+fn school_query_uses_read_scope_and_preserves_source_snapshot() {
+    let fixture = school_catalog_response();
+    let (base_url, server) = mock_recorded(vec![(200, fixture.to_string())], None);
+    let output_dir = tempfile::tempdir().unwrap();
+    let output_file = output_dir.path().join("schools.json");
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base_url,
+            "requirements",
+            "catalog",
+            "schools",
+            "--keyword",
+            " 浙大 ",
+            "--exact",
+            "--province",
+            " 浙江省 ",
+            "--tier",
+            "211",
+            "--id",
+            "1",
+            "--output",
+            output_file.to_str().unwrap(),
+        ],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:read"),
+        ],
         0,
     );
-    assert_eq!(value["data"]["created"], 1);
-    assert_eq!(value["data"]["idempotency_key"], serde_json::Value::Null);
+    assert_eq!(value["data"], fixture["data"]);
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(output_file).unwrap()).unwrap();
+    assert_eq!(saved, fixture["data"]);
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert!(request.starts_with("GET /api/v1/agent/catalog/schools?"));
+    for parameter in [
+        "keyword=%E6%B5%99%E5%A4%A7",
+        "exact=true",
+        "school_id=1",
+        "tier=211",
+        "limit=20",
+        "skip=0",
+    ] {
+        assert!(
+            request.contains(parameter),
+            "missing {parameter}: {request}"
+        );
+    }
+    assert!(request.to_lowercase().contains("x-agent-key: test-token"));
+}
+
+/// Reject invalid school filters locally before contacting the backend.
+#[test]
+fn school_query_rejects_invalid_filters_before_http() {
+    for flags in [
+        vec!["--exact"],
+        vec!["--id", "0"],
+        vec!["--limit", "0"],
+        vec!["--limit", "101"],
+        vec!["--keyword", " "],
+        vec!["--province", " "],
+    ] {
+        let mut args = vec!["requirements", "catalog", "schools"];
+        args.extend(flags);
+        assert_local_failure(&args, 2);
+    }
+}
+
+/// Incomplete provenance is a contract error even when the backend reports success.
+#[test]
+fn school_query_rejects_missing_source_evidence() {
+    for field in ["sources", "data_files"] {
+        let mut fixture = school_catalog_response();
+        fixture["data"]["catalog"][field] = serde_json::json!([]);
+        let (base_url, server) = mock_recorded(vec![(200, fixture.to_string())], None);
+        let value = run_json_expect_code(
+            &[
+                "--base-url",
+                &base_url,
+                "requirements",
+                "catalog",
+                "schools",
+            ],
+            &[
+                ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+                ("HYACINTHUS_AGENT_SCOPES", "requirements:read"),
+            ],
+            1,
+        );
+        assert_eq!(value["error"]["code"], "RESPONSE_SCHEMA_MISMATCH");
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+}
+
+/// Native offset pagination cannot be confused with generic continuation-token collection.
+#[test]
+fn school_page_all_is_rejected_before_http() {
+    let value = assert_local_failure(
+        &["capability", "run", "catalog.schools.search", "--page-all"],
+        2,
+    );
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("does not support --page-all"));
+}
+
+/// Never describe a cursor page as complete when the backend omitted its continuation token.
+#[test]
+fn page_all_rejects_missing_continuation_token() {
+    let (base_url,server)=mock_recorded(vec![(200,serde_json::json!({"code":0,"message":"success","data":{"items":[1],"total":2,"has_more":true}}).to_string())],None);
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base_url,
+            "api",
+            "GET",
+            "/api/v1/agent/items",
+            "--page-all",
+        ],
+        &[
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+            ("HYACINTHUS_RAW_API", "1"),
+        ],
+        1,
+    );
+    assert_eq!(value["error"]["code"], "PAGINATION_TOKEN_MISSING");
+    assert_eq!(server.join().unwrap().len(), 1);
+}
+
+/// A successful task fixture with the actual parse response schema shape.
+fn successful_job(job_id: &str) -> String {
+    serde_json::json!({"code": 0, "message": "success", "data": {"job_id": job_id, "status": "succeeded", "result": {"summary": {"auto_commit_ready": 0, "needs_confirmation": 0}, "rows": []}}}).to_string()
+}
+
+/// All import entrypoints reject absent, empty, padded and wrong-type keys before HTTP.
+#[test]
+fn imports_require_explicit_nonempty_stable_keys() {
+    for payload in [
+        r#"{"confirmed_rows":[{"description":"audit"}]}"#,
+        r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":""}"#,
+        r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":"   "}"#,
+        r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":" padded "}"#,
+        r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":"left "}"#,
+        r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":null}"#,
+        r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":1}"#,
+    ] {
+        assert_local_failure(
+            &["requirements", "import", "--data", payload, "--dry-run"],
+            2,
+        );
+        assert_local_failure(
+            &[
+                "capability",
+                "run",
+                "requirements.batch_import",
+                "--data",
+                payload,
+                "--dry-run",
+            ],
+            2,
+        );
+    }
+    for key in [None, Some(""), Some(" "), Some(" padded "), Some("left ")] {
+        let mut direct = vec![
+            "requirements",
+            "import",
+            "--data",
+            r#"{"confirmed_rows":[{"description":"audit"}]}"#,
+            "--dry-run",
+        ];
+        if let Some(key) = key {
+            direct.extend(["--idempotency-key", key]);
+        }
+        assert_local_failure(&direct, 2);
+        let mut args = vec!["requirements", "import-raw", "--text", "audit", "--dry-run"];
+        if let Some(key) = key {
+            args.extend(["--idempotency-key", key]);
+        }
+        assert_local_failure(&args, 2);
+    }
+}
+
+/// Identical dual-source keys are preserved; conflicts and explicit empty JSON cannot be overwritten.
+#[test]
+fn import_key_sources_must_agree_and_dry_runs_are_stable() {
+    for key in ["other", "", " "] {
+        let payload = serde_json::json!({"confirmed_rows": [{"description": "audit"}], "idempotency_key": key}).to_string();
+        assert_local_failure(
+            &[
+                "requirements",
+                "import",
+                "--data",
+                &payload,
+                "--idempotency-key",
+                "stable",
+                "--dry-run",
+            ],
+            2,
+        );
+    }
+    for _ in 0..2 {
+        let value = run_json_expect_code(
+            &[
+                "requirements",
+                "import",
+                "--data",
+                r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":"stable"}"#,
+                "--idempotency-key",
+                "stable",
+                "--dry-run",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            0,
+        );
+        assert_eq!(
+            value["data"]["request"]["body"]["idempotency_key"],
+            "stable"
+        );
+    }
+}
+
+/// JSON parse business state is preserved unchanged unless an explicit conflicting flag is supplied.
+#[test]
+fn parse_json_preserves_mode_and_rejects_business_flag_overrides() {
+    for command in ["parse", "import-raw"] {
+        for flags in [
+            vec!["--strict"],
+            vec!["--lenient"],
+            vec!["--preset-city", "北京"],
+            vec!["--preset-contact-phone", "123"],
+            vec!["--preset-contact-wechat", "audit"],
+        ] {
+            let mut args = vec![
+                "requirements",
+                command,
+                "--data",
+                r#"{"raw_text":"audit","mode":"strict"}"#,
+                "--dry-run",
+            ];
+            if command == "import-raw" {
+                args.extend(["--idempotency-key", "stable"]);
+            }
+            args.extend(flags);
+            assert_local_failure(&args, 2);
+        }
+    }
+    for mode in [Some("strict"), Some("lenient"), None] {
+        let mut payload = serde_json::json!({"raw_text": "audit"});
+        if let Some(mode) = mode {
+            payload["mode"] = serde_json::json!(mode);
+        }
+        let value = run_json_expect_code(
+            &[
+                "requirements",
+                "parse",
+                "--data",
+                &payload.to_string(),
+                "--dry-run",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            0,
+        );
+        assert_eq!(value["data"]["request"]["body"], payload);
+    }
+    assert_local_failure(
+        &[
+            "--instance-id",
+            "2",
+            "requirements",
+            "parse",
+            "--data",
+            r#"{"instance_id":1,"raw_text":"audit"}"#,
+            "--dry-run",
+        ],
+        2,
+    );
+}
+
+/// Preserve opaque business fields in preview and never authorize rows containing backend errors.
+#[test]
+fn import_preserves_business_fields_and_backend_errors() {
+    for parsed in [
+        serde_json::json!({"description":"audit","requirement_type":"alien"}),
+        serde_json::json!({"description":"audit","preferred_mode":"telepathy"}),
+        serde_json::json!({"description":"audit","requirement_type":null}),
+        serde_json::json!({"description":"audit","preferred_mode":null}),
+    ] {
+        let source = serde_json::json!({"rows":[{"parsed":parsed,"errors":[],"confirmation_reasons":[],"can_auto_commit":true,"needs_confirmation":false}]}).to_string();
+        let value = run_json_expect_code(
+            &[
+                "requirements",
+                "import",
+                "--data",
+                &source,
+                "--idempotency-key",
+                "review",
+                "--yes",
+                "--dry-run",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            0,
+        );
+        assert_eq!(
+            value["data"]["request"]["body"]["confirmed_rows"][0],
+            parsed
+        );
+        let confirmed =
+            serde_json::json!({"confirmed_rows":[parsed],"idempotency_key":"review"}).to_string();
+        let value = run_json_expect_code(
+            &[
+                "requirements",
+                "import",
+                "--data",
+                &confirmed,
+                "--yes",
+                "--dry-run",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            0,
+        );
+        assert_eq!(
+            value["data"]["request"]["body"]["confirmed_rows"][0],
+            parsed
+        );
+    }
+    let source = r#"{"rows":[{"parsed":{"description":"audit"},"can_auto_commit":false,"needs_confirmation":true,"confirmation_reasons":["unreviewed"],"errors":["unreviewed"]}]}"#;
+    assert_local_failure(
+        &[
+            "requirements",
+            "import",
+            "--data",
+            source,
+            "--idempotency-key",
+            "review",
+            "--yes",
+            "--dry-run",
+        ],
+        2,
+    );
+    let value = run_json_expect_code(
+        &[
+            "requirements",
+            "import",
+            "--data",
+            r#"{"confirmed_rows":[{"description":"reviewed","requirement_type":"general"}],"idempotency_key":"reviewed"}"#,
+            "--dry-run",
+        ],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        0,
+    );
+    assert_eq!(
+        value["data"]["request"]["body"]["confirmed_rows"][0]["requirement_type"],
+        "general"
+    );
+}
+
+/// Missing/contradictory verdict fields are protocol errors rather than skipped or successful rows.
+#[test]
+fn import_rejects_missing_or_contradictory_backend_verdict_fields() {
+    let valid = serde_json::json!({"parsed":{"description":"audit"},"errors":[],"confirmation_reasons":[],"can_auto_commit":true,"needs_confirmation":false});
+    let mut cases = Vec::new();
+    for field in [
+        "parsed",
+        "errors",
+        "can_auto_commit",
+        "needs_confirmation",
+        "confirmation_reasons",
+    ] {
+        let mut row = valid.clone();
+        row.as_object_mut().unwrap().remove(field);
+        cases.push(row);
+    }
+    for (field, value) in [
+        ("errors", serde_json::json!(["BACKEND_ERROR"])),
+        ("can_auto_commit", serde_json::json!(false)),
+        ("needs_confirmation", serde_json::json!(true)),
+        ("confirmation_reasons", serde_json::json!(["GEO_WARNING"])),
+    ] {
+        let mut row = valid.clone();
+        row[field] = value;
+        cases.push(row);
+    }
+    for row in cases {
+        let source = serde_json::json!({"rows":[row]}).to_string();
+        let value = run_json_expect_code(
+            &[
+                "requirements",
+                "import",
+                "--data",
+                &source,
+                "--idempotency-key",
+                "protocol-key",
+                "--yes",
+                "--dry-run",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            1,
+        );
+        assert_eq!(value["error"]["code"], "PARSE_ROW_PROTOCOL_ERROR");
+    }
+}
+
+/// Malformed submit responses retain the key/result as unknown outcome, never claiming a commit.
+#[test]
+fn import_rejects_incomplete_or_mismatched_submit_response() {
+    for response in [
+        serde_json::json!({}),
+        serde_json::json!({"created":1,"updated":0,"failed":0,"created_ids":[1],"updated_ids":[],"failed_rows":[],"idempotency_key":"wrong-key","idempotent_replay":false}),
+    ] {
+        let body = serde_json::json!({"code":0,"message":"success","data":response}).to_string();
+        let (base, handle) = mock_recorded(vec![(200, body)], None);
+        let value = run_json_expect_code(
+            &[
+                "--base-url",
+                &base,
+                "requirements",
+                "import",
+                "--data",
+                r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":"protocol-key"}"#,
+                "--yes",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            1,
+        );
+        assert_eq!(value["error"]["detail"]["outcome"], "unknown");
+        assert_eq!(value["error"]["detail"]["idempotency_key"], "protocol-key");
+        assert_eq!(value["error"]["detail"]["backend_result"], response);
+        assert!(value["error"]["detail"].get("committed").is_none());
+        assert_eq!(handle.join().unwrap().len(), 1);
+    }
+}
+
+/// Both parse commands remove the confidence option from help and reject every supplied threshold.
+#[test]
+fn batch_parse_commands_no_longer_accept_min_confidence() {
+    for subcommand in ["parse", "import-raw"] {
+        let help = cli()
+            .args(["requirements", subcommand, "--help"])
+            .output()
+            .unwrap();
+        assert!(help.status.success());
+        assert!(!String::from_utf8_lossy(&help.stdout).contains("--min-confidence"));
+        for confidence in ["0", "0.8", "1", "-0.01", "1.01", "NaN", "inf"] {
+            let output = cli()
+                .args([
+                    "requirements",
+                    subcommand,
+                    "--text",
+                    "audit",
+                    &format!("--min-confidence={confidence}"),
+                    "--dry-run",
+                ])
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(2));
+            assert!(String::from_utf8_lossy(&output.stderr)
+                .contains("unexpected argument '--min-confidence'"));
+        }
+    }
+}
+
+/// Return backend summaries, warnings and decisions unchanged without requiring confidence fields.
+#[test]
+fn requirements_parse_preserves_backend_decisions_without_confidence() {
+    let result = serde_json::json!({
+        "summary": {"auto_commit_ready": 1, "needs_confirmation": 1},
+        "rows": [
+            {"can_auto_commit": true, "needs_confirmation": false,
+             "confirmation_reasons": [], "errors": [],
+             "warnings": ["GEO_LOW_CONFIDENCE", "SUBJECT_NAME_UNMAPPED:科创编程"],
+             "parsed": {"description": "approved"}},
+            {"can_auto_commit": false, "needs_confirmation": true,
+             "confirmation_reasons": ["DESCRIPTION_REQUIRED"],
+             "errors": ["DESCRIPTION_REQUIRED"], "warnings": [], "parsed": {}}
+        ]
+    });
+    let body = serde_json::json!({"code": 0, "message": "success", "data": {
+        "job_id": "job-decisions", "status": "succeeded", "result": result
+    }})
+    .to_string();
+    let (base, handle) = mock_recorded(vec![
+        (200, r#"{"code":0,"message":"success","data":{"job_id":"job-decisions","status":"queued"}}"#.to_string()),
+        (200, body),
+    ], None);
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base,
+            "requirements",
+            "parse",
+            "--text",
+            "audit",
+        ],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        0,
+    );
+    assert_eq!(value["data"], result);
+    assert!(value["data"].get("confidence").is_none());
+    assert!(value["data"]["rows"][0].get("confidence").is_none());
+    assert_eq!(handle.join().unwrap().len(), 2);
+}
+
+/// Backend-approved warnings and descriptive unknown strings never become implicit review rules.
+#[test]
+fn import_parse_output_warnings_do_not_block_or_rewrite_business_fields() {
+    let parsed = serde_json::json!({
+        "description": "audit", "condition": {"requester_gender": "未明确"},
+        "compensation": {"amount_min": "1.2E2", "billing_period": "未知计费方式"}
+    });
+    // Warnings remain non-blocking; verdict fields must still obey the backend protocol.
+    let source = serde_json::json!({"rows": [{
+        "can_auto_commit": true, "errors": [], "needs_confirmation": false,
+        "confirmation_reasons": [],
+        "warnings": ["GEO_LOW_CONFIDENCE", "GRADE_NAME_UNMAPPED:小升初"], "parsed": parsed
+    }]})
+    .to_string();
+    let value = run_json_expect_code(
+        &[
+            "requirements",
+            "import",
+            "--data",
+            &source,
+            "--idempotency-key",
+            "warning-key",
+            "--dry-run",
+        ],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        0,
+    );
+    assert_eq!(
+        value["data"]["request"]["body"]["confirmed_rows"],
+        serde_json::json!([parsed])
+    );
+    assert_eq!(
+        value["data"]["request"]["body"]["idempotency_key"],
+        "warning-key"
+    );
+}
+
+/// Split solely by backend admission/errors while preserving dry-run, stable keys and write authorization.
+#[test]
+fn import_raw_backend_decisions_preserve_warning_rows_and_write_controls() {
+    let parsed = serde_json::json!({
+        "description": "approved with warnings",
+        "condition": {"requester_gender": "未明确", "confidence": 0.0},
+        "compensation": {"amount_min": "90", "amount_max": "1.2E2"}
+    });
+    let result = serde_json::json!({
+        "summary": {"auto_commit_ready": 1, "needs_confirmation": 3},
+        "rows": [
+            {"can_auto_commit": true, "needs_confirmation": false, "confirmation_reasons": [],
+             "errors": [], "warnings": ["GEO_LOW_CONFIDENCE", "SUBJECT_NAME_UNMAPPED:科创编程"],
+             "parsed": parsed},
+            {"can_auto_commit": false, "needs_confirmation": true,
+             "confirmation_reasons": ["DESCRIPTION_REQUIRED"], "errors": ["DESCRIPTION_REQUIRED"],
+             "warnings": ["GEO_UNAVAILABLE"], "parsed": {"requirement_type": "unknown"}},
+            {"can_auto_commit": false, "needs_confirmation": true, "confirmation_reasons": ["BACKEND_ERROR"],
+             "errors": ["BACKEND_ERROR"], "warnings": [], "parsed": {"description": "blocked by errors"}},
+            {"can_auto_commit": false, "needs_confirmation": true, "confirmation_reasons": ["BACKEND_ERROR_2"],
+             "errors": ["BACKEND_ERROR_2"], "warnings": [], "parsed": {"description": "not admitted by backend"}}
+        ]
+    });
+    for (flag, expected_code, request_count) in [("--dry-run", 0, 2), ("--yes", 0, 3), ("", 10, 2)]
+    {
+        let body = serde_json::json!({"code": 0, "message": "success", "data": {
+            "job_id": "job-warnings", "status": "succeeded", "result": result
+        }})
+        .to_string();
+        let mut responses = vec![
+            (200, r#"{"code":0,"message":"success","data":{"job_id":"job-warnings","status":"queued"}}"#.to_string()),
+            (200, body),
+        ];
+        if flag == "--yes" {
+            responses.push((200, r#"{"code":0,"message":"success","data":{"created":1,"updated":0,"failed":0,"created_ids":[8],"updated_ids":[],"failed_rows":[],"idempotency_key":"warning-key","idempotent_replay":false}}"#.to_string()));
+        }
+        let (base, handle) = mock_recorded(responses, None);
+        let mut args = vec![
+            "--base-url",
+            &base,
+            "requirements",
+            "import-raw",
+            "--text",
+            "audit",
+            "--idempotency-key",
+            "warning-key",
+        ];
+        if !flag.is_empty() {
+            args.push(flag);
+        }
+        let value = run_json_expect_code(
+            &args,
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            expected_code,
+        );
+        let requests = handle.join().unwrap();
+        assert_eq!(requests.len(), request_count);
+        if flag.is_empty() {
+            assert_eq!(value["error"]["code"], "CONFIRMATION_REQUIRED");
+            assert_eq!(value["error"]["detail"]["idempotency_key"], "warning-key");
+            continue;
+        }
+        assert_eq!(value["data"]["auto_commit_rows"], 1);
+        assert_eq!(value["data"]["skipped"], 3);
+        assert_eq!(value["data"]["parse_summary"], result["summary"]);
+        assert_eq!(
+            value["data"]["warnings"][0]["warnings"],
+            result["rows"][0]["warnings"]
+        );
+        assert_eq!(
+            value["data"]["skipped_rows"][0]["errors"],
+            result["rows"][1]["errors"]
+        );
+        assert_eq!(
+            value["data"]["skipped_rows"][0]["warnings"],
+            result["rows"][1]["warnings"]
+        );
+        assert_eq!(
+            value["data"]["skipped_rows"][1]["errors"],
+            serde_json::json!(["BACKEND_ERROR"])
+        );
+        for row in value["data"]["skipped_rows"].as_array().unwrap() {
+            assert!(row.get("confidence").is_none());
+        }
+        let payload = if flag == "--dry-run" {
+            value["data"]["import_summary"]["request"]["body"].clone()
+        } else {
+            assert!(requests[2].starts_with("POST /api/v1/agent/requirements/batch-import "));
+            serde_json::from_str(requests[2].split("\r\n\r\n").nth(1).unwrap()).unwrap()
+        };
+        assert_eq!(payload["confirmed_rows"], serde_json::json!([parsed]));
+        assert_eq!(payload["idempotency_key"], "warning-key");
+        assert_eq!(value["data"]["dry_run"], flag == "--dry-run");
+        assert_eq!(value["meta"]["committed"], flag == "--yes");
+    }
+}
+
+/// Predictable jq syntax and output path failures never submit an import or parse task.
+#[test]
+fn delivery_preflight_blocks_requests_for_invalid_jq_and_output_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing_parent = dir.path().join("missing/result.json");
+    for args in [
+        vec!["--jq", ".data | select(.)"],
+        vec!["--jq", ".data["],
+        vec!["--output", dir.path().to_str().unwrap()],
+        vec!["--output", missing_parent.to_str().unwrap()],
+    ] {
+        let mut command = vec![
+            "requirements",
+            "import",
+            "--data",
+            r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":"delivery"}"#,
+            "--yes",
+        ];
+        command.extend(args);
+        assert_local_failure(&command, 2);
+    }
+}
+
+/// The official resume command only GETs the selected existing task, even in retry/terminal states.
+#[test]
+fn parse_job_recovery_is_a_single_read_only_get() {
+    for status in [
+        "queued",
+        "retry_wait",
+        "running",
+        "failed",
+        "cancelled",
+        "succeeded",
+    ] {
+        let body = if status == "succeeded" {
+            successful_job("job-resume")
+        } else {
+            serde_json::json!({"code":0,"message":"success","data":{"job_id":"job-resume","status":status}}).to_string()
+        };
+        let (base, handle) = mock_recorded(vec![(200, body)], None);
+        let value = run_json_expect_code(
+            &[
+                "--base-url",
+                &base,
+                "requirements",
+                "parse-job",
+                "job-resume",
+                "--instance-id",
+                "3",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            0,
+        );
+        assert_eq!(value["data"]["job_id"], "job-resume");
+        assert_eq!(value["data"]["status"], status);
+        let requests = handle.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].starts_with(
+            "GET /api/v1/agent/requirements/batch-parse-jobs/job-resume?instance_id=3 "
+        ));
+    }
+}
+
+/// Failed polling preserves the created handle, original phase, and explicit same-job GET operation.
+#[test]
+fn parse_job_poll_failures_preserve_identity_and_recovery() {
+    for (status, state) in [
+        (
+            503,
+            serde_json::json!({"error_code":"UNAVAILABLE","message":"service unavailable"}),
+        ),
+        (
+            200,
+            serde_json::json!({"code":0,"message":"success","data":{"job_id":"other-job","status":"running"}}),
+        ),
+        (
+            200,
+            serde_json::json!({"code":0,"message":"success","data":{"job_id":"job-original","status":"unknown"}}),
+        ),
+        (
+            200,
+            serde_json::json!({"code":0,"message":"success","data":{"job_id":"job-original","status":"failed","error":null}}),
+        ),
+        (
+            200,
+            serde_json::json!({"code":0,"message":"success","data":{"job_id":"job-original","status":"succeeded"}}),
+        ),
+        (
+            200,
+            serde_json::json!({"code":0,"message":"success","data":{"job_id":"job-original","status":"succeeded","result":{"rows":"invalid"}}}),
+        ),
+        (
+            200,
+            serde_json::json!({"code":0,"message":"success","data":{"job_id":"job-original","status":"failed","error":{"code":"PARSE_FAILED","detail":"bad input"}}}),
+        ),
+    ] {
+        let (base, handle) = mock_recorded(
+            vec![
+                (
+                    200,
+                    r#"{"code":0,"message":"success","data":{"job_id":"job-original","status":"queued"}}"#.to_string(),
+                ),
+                (status, state.to_string()),
+            ],
+            None,
+        );
+        let value = run_json_expect_code(
+            &[
+                "--base-url",
+                &base,
+                "requirements",
+                "parse",
+                "--text",
+                "audit",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            1,
+        );
+        assert_eq!(value["error"]["detail"]["job_id"], "job-original");
+        assert_eq!(value["error"]["detail"]["phase"], "poll");
+        assert!(value["error"]["detail"]["recovery_command"]
+            .as_str()
+            .unwrap()
+            .contains("requirements parse-job job-original"));
+        assert!(value["error"]["hint"].as_str().unwrap().contains("do not"));
+        let requests = handle.join().unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with("POST "))
+                .count(),
+            1
+        );
+        assert!(requests[1]
+            .starts_with("GET /api/v1/agent/requirements/batch-parse-jobs/job-original "));
+    }
+}
+
+/// Recovery itself refuses foreign task IDs or absent result objects without another POST.
+#[test]
+fn parse_job_recovery_rejects_mismatched_response_identity() {
+    for body in [
+        successful_job("foreign-job"),
+        r#"{"code":0,"message":"success","data":{"job_id":"job-original","status":"succeeded"}}"#
+            .to_string(),
+    ] {
+        let (base, handle) = mock_recorded(vec![(200, body)], None);
+        let value = run_json_expect_code(
+            &[
+                "--base-url",
+                &base,
+                "requirements",
+                "parse-job",
+                "job-original",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            1,
+        );
+        assert_eq!(value["error"]["detail"]["job_id"], "job-original");
+        assert_eq!(value["error"]["detail"]["phase"], "query_validation");
+        assert!(handle.join().unwrap()[0].starts_with("GET "));
+    }
+}
+
+/// A data-dependent jq failure retains the successful write and its original stable retry key.
+#[test]
+fn import_jq_delivery_failure_preserves_committed_result_and_key() {
+    for generic in [false, true] {
+        let (base,handle)=mock_recorded(vec![(200,r#"{"code":0,"message":"success","data":{"created":1,"updated":0,"failed":0,"created_ids":[9],"updated_ids":[],"failed_rows":[],"idempotency_key":"committed-key","idempotent_replay":false}}"#.to_string())],None);
+        let mut args = vec!["--base-url", &base, "--jq", ".data.absent"];
+        if generic {
+            args.extend(["capability", "run", "requirements.batch_import"]);
+        } else {
+            args.extend(["requirements", "import"]);
+        }
+        args.extend([
+            "--data",
+            r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":"committed-key"}"#,
+            "--yes",
+        ]);
+        let value = run_json_expect_code(&args, &[("HYACINTHUS_AGENT_TOKEN", "test-token")], 2);
+        assert_eq!(value["error"]["detail"]["committed"], true);
+        assert_eq!(
+            value["error"]["detail"]["result"]["created_ids"],
+            serde_json::json!([9])
+        );
+        assert_eq!(value["error"]["detail"]["idempotency_key"], "committed-key");
+        assert_eq!(handle.join().unwrap().len(), 1);
+    }
+}
+
+/// A filesystem race after a committed write returns the preserved result rather than false failure.
+#[test]
+fn import_output_path_race_preserves_committed_result_and_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("result.json");
+    let (base,handle)=mock_recorded(vec![(200,r#"{"code":0,"message":"success","data":{"created":1,"updated":0,"failed":0,"created_ids":[9],"updated_ids":[],"failed_rows":[],"idempotency_key":"path-race","idempotent_replay":false}}"#.to_string())],Some(path.clone()));
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base,
+            "requirements",
+            "import",
+            "--data",
+            r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":"path-race"}"#,
+            "--yes",
+            "--output",
+            path.to_str().unwrap(),
+        ],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        2,
+    );
+    assert_eq!(value["error"]["detail"]["committed"], true);
+    assert_eq!(value["error"]["detail"]["idempotency_key"], "path-race");
+    assert_eq!(value["error"]["detail"]["result"]["created"], 1);
+    assert_eq!(handle.join().unwrap().len(), 1);
+}
+
+/// Environment credentials are shown as env ownership and never inherit saved token scopes.
+#[test]
+fn auth_token_status_reports_selected_environment_source() {
+    let (base, handle) = mock_recorded(vec![(200, r#"{"code":0,"message":"success","data":{"token_id":"token-env","client_instance_id":"hermes-wechat-a","client_type":"hermes","scopes":["requirements:write"],"state":"active","expires_at":"2026-09-30T00:00:00Z","created_at":"2026-08-31T00:00:00Z","updated_at":"2026-08-31T00:00:00Z","revoked_at":null,"revocation_actor_kind":null,"revocation_reason":null}}"#.to_string())], None);
+    let dir = tempfile::tempdir().unwrap();
+    seed_agent_profile(dir.path(), &base);
+    for args in [vec!["auth", "token", "status"], vec!["auth", "status"]] {
+        let output = cli()
+            .args(args)
+            .env_clear()
+            .env("HYACINTHUS_CONFIG_DIR", dir.path())
+            .env("HYACINTHUS_AGENT_TOKEN", "environment-token")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let source = if value["meta"]["command"] == "auth token status" {
+            &value["meta"]["token_source"]
+        } else {
+            &value["data"]["token_source"]
+        };
+        assert_eq!(source, "env");
+        if value["meta"]["command"] == "auth status" {
+            assert!(value["data"]["scope_count"].is_null());
+        }
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("environment-token"));
+    }
+    let requests = handle.join().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0]
+        .to_ascii_lowercase()
+        .contains("x-agent-key: environment-token"));
+}
+
+/// Explicit malformed env tokens fail locally instead of falling back to a valid saved token.
+#[test]
+fn invalid_environment_token_never_falls_back_to_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    seed_agent_profile(dir.path(), "http://localhost:8000");
+    for token in ["", "   ", "invalid\nheader"] {
+        for args in [
+            vec!["auth", "status"],
+            vec!["auth", "token", "status"],
+            vec!["requirements", "parse", "--text", "audit", "--dry-run"],
+        ] {
+            let output = cli()
+                .args(args)
+                .env_clear()
+                .env("HYACINTHUS_CONFIG_DIR", dir.path())
+                .env("HYACINTHUS_AGENT_TOKEN", token)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(2));
+            let saved: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(dir.path().join("config.json")).unwrap())
+                    .unwrap();
+            assert_eq!(saved["profiles"]["dev"]["token"], "test-token");
+        }
+    }
+}
+
+/// Binding/access validation failures are not proof of deletion: keep the selected saved token.
+#[test]
+fn invalid_binding_revoke_and_logout_preserve_local_credential() {
+    for code in [
+        "AUTH_AGENT_INVALID",
+        "AUTH_ACCESS_INVALID",
+        "AGENT_INSTANCE_MISMATCH",
+    ] {
+        for logout in [false, true] {
+            let body=serde_json::json!({"code":4010,"error_code":code,"message":"binding rejected","data":null}).to_string();
+            let (base, handle) = mock_recorded(vec![(401, body)], None);
+            let dir = tempfile::tempdir().unwrap();
+            seed_agent_profile(dir.path(), &base);
+            let args = if logout {
+                vec!["auth", "logout"]
+            } else {
+                vec!["auth", "token", "revoke"]
+            };
+            let output = cli()
+                .args(args)
+                .env_clear()
+                .env("HYACINTHUS_CONFIG_DIR", dir.path())
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(3),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(value["error"]["code"], code);
+            let saved: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(dir.path().join("config.json")).unwrap())
+                    .unwrap();
+            assert_eq!(saved["profiles"]["dev"]["token"], "test-token");
+            assert_eq!(handle.join().unwrap().len(), 1);
+        }
+    }
+}
+
+/// Backend-approved opaque fields reach submission; partial backend failures are preserved unchanged.
+#[test]
+fn import_raw_unknown_enums_reach_backend_submission() {
+    for field in ["requirement_type", "preferred_mode"] {
+        let mut parsed = serde_json::json!({"description":"audit"});
+        parsed[field] = serde_json::json!("unknown");
+        let body = serde_json::json!({"code":0,"message":"success","data":{"job_id":"job-review","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"errors":[],"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":parsed}]}}}).to_string();
+        let (base, handle) = mock_recorded(vec![
+            (200,r#"{"code":0,"message":"success","data":{"job_id":"job-review","status":"queued"}}"#.to_string()),
+            (200,body),
+            (200,r#"{"code":0,"message":"success","data":{"created":0,"updated":0,"failed":1,"created_ids":[],"updated_ids":[],"failed_rows":[{"row":1,"error":"BACKEND_INVALID_FIELD"}],"idempotency_key":"review-key","idempotent_replay":false}}"#.to_string())
+        ],None);
+        let value = run_json_expect_code(
+            &[
+                "--base-url",
+                &base,
+                "requirements",
+                "import-raw",
+                "--text",
+                "audit",
+                "--idempotency-key",
+                "review-key",
+                "--yes",
+            ],
+            &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+            0,
+        );
+        assert_eq!(value["data"]["import_summary"]["failed"], 1);
+        assert_eq!(
+            value["data"]["import_summary"]["failed_rows"][0]["error"],
+            "BACKEND_INVALID_FIELD"
+        );
+        assert_eq!(value["data"]["idempotency_key"], "review-key");
+        let requests = handle.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        let submitted: serde_json::Value =
+            serde_json::from_str(requests[2].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(submitted["confirmed_rows"][0][field], "unknown");
+        assert!(requests[0].starts_with("POST /api/v1/agent/requirements/batch-parse-jobs "));
+        assert!(
+            requests[1].starts_with("GET /api/v1/agent/requirements/batch-parse-jobs/job-review ")
+        );
+    }
+}
+
+/// Raw JSON mode and instance identity reach the one parse POST and the subsequent import unchanged.
+#[test]
+fn import_raw_preserves_json_mode_instance_and_key_through_single_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("raw-result.json");
+    let (base,handle) = mock_recorded(vec![
+        (200,r#"{"code":0,"message":"success","data":{"job_id":"job-raw","status":"queued"}}"#.to_string()),
+        (200,r#"{"code":0,"message":"success","data":{"job_id":"job-raw","status":"succeeded","result":{"summary":{"auto_commit_ready":1,"needs_confirmation":0},"rows":[{"errors":[],"can_auto_commit":true,"needs_confirmation":false,"confirmation_reasons":[],"parsed":{"description":"approved"}}]}}}"#.to_string()),
+        (200,r#"{"code":0,"message":"success","data":{"created":1,"updated":0,"failed":0,"created_ids":[8],"updated_ids":[],"failed_rows":[],"idempotency_key":"raw-key","idempotent_replay":false}}"#.to_string())],Some(path.clone()));
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base,
+            "requirements",
+            "import-raw",
+            "--data",
+            r#"{"raw_text":"audit","mode":"strict","instance_id":7}"#,
+            "--idempotency-key",
+            "raw-key",
+            "--yes",
+            "--output",
+            path.to_str().unwrap(),
+        ],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        2,
+    );
+    assert_eq!(value["error"]["detail"]["job_id"], "job-raw");
+    assert_eq!(value["error"]["detail"]["committed"], true);
+    assert_eq!(value["error"]["detail"]["idempotency_key"], "raw-key");
+    assert_eq!(
+        value["error"]["detail"]["result"]["import_summary"]["created"],
+        1
+    );
+    let requests = handle.join().unwrap();
+    let parse: serde_json::Value =
+        serde_json::from_str(requests[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(parse["mode"], "strict");
+    assert_eq!(parse["instance_id"], 7);
+    assert!(requests[1]
+        .starts_with("GET /api/v1/agent/requirements/batch-parse-jobs/job-raw?instance_id=7 "));
+    assert!(requests[2].starts_with("POST /api/v1/agent/requirements/batch-import "));
+    let import: serde_json::Value =
+        serde_json::from_str(requests[2].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(import["idempotency_key"], "raw-key");
+    assert_eq!(import["instance_id"], 7);
+}
+
+/// Post-create query and result-delivery errors retain the original job across generic parse execution.
+#[test]
+fn capability_parse_delivery_failure_retains_read_only_recovery_handle() {
+    let (base,handle) = mock_recorded(vec![(200,r#"{"code":0,"message":"success","data":{"job_id":"job-generic","status":"queued"}}"#.to_string()),(200,successful_job("job-generic"))],None);
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base,
+            "--jq",
+            ".data.absent",
+            "capability",
+            "run",
+            "requirements.batch_parse",
+            "--data",
+            r#"{"raw_text":"audit","instance_id":4}"#,
+        ],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        2,
+    );
+    assert_eq!(value["error"]["detail"]["job_id"], "job-generic");
+    assert_eq!(value["error"]["detail"]["phase"], "result_delivery");
+    assert_eq!(
+        value["error"]["detail"]["recovery_command"],
+        "hyacinthus requirements parse-job job-generic --instance-id 4"
+    );
+    assert_eq!(handle.join().unwrap().len(), 2);
+}
+
+/// Unknown transport outcome carries the stable key, with no random-key retry advice.
+#[test]
+fn import_unacknowledged_submission_preserves_same_key_for_retry() {
+    let (base,handle) = mock_recorded(vec![(503,r#"{"code":5030,"message":"unavailable","error_code":"DEPENDENCY_UNAVAILABLE","data":null}"#.to_string())],None);
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base,
+            "requirements",
+            "import",
+            "--data",
+            r#"{"confirmed_rows":[{"description":"audit"}],"idempotency_key":"unknown-outcome"}"#,
+            "--yes",
+        ],
+        &[("HYACINTHUS_AGENT_TOKEN", "test-token")],
+        1,
+    );
+    assert_eq!(
+        value["error"]["detail"]["idempotency_key"],
+        "unknown-outcome"
+    );
+    assert_eq!(value["error"]["detail"]["outcome"], "unknown");
+    assert!(value["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .contains("identical confirmed_rows payload with the same"));
+    assert_eq!(handle.join().unwrap().len(), 1);
 }
 
 /// Refuses a match page beyond the backend's documented maximum before HTTP.
