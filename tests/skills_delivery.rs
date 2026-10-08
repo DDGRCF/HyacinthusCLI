@@ -1,4 +1,4 @@
-// 改动说明：核对随包退出码与实现，并执行主Skill能力示例及邮件、预览、schema交付回归。
+// 改动说明：核对随包退出码、邮件缺来源顺序及主Skill能力示例、预览和schema交付。
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -184,6 +184,8 @@ fn mail_and_general_guides_share_the_current_twenty_one_fields() {
     ];
     let mail =
         String::from_utf8(run(&["skills", "read", "tutoring-job-mail-upload"]).stdout).unwrap();
+    assert!(mail
+        .contains("没有原文且没有可用邮件工具时，只询问来源并结束本轮；取得来源后再申请 CLI 授权"));
     let field_reference = "../hyacinthus-cli/references/requirements-format.md";
     assert!(mail.contains(field_reference));
     let dir = tempfile::tempdir().unwrap();
