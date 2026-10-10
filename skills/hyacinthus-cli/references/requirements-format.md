@@ -2,7 +2,7 @@
 
 TXT 每个岗位一块，用“字段名：字段值”；CSV 每个岗位一行，使用下表21个字段作表头。规范输出按表中顺序，空值保留字段或空列，不能删列导致错位。
 
-输入可以是任意列数、任意顺序，识别别名；不要求补齐可选值。未说明留空，不推断缺失信息；明确写“不限”才保留不限。原文另存，不把标签和值改成斜杠串。
+输入可以是任意列数、任意顺序，识别别名；不要求补齐可选值。未说明留空，不推断缺失信息；明确写“不限”才保留不限。授课方式按第11字段的默认规则填写。原文另存，不把标签和值改成斜杠串。
 
 ## 字段规则
 
@@ -20,7 +20,7 @@ TXT 每个岗位一块，用“字段名：字段值”；CSV 每个岗位一行
 | 8 | `要求的学历` | `condition.required_education_levels`、`condition.required_education_note` | 保留学历限制和在读身份；大学生不等于本科毕业。levels 用后端学历值字符串数组，不写 null；在读等说明写 `required_education_note`。 |
 | 9 | `要求的学校` | `condition.required_school_names`、`condition.required_school_ids` | 填教师就读/毕业学校，保留多校选择关系；地址中的学校不算。names 为字符串数组，ids 为真实整数 ID 数组，均不写 null；层次写下一字段。 |
 | 10 | `学校的资质` | `condition.required_school_tiers` | 填明示的985、211、双一流等层次，不按校名推断。“211高校老师”只填211；教师资格证写要求。JSON：明示985/211/双一流分别用 `985`/`211`/`double_first_class`，组成字符串数组，不写 null。 |
-| 11 | `授课方式` | `preferred_mode` | 线上/线下/混合对应 online/offline/hybrid，不从地址推断；整组声明须明确适用。JSON 不传 null，缺失或冲突先复核，不删字段触发默认。 |
+| 11 | `授课方式` | `preferred_mode` | 原文明确线上时填线上/`online`；原文明确混合授课时填混合/`hybrid`；其他情况（包括未说明）默认填线下/`offline`。不从地址推断，整组声明须明确适用。JSON 不传 null。未说明授课方式不询问、不阻断上传。 |
 | 12 | `要求的资格` | `condition.required_occupation` | 职业身份：大学生/兼职→part_time_teacher，专职/全职→full_time_teacher，明示职业不限→any，未提供可为 null。经验、教师资格证写要求。 |
 | 13 | `薪酬` | `compensation` | 保留金额、范围、单位和附加条件，不猜单位、不换算。amount_min/max 为十进制字符串，单位写 billing_period/billing_unit_text，原文写 raw_text。 |
 | 14 | `时间` | `class_time_text`、`time_slots`、`weekly_frequency_min/max`、`session_duration_minutes_min/max` | 保留次数、每次时长、日期和时段。“周一三”可展开；124明确为星期、7~8:30明确为晚间才展开。JSON 次数用整数、时长用分钟，无范围时 min=max；time_slots 用数组，null转[]，weekday为1–7，时间用分钟；原文写 class_time_text。 |
