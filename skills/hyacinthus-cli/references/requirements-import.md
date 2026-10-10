@@ -28,7 +28,7 @@ parse/options 需要 `requirements:parse`，import 需要 `requirements:write`�
 
 业务准入只看后端 `errors`：空数组可导入，非空需修正；warnings 展示但不阻断。`can_auto_commit/needs_confirmation/confirmation_reasons` 必须与 errors 一致，缺失或矛盾是协议错误，不能自行改裁决。没有行级置信度门槛。
 
-核对 `parsed` 与原文的编号、类型、授课方式、目录、条件、薪酬、次数/时长、地址、联系方式和备注。明确来源可补入，信息缺失或冲突才询问；不能删除关键字段触发默认，也不编造地址/坐标。目录未匹配 warning 不自动创建，用户要求补全时见[目录管理](catalog.md)。
+核对 `parsed` 与原文的编号、类型、授课方式、目录、条件、薪酬、次数/时长、地址、联系方式和备注。授课方式按[字段格式](requirements-format.md)整理：原文明确线上才填 `online`，明确混合授课填 `hybrid`，其余（包括未说明）填 `offline`；不得因原文未提授课方式而追问或阻断。其他必要信息缺失或冲突时才询问，不编造地址/坐标。目录未匹配 warning 不自动创建，用户要求补全时见[目录管理](catalog.md)。
 
 当前 parse 不生成 `weekly_frequency_min/max` 和 `session_duration_minutes_min/max` 四个次数/时长字段。要完整保存原文的次数与课时，按字段格式补入 confirmed_rows；直接导入 parse 输出或 import-raw 不会自动补齐。
 

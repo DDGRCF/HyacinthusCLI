@@ -215,6 +215,9 @@ fn mail_and_general_guides_share_the_current_twenty_one_fields() {
         })
         .collect();
     assert_eq!(fields, labels);
+    assert!(general.contains("原文明确线上时填线上/`online`"));
+    assert!(general.contains("其他情况（包括未说明）默认填线下/`offline`"));
+    assert!(general.contains("未说明授课方式不询问、不阻断上传"));
     assert_eq!(fs::read_to_string(exported_reference).unwrap(), general);
     let example = general
         .split_once("```text\n")
