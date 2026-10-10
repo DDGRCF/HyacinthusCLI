@@ -4276,6 +4276,18 @@ fn tutoring_mail_skill_preserves_agent_workflow_contract() {
         "errors.csv",
         "不得假称已访问真实邮箱",
         "原幂等键",
+        "明确列出多个实际授课地址",
+        "分别招聘不同科目的老师",
+        "同一位老师负责多科",
+        "无法判断时",
+        "每份整理文档最多50条岗位",
+        "岗位之间空一行",
+        "原编号-地址",
+        "原编号-科目",
+        "原文没有业务编号时，以实际授课地址作为编号",
+        "地址-科目名",
+        "同地址、同科目仍无法唯一编号",
+        "编号唯一性",
     ] {
         assert!(content.contains(rule), "missing mail workflow rule: {rule}");
     }
