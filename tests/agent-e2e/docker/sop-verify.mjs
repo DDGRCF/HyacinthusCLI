@@ -1,4 +1,4 @@
-// 改动说明：核对21字段及未提供联系方式、解析优先级在完整预览中的保留及入库字段。
+// 改动说明：核对21字段、学生性别结构字段、未提供联系方式及解析优先级在完整预览中的保留和入库字段。
 import assert from 'node:assert/strict';
 import { NORMALIZED_LABELS } from '../lib/verify.mjs';
 import { GEO_FIXTURE } from './geo-fixture.mjs';
@@ -22,7 +22,7 @@ export function sourceRows(rows,expected,{persisted=false,parsedRows=[]}={}){
  if(persisted){assert.ok(r.id>0);assert.deepEqual(r.subject_names,['数学']);assert.deepEqual(r.grade_names,['初一']);assert.equal(r.ext.priority,5);}
  else{assert.equal(r.subject_ids?.length,1);assert.equal(r.grade_ids?.length,1);const parsed=parsedRows.find(p=>p.requirement_code===e.code);if(parsed){assert.equal(parsed.ext?.priority,5,'Backend parser did not apply the test prefix rule');assert.equal(r.ext?.priority,parsed.ext.priority,`Preview dropped parsed priority for ${e.code}`);}}
  assert.equal(r.compensation.currency,'CNY');assert.equal(Number(r.compensation.amount_min),e.amount);assert.equal(Number(r.compensation.amount_max),e.amount);assert.ok(isHourlyBilling(r.compensation.billing_period),'Expected an explicit hourly billing unit');
- assert.equal(r.condition.requester_role,'parent');assert.equal(r.condition.requester_gender??null,null,'Invented parent gender');assert.match(r.description,/男生|学生.{0,6}男/,'Student gender lost');assert.equal(r.condition.required_gender,'female');assert.deepEqual(r.condition.required_education_levels,['bachelor']);assert.equal(r.condition.requester_education_level??null,null);for(const field of ['required_school_names','required_school_tiers','required_school_ids'])assert.deepEqual(r.condition[field]??[],[]);
+ assert.equal(r.condition.requester_role,'parent');assert.equal(r.condition.requester_gender,'male','Student gender missing from requester field');assert.doesNotMatch(r.description,/男生|学生.{0,6}男/,'Student gender duplicated in description');assert.equal(r.condition.required_gender,'female');assert.deepEqual(r.condition.required_education_levels,['bachelor']);assert.equal(r.condition.requester_education_level??null,null);for(const field of ['required_school_names','required_school_tiers','required_school_ids'])assert.deepEqual(r.condition[field]??[],[]);
  assert.equal(r.condition.required_occupation??null,null);assert.match(r.description,/家教经验|有经验/);assert.equal(r.ext.admin_contact_phone,'13800138000');for(const field of ['user_contact_phone','user_contact_wechat','admin_contact_wechat'])assert.equal(r.ext[field]??null,null,`Invented contact: ${e.code}/${field}`);
  assert.equal(r.weekly_frequency_min,1);assert.equal(r.weekly_frequency_max,1);assert.equal(r.session_duration_minutes_min,120);assert.equal(r.session_duration_minutes_max,120);
  assert.ok(r.time_slots.some(s=>s.weekday===6&&s.start_minute===840&&s.end_minute===960));}

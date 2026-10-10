@@ -266,12 +266,12 @@ capabilities:
                     type:
                       - string
                       - "null"
-                    description: 需求方角色，例如 家长、学生。
+                    description: 需求方角色，只使用家长或机构；未明确时默认家长，学生是接受辅导的人。
                   requester_gender:
                     type:
                       - string
                       - "null"
-                    description: 与 requester_role 对应的需求方性别；家长发布时，学生性别保留在 description，不代填家长性别。
+                    description: 学生、孩子或学员的性别写入此字段，与需求方角色无关；不得把学生性别留在 description 或写入教师性别要求。
                   requester_education_level:
                     type:
                       - string
@@ -317,7 +317,7 @@ capabilities:
                       - string
                       - "null"
                     enum: [part_time_teacher, full_time_teacher, any, null]
-                    description: 老师职业要求（兼职、全职或不限）；家教经验等文本条件写入 description，不作为职业枚举。
+                    description: 岗位格式二只用 part_time_teacher 或 full_time_teacher；默认普通兼职，“不限”归普通兼职。接口保留 any 仅作兼容，不作为格式二输出值；家教经验等教师条件写入 description。
                   source:
                     type:
                       - string

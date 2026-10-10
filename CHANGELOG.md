@@ -1,4 +1,4 @@
-<!-- 改动说明：记录统一 CLI Skills 发现、完整引用交付、安装联动和独立 Pi 验收，并保留此前运行链路调整。 -->
+<!-- 改动说明：记录统一 CLI Skills 发现、当前格式二规范交付、安装联动和独立 Pi 验收，并保留此前运行链路调整。 -->
 # Changelog
 
 ## Unreleased
@@ -9,6 +9,8 @@
 - Guide authentication errors through original authorization links and wait only after user approval; preserve the configured environment during network failures.
 - Save full parse/import dry-run data with `--output` even when stdout is reduced with `--jq`; constrain teacher occupation to backend canonical enums and retain experience as description text.
 - Add independent Docker API/Worker/PostGIS/Redis/MinIO/Pi acceptance using MiMo Token Plan, natural user tasks, actual browser authorization and independent business readback.
+- Replace the bundled Format 2 field rules with the current local canonical specification; keep online-address composition in one source and preserve backend geolocation validation.
+- Align the import contract and offline acceptance checks so explicit learner gender is stored in `requester_gender`, independently of requester role, and is not duplicated in description.
 
 - Remove managed runtime guard/probe and status/skill business commands, capabilities, tests, and fixtures.
 - Retain Hermes, Codex, Claude Code, and direct CLI authorization, requirement imports, and generic local skill export/install; do not restore Claw/PicoClaw hosting.

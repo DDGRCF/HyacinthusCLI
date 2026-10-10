@@ -34,7 +34,7 @@ parse/options 需要 `requirements:parse`，import 需要 `requirements:write`�
 
 出现 `FIELD_RECOGNITION_NOTICE` 时，核对 unknown_fields/duplicate_fields/ignored_values，确认忽略了哪些源信息。文本诊断在行 field_recognition，表格聚合在结果顶层 field_recognition；重复编号报 `TEXT_RECORD_BOUNDARY_AMBIGUOUS`，按 errors 处理。
 
-地址诊断与原文不一致时展示差异；GEO_* 按实际 errors/warnings 分类，不自行升级 warning。缺地址（含 online）或 `ADDRESS_DETAIL_MISSING` 落在 errors 时，请用户补齐地址后再预览；不能提供“确认无地址直接写入”，用户确认不能代替补齐必需字段或后端定位校验。
+地址文本及纯线上岗位的填写格式统一按[字段格式](requirements-format.md#字段规则)整理。地址诊断与原文不一致时展示差异；GEO_* 按实际 errors/warnings 分类，不自行升级 warning。地址字段为空，或 `ADDRESS_DETAIL_MISSING` 落在 errors 时，请用户补齐地址后再预览；不能提供“确认无地址直接写入”，用户确认不能代替补齐必需字段或后端定位校验。
 
 ## 3. 保存 confirmed_rows
 
@@ -52,7 +52,7 @@ parse/options 需要 `requirements:parse`，import 需要 `requirements:write`�
 
 导入按编号**新增或更新**。已有编号会替换内容及科目/年级/时间关联，设为 open、清空匹配并重置生命周期；空字段不会保留旧值。用户只批准新增时先处理编号冲突。
 
-真实导入在写入前按地址验证定位，或复用已有需求的有效定位；不直接信任客户端候选坐标。包括 online 在内，定位失败进入 failed_rows。普通 import 不返回 geo_run_id，不能描述成入库后等地图；实际外部地图调用次数取决于缓存和复用。
+真实导入在写入前按后台规则验证定位，或复用已有需求的有效定位；不直接信任客户端候选坐标。定位失败按真实回执进入 `failed_rows`，不因岗位是线上就自行改写字段或绕过后台校验。普通 import 不返回 geo_run_id，不能描述成入库后等地图；实际外部地图调用次数取决于缓存和复用。
 
 | 命令 | stdout data / --output 文件的内容 |
 | --- | --- |

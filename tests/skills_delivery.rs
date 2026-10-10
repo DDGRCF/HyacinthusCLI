@@ -1,4 +1,4 @@
-// 改动说明：核对随包退出码、邮件缺来源顺序及主Skill能力示例、预览和schema交付。
+// 改动说明：核对随包退出码、邮件流程、当前格式二规范及主Skill能力示例、预览和schema交付。
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -184,8 +184,7 @@ fn mail_and_general_guides_share_the_current_twenty_one_fields() {
     ];
     let mail =
         String::from_utf8(run(&["skills", "read", "tutoring-job-mail-upload"]).stdout).unwrap();
-    assert!(mail
-        .contains("没有原文且没有可用邮件工具时，只询问来源并结束本轮；取得来源后再申请 CLI 授权"));
+    assert!(mail.contains("没有原文且没有可用邮件工具时，只询问来源并结束本轮"));
     let field_reference = "../hyacinthus-cli/references/requirements-format.md";
     assert!(mail.contains(field_reference));
     let dir = tempfile::tempdir().unwrap();
@@ -216,6 +215,24 @@ fn mail_and_general_guides_share_the_current_twenty_one_fields() {
         .collect();
     assert_eq!(fields, labels);
     assert_eq!(fs::read_to_string(exported_reference).unwrap(), general);
+    assert!(general.contains("需求方角色只有“家长”或“机构”"));
+    assert!(general.contains("默认普通兼职（`part_time_teacher`）"));
+    assert!(general.contains("纯线上岗位按既定格式写“城市（线上单）编号”"));
+    assert!(general.contains("后台标题不属于这21个字段"));
+    assert!(!general.contains("（陈）HZ260514701”取"));
+    assert!(!general.contains("明示职业不限→any"));
+    let import_guide = String::from_utf8(
+        run(&[
+            "skills",
+            "read",
+            "hyacinthus-cli",
+            "references/requirements-import.md",
+        ])
+        .stdout,
+    )
+    .unwrap();
+    assert!(import_guide.contains("纯线上岗位的填写格式统一按[字段格式]"));
+    assert!(!import_guide.contains("缺地址（含 online）"));
     let example = general
         .split_once("```text\n")
         .unwrap()

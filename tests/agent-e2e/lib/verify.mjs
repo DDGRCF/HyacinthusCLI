@@ -1,4 +1,4 @@
-// 改动说明：独立核对Pi轨迹、统一21字段和四类联系角色、批准、落库及真实汇报。
+// 改动说明：独立核对Pi轨迹、统一21字段与学生性别字段归属、联系角色、批准、落库及真实汇报。
 import assert from 'node:assert/strict';
 /** The ordered published mail normalization contract shared by TXT and CSV checks. */
 export const NORMALIZED_LABELS=['编号','年级','科目','需求方角色','需求方性别','需求方学历','要求的性别','要求的学历','要求的学校','学校的资质','授课方式','要求的资格','薪酬','时间','地址','要求','备注','用户电话','用户微信','管理员电话','管理员微信'];
@@ -76,8 +76,8 @@ export function verifyRows(items, expected) {
     for (const field of ['user_contact_phone', 'user_contact_wechat', 'admin_contact_wechat']) {
       assert.equal(item.ext[field] ?? null, null, `Invented contact: ${row.code}/${field}`);
     }
-    assert.equal(item.condition.requester_gender ?? null, null, `Invented parent gender: ${row.code}`);
-    assert.match(item.description, /男生|学生.{0,6}男/, `Student gender lost: ${row.code}`);
+    assert.equal(item.condition.requester_gender, 'male', `Student gender missing from requester field: ${row.code}`);
+    assert.doesNotMatch(item.description, /男生|学生.{0,6}男/, `Student gender duplicated in description: ${row.code}`);
     assert.equal(item.condition.required_gender, 'female', `Teacher gender mixed up: ${row.code}`);
     assert.ok(item.condition.required_education_levels.includes('bachelor'), `Teacher education lost: ${row.code}`);
     assert.ok(item.description.trim(), `Missing description: ${row.code}`);
@@ -137,8 +137,8 @@ export function verifyNormalized(text, expected) {
     assert.match(row['年级'], /初一|七年级/);
     assert.match(row['科目'], /数学/);
     assert.match(row['需求方角色'], /家长/);
-    assert.equal(row['需求方性别'], '');
-    assert.match(row['要求'], /男生|学生.{0,6}男/);
+    assert.match(row['需求方性别'], /男/);
+    assert.doesNotMatch(`${row['要求']} ${row['备注']}`, /男生|学生.{0,6}男/);
     assert.equal(row['需求方学历'], '');
     assert.match(row['要求的性别'], /女/);
     assert.match(row['要求的学历'], /本科/);

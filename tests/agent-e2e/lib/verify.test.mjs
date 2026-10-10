@@ -1,4 +1,4 @@
-// 改动说明：覆盖21列及经验归类、未知联系值和旧合并列拒绝；离线验证独立验收会拒绝漏行、提前写入、换键重试和虚假汇报；不代表真实导入通过。
+// 改动说明：覆盖21列、学生性别字段归属、经验归类、未知联系值和旧合并列拒绝；离线验证独立验收会拒绝漏行、提前写入、换键重试和虚假汇报；不代表真实导入通过。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { verifyTrace, verifyReport, verifyApproval, verifyNormalized, deniedAttempts } from './verify.mjs';
@@ -84,9 +84,9 @@ test('structured approval rejects negative intent and binds the sole preview key
 });
 
 test('all 21 normalized labels and separate student/teacher and contact roles are required', () => {
-  const row = { '编号': 'TEST-001', '年级': '初一', '科目': '数学', '需求方角色': '家长', '需求方性别': '', '需求方学历': '',
+  const row = { '编号': 'TEST-001', '年级': '初一', '科目': '数学', '需求方角色': '家长', '需求方性别': '男', '需求方学历': '',
     '要求的性别': '女', '要求的学历': '本科', '要求的学校': '', '学校的资质': '', '授课方式': 'online', '要求的资格': '',
-    '薪酬': '100元/小时', '时间': '每周1次，周六14:00-16:00，每次2小时', '地址': '线上', '要求': '学生为男生，一对一，有家教经验', '备注': '线上授课', '用户电话': '', '用户微信': '', '管理员电话': '13800138000', '管理员微信': '' };
+    '薪酬': '100元/小时', '时间': '每周1次，周六14:00-16:00，每次2小时', '地址': '线上', '要求': '一对一，有家教经验', '备注': '线上授课', '用户电话': '', '用户微信': '', '管理员电话': '13800138000', '管理员微信': '' };
   const text = Object.entries(row).map(([key, value]) => `${key}：${value}`).join('\n');
   verifyNormalized(text, [{ code: 'TEST-001', amount: 100 }]);
   assert.throws(() => verifyNormalized(text.replace('要求的学历：本科', '要求的学历：'), [{ code: 'TEST-001', amount: 100 }]));
@@ -99,7 +99,8 @@ test('all 21 normalized labels and separate student/teacher and contact roles ar
   assert.throws(() => verifyNormalized(text.replace('备注：线上授课','备注：管理员电话13800138000'), [{code:'TEST-001',amount:100}]));
 });
 
-test('student sex must not be used as an unspecified parent sex', () => {
-  const row = {'编号':'TEST-001','年级':'初一','科目':'数学','需求方角色':'家长','需求方性别':'男','需求方学历':'','要求的性别':'女','要求的学历':'本科','要求的学校':'','学校的资质':'','授课方式':'online','要求的资格':'','薪酬':'100元/小时','时间':'每周1次，周六14:00-16:00，每次2小时','地址':'线上','要求':'男生，一对一，有家教经验','备注':'','用户电话':'','用户微信':'','管理员电话':'13800138000','管理员微信':''};
-  assert.throws(() => verifyNormalized(Object.entries(row).map(([key,value])=>`${key}：${value}`).join('\n'),[{code:'TEST-001',amount:100}]));
+test('student sex belongs in requester gender, regardless of whether the requester is a parent', () => {
+  const row = {'编号':'TEST-001','年级':'初一','科目':'数学','需求方角色':'家长','需求方性别':'男','需求方学历':'','要求的性别':'女','要求的学历':'本科','要求的学校':'','学校的资质':'','授课方式':'online','要求的资格':'','薪酬':'100元/小时','时间':'每周1次，周六14:00-16:00，每次2小时','地址':'线上','要求':'一对一，有家教经验','备注':'','用户电话':'','用户微信':'','管理员电话':'13800138000','管理员微信':''};
+  verifyNormalized(Object.entries(row).map(([key,value])=>`${key}：${value}`).join('\n'),[{code:'TEST-001',amount:100}]);
+  assert.throws(() => verifyNormalized(Object.entries({...row,'需求方性别':'','要求':'学生为男生，一对一，有家教经验'}).map(([key,value])=>`${key}：${value}`).join('\n'),[{code:'TEST-001',amount:100}]));
 });
