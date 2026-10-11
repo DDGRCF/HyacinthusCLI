@@ -3,6 +3,9 @@
 
 ## Unreleased
 
+- Make the bundled format-2 field guide the single source for semantic mapping; import and mail guides link to it instead of duplicating decision rules. Clarify defaults as explicit exceptions and keep the qualification default concise: ordinary part-time unless full-time is explicit.
+- Generalize the bundled format-2 guide around entity, fact, scope, and purpose relationships; teach agents to recover explicit facts omitted by the server parser into confirmed rows.
+- Align bundled capability descriptions and end-to-end expectations for student gender, requester role, teacher qualification defaults, and teaching mode; distinguish agent guidance from the server parser's supported alias mapping.
 - Consolidate shared/runtime/requirements into a discoverable `hyacinthus-cli` entry with 11 relative task guides; retain the independent mail workflow.
 - Add frontmatter-backed metadata, directory listing and raw/JSON `skills read`; export/check all references and reconcile only previously registered retired entries.
 - Install and verify bundled Skills alongside npm and Shell binary installation, with explicit targets/directories and opt-out.

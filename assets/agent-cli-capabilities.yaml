@@ -1,4 +1,4 @@
-# 改动说明：增加有来源快照的学校查询；保留21字段、联系方式与写前定位契约。
+# 改动说明：区分服务器标签解析与CLI语义整理，统一格式二关系归位规则及字段默认值。
 version: "2026-10-08"
 backend_min_version: "0.1.0"
 capabilities:
@@ -53,7 +53,7 @@ capabilities:
             - strict
             - lenient
           default: lenient
-          description: CSV/XLSX和标签文本按字段名及可识别别名映射到21字段整理规范，允许任意列数/顺序，缺失可选字段留空；未知/非编号重复字段聚合为非阻断 FIELD_RECOGNITION_NOTICE，重复编号为 error。默认 lenient，不调用 AI；CLI --file 只读取 UTF-8 TXT/CSV，不上传二进制 XLSX。
+          description: 服务器解析器按字段名及其已支持的别名映射到21字段，允许任意列数/顺序；这不是开放式自然语言语义解析，默认 lenient 也不调用 AI。Agent 整理时按内嵌 requirements-format 指南依据事实对象、用途和岗位范围归位，并对照全文把明确但漏解析的事实补入 confirmed_rows。缺失可选字段留空；未知/非编号重复字段聚合为非阻断 FIELD_RECOGNITION_NOTICE，重复编号为 error。CLI --file 只读取 UTF-8 TXT/CSV，不上传二进制 XLSX。
     response_schema:
       type: object
       required:
@@ -266,12 +266,12 @@ capabilities:
                     type:
                       - string
                       - "null"
-                    description: 需求方角色，例如 家长、学生。
+                    description: 按业务规则归一为家长或机构；原文未明确时默认家长。邮件发布人或转发人不自动视为机构。
                   requester_gender:
                     type:
                       - string
                       - "null"
-                    description: 与 requester_role 对应的需求方性别；家长发布时，学生性别保留在 description，不代填家长性别。
+                    description: 按当前格式规则记录学员/学生性别，不记录家长、机构联系人或发布人的性别；无论性别跟在年级旁还是单独出现，都按所指对象归入此字段。对象不明或混合性别时留空并保留原文。
                   requester_education_level:
                     type:
                       - string
@@ -286,7 +286,7 @@ capabilities:
                     type:
                       - string
                       - "null"
-                    description: 老师性别要求。
+                    description: 只记录对教师的性别要求；学员性别不得填入此字段。未明示教师性别要求时归为不限。
                   required_education_levels:
                     type: array
                     description: 老师学历要求，使用字符串数组。
@@ -317,7 +317,7 @@ capabilities:
                       - string
                       - "null"
                     enum: [part_time_teacher, full_time_teacher, any, null]
-                    description: 老师职业要求（兼职、全职或不限）；家教经验等文本条件写入 description，不作为职业枚举。
+                    description: 格式二只归一为普通兼职或专职教师，未明确时默认普通兼职；经验和教师资格写入 description。接口仍接受 any/null，但格式规则不输出这两项。
                   source:
                     type:
                       - string
@@ -339,7 +339,7 @@ capabilities:
                   - online
                   - offline
                   - hybrid
-                description: 授课方式，默认 hybrid。
+                description: 授课方式；原文明确线上为 online，明确混合为 hybrid，其余包括未说明均为 offline。
               weekly_frequency_min:
                 type: [integer, "null"]
                 minimum: 1

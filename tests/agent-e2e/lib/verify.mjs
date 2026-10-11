@@ -76,10 +76,10 @@ export function verifyRows(items, expected) {
     for (const field of ['user_contact_phone', 'user_contact_wechat', 'admin_contact_wechat']) {
       assert.equal(item.ext[field] ?? null, null, `Invented contact: ${row.code}/${field}`);
     }
-    assert.equal(item.condition.requester_gender ?? null, null, `Invented parent gender: ${row.code}`);
-    assert.match(item.description, /男生|学生.{0,6}男/, `Student gender lost: ${row.code}`);
+    assert.equal(item.condition.requester_gender, 'male', `Student gender missing from requester_gender: ${row.code}`);
     assert.equal(item.condition.required_gender, 'female', `Teacher gender mixed up: ${row.code}`);
     assert.ok(item.condition.required_education_levels.includes('bachelor'), `Teacher education lost: ${row.code}`);
+    assert.equal(item.condition.required_occupation, 'part_time_teacher', `Qualification default mismatch: ${row.code}`);
     assert.ok(item.description.trim(), `Missing description: ${row.code}`);
     assert.equal(item.weekly_frequency_min, 1, `Wrong frequency: ${row.code}`);
     assert.equal(item.session_duration_minutes_min, 120, `Wrong duration: ${row.code}`);

@@ -186,6 +186,8 @@ fn mail_and_general_guides_share_the_current_twenty_one_fields() {
         String::from_utf8(run(&["skills", "read", "tutoring-job-mail-upload"]).stdout).unwrap();
     assert!(mail
         .contains("没有原文且没有可用邮件工具时，只询问来源并结束本轮；取得来源后再申请 CLI 授权"));
+    assert!(mail.contains("字段识别、默认值和歧义处理只按该规则执行"));
+    assert!(!mail.contains("岗位归属→事实对象→事实用途与范围→字段"));
     let field_reference = "../hyacinthus-cli/references/requirements-format.md";
     assert!(mail.contains(field_reference));
     let dir = tempfile::tempdir().unwrap();
@@ -218,6 +220,30 @@ fn mail_and_general_guides_share_the_current_twenty_one_fields() {
     assert!(general.contains("原文明确线上时填线上/`online`"));
     assert!(general.contains("其他情况（包括未说明）默认填线下/`offline`"));
     assert!(general.contains("未说明授课方式不询问、不阻断上传"));
+    assert!(general.contains("按事实关系归位，不靠别名清单"));
+    assert!(general.contains("锁定岗位和对象"));
+    assert!(general.contains("识别事实关系"));
+    assert!(general.contains("若事实在原文中清楚、只是标签或位置特殊"));
+    assert!(general.contains("学员/学生性别"));
+    assert!(general.contains("实际授课地点"));
+    assert!(general.contains("除下表明确规定的默认项外，只填原文明示"));
+    assert!(general.contains("原文明确专职/全职教师时归为专职教师，其余未明确时默认普通兼职"));
+    let import_guide = String::from_utf8(
+        run(&[
+            "skills",
+            "read",
+            "hyacinthus-cli",
+            "references/requirements-import.md",
+        ])
+        .stdout,
+    )
+    .unwrap();
+    assert!(import_guide.contains("字段识别及歧义边界一律按[字段格式]"));
+    assert!(!import_guide.contains("按事实关系归位，不靠别名清单"));
+    let capabilities = include_str!("../assets/agent-cli-capabilities.yaml");
+    assert!(capabilities.contains("这不是开放式自然语言语义解析"));
+    assert!(capabilities.contains("明确但漏解析的事实补入 confirmed_rows"));
+    assert!(capabilities.contains("学员/学生性别"));
     assert_eq!(fs::read_to_string(exported_reference).unwrap(), general);
     let example = general
         .split_once("```text\n")
@@ -231,6 +257,19 @@ fn mail_and_general_guides_share_the_current_twenty_one_fields() {
         .filter_map(|line| line.split_once('：').map(|(label, _)| label))
         .collect();
     assert_eq!(example_fields, labels);
+
+    let json_example: Value = serde_json::from_str(
+        general
+            .split_once("```json\n")
+            .unwrap()
+            .1
+            .split_once("\n```")
+            .unwrap()
+            .0,
+    )
+    .unwrap();
+    assert_eq!(json_example["condition"]["requester_gender"], "male");
+    assert_eq!(json_example["preferred_mode"], "offline");
 }
 
 /// Every reference read equals the bytes exported for an Agent's normal loader.
