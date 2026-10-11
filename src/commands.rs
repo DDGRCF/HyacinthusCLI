@@ -2987,7 +2987,7 @@ fn normalize_parsed_row_for_import(mut parsed: Value) -> Value {
     if object.get("time_slots").is_some_and(Value::is_null) {
         object.insert("time_slots".to_string(), json!([]));
     }
-    if object.get("preferred_mode").is_none_or(Value::is_null) {
+    if object.get("preferred_mode").and_then(Value::as_str) != Some("online") {
         object.insert("preferred_mode".to_string(), json!("offline"));
     }
     parsed

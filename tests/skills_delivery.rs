@@ -135,6 +135,10 @@ fn batch_import_defaults_missing_delivery_mode_to_offline() {
             "delivery-default-null",
             json!({"description":"有家教经验", "preferred_mode":null}),
         ),
+        (
+            "delivery-default-hybrid",
+            json!({"description":"有家教经验", "preferred_mode":"hybrid"}),
+        ),
     ] {
         let request = json!({"confirmed_rows":[row], "idempotency_key":key}).to_string();
         let output = run(&["requirements", "import", "--data", &request, "--dry-run"]);
