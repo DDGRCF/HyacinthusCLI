@@ -1,4 +1,4 @@
-// 改动说明：新增有来源的学校事实查询，保留地图诊断、确认、恢复和优先级规则流程。
+// 改动说明：新增有来源的学校事实查询，并将批量导入中缺失或空值授课方式统一补为线下。
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
@@ -2953,6 +2953,14 @@ fn build_import_payload(
             payload["instance_id"] = json!(instance_id);
         }
     }
+    if let Some(rows) = payload
+        .get_mut("confirmed_rows")
+        .and_then(Value::as_array_mut)
+    {
+        for row in rows {
+            *row = normalize_parsed_row_for_import(std::mem::take(row));
+        }
+    }
     let key = resolve_import_key(
         payload.get("idempotency_key"),
         args.idempotency_key.as_deref(),
@@ -2969,7 +2977,7 @@ fn build_import_payload(
     Ok(payload)
 }
 
-/// Adapt parser diagnostics and nullable time slots to the write schema without changing business fields.
+/// Adapts parser diagnostics and defaults missing delivery mode before the closed write schema.
 fn normalize_parsed_row_for_import(mut parsed: Value) -> Value {
     let Some(object) = parsed.as_object_mut() else {
         return parsed;
@@ -2978,6 +2986,9 @@ fn normalize_parsed_row_for_import(mut parsed: Value) -> Value {
     object.remove("geo_diagnostic");
     if object.get("time_slots").is_some_and(Value::is_null) {
         object.insert("time_slots".to_string(), json!([]));
+    }
+    if object.get("preferred_mode").is_none_or(Value::is_null) {
+        object.insert("preferred_mode".to_string(), json!("offline"));
     }
     parsed
 }

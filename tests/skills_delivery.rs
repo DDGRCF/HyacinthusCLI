@@ -123,6 +123,34 @@ fn mail_workflow_previews_save_full_data_when_stdout_is_reduced() {
     }
 }
 
+/// Prevents missing or null delivery mode from blocking a CLI batch import.
+#[test]
+fn batch_import_defaults_missing_delivery_mode_to_offline() {
+    for (key, row) in [
+        (
+            "delivery-default-missing",
+            json!({"description":"有家教经验"}),
+        ),
+        (
+            "delivery-default-null",
+            json!({"description":"有家教经验", "preferred_mode":null}),
+        ),
+    ] {
+        let request = json!({"confirmed_rows":[row], "idempotency_key":key}).to_string();
+        let output = run(&["requirements", "import", "--data", &request, "--dry-run"]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            value["data"]["request"]["body"]["confirmed_rows"][0]["preferred_mode"],
+            "offline"
+        );
+    }
+}
+
 /// Priority-rule previews save their full request even when stdout only returns metadata.
 #[test]
 fn priority_rule_preview_saves_full_data_when_stdout_is_reduced() {

@@ -3,6 +3,7 @@
 
 ## Unreleased
 
+- Default missing or null batch-import `preferred_mode` to `offline` before local validation and submission, so prepared Format 2 jobs do not stall on an empty mode field.
 - Make the bundled format-2 field guide the single source for semantic mapping; import and mail guides link to it instead of duplicating decision rules. Clarify defaults as explicit exceptions and keep the qualification default concise: ordinary part-time unless full-time is explicit.
 - Generalize the bundled format-2 guide around entity, fact, scope, and purpose relationships; teach agents to recover explicit facts omitted by the server parser into confirmed rows.
 - Align bundled capability descriptions and end-to-end expectations for student gender, requester role, teacher qualification defaults, and teaching mode; distinguish agent guidance from the server parser's supported alias mapping.
