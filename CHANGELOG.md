@@ -3,6 +3,7 @@
 
 ## Unreleased
 
+- Limit age-based grade defaults to age 3 -> 小班, age 4 -> 中班, ages 5–6 -> 大班, and age 18 or above -> 成人; explicit learner grades take precedence, other ages are not inferred, and age plus the inference basis remains in remarks.
 - Clarify entity attribution, separate facts combined in one sentence, preserve negation and conditional scope, and retain teacher gender preferences in the description instead of turning them into hard restrictions.
 - Normalize batch-import `preferred_mode` to `offline` unless the value is explicitly `online`, so blank, null, hybrid, and unrecognized values cannot stall prepared Format 2 jobs. Align the bundled field guide and capability description with this behavior, preserving mixed arrangements in descriptive text.
 - Make the bundled format-2 field guide the single source for semantic mapping; import and mail guides link to it instead of duplicating decision rules. Clarify defaults as explicit exceptions and keep the qualification default concise: ordinary part-time unless full-time is explicit. Use the canonical 普通兼职 label in both the TXT and JSON examples.
