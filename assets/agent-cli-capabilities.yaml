@@ -1,4 +1,4 @@
-# 改动说明：区分服务器标签解析与CLI语义整理，统一格式二关系归位规则及字段默认值。
+# 改动说明：区分服务器标签解析与CLI语义整理，统一格式二关系归位规则及字段默认值，并说明常规导入的非线上归线下行为。
 version: "2026-10-08"
 backend_min_version: "0.1.0"
 capabilities:
@@ -339,7 +339,7 @@ capabilities:
                   - online
                   - offline
                   - hybrid
-                description: 授课方式；原文明确线上为 online，明确混合为 hybrid，其余包括未说明均为 offline。
+                description: 授课方式；格式二整理遵循内嵌 requirements-format 指南。requirements import/import-raw 仅保留明确的 online，其余值（含 hybrid、未说明）全部归为 offline；混合安排保留在 description 或 ext.remark。
               weekly_frequency_min:
                 type: [integer, "null"]
                 minimum: 1
