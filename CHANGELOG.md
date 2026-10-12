@@ -3,6 +3,7 @@
 
 ## Unreleased
 
+- Clarify entity attribution, separate facts combined in one sentence, preserve negation and conditional scope, and retain teacher gender preferences in the description instead of turning them into hard restrictions.
 - Normalize batch-import `preferred_mode` to `offline` unless the value is explicitly `online`, so blank, null, hybrid, and unrecognized values cannot stall prepared Format 2 jobs.
 - Make the bundled format-2 field guide the single source for semantic mapping; import and mail guides link to it instead of duplicating decision rules. Clarify defaults as explicit exceptions and keep the qualification default concise: ordinary part-time unless full-time is explicit.
 - Generalize the bundled format-2 guide around entity, fact, scope, and purpose relationships; teach agents to recover explicit facts omitted by the server parser into confirmed rows.
