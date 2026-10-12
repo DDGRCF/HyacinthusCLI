@@ -1,4 +1,4 @@
-// 改动说明：验证学校查询、完整来源和本地参数门禁；保留 Skills 与导入准入回归。
+// 改动说明：导入契约测试对齐已批准的默认线下及诊断字段剥离，保留业务字段、后端裁决和授权校验。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -5452,15 +5452,15 @@ fn requirements_import_projects_complete_backend_parser_draft() {
     let row = &value["data"]["request"]["body"]["confirmed_rows"][0];
     assert!(row.get("geo_diagnostic").is_none());
     assert_eq!(row["requirement_type"], "tutoring");
-    assert_eq!(row["preferred_mode"], "hybrid");
+    assert_eq!(row["preferred_mode"], "offline");
     assert_eq!(row["time_slots"], serde_json::json!([]));
     assert_eq!(row["weekly_frequency_max"], 2);
     assert_eq!(row["ext"]["source"], "audit");
 }
 
-/// Dry-run previews business fields unchanged; only the backend may reject them on submission.
+/// Preview preserves backend business validation while applying delivery defaults and stripping diagnostics.
 #[test]
-fn requirements_import_previews_business_fields_without_local_rules() {
+fn requirements_import_previews_business_fields_with_delivery_default() {
     for field in [
         serde_json::json!({"geo_diagnostic": null}),
         serde_json::json!({"expires_at": "2027-02-30T12:00:00Z"}),
@@ -5487,7 +5487,13 @@ fn requirements_import_previews_business_fields_without_local_rules() {
             ],
             0,
         );
-        assert_eq!(value["data"]["request"]["body"]["confirmed_rows"][0], row);
+        let mut expected = row.clone();
+        expected.as_object_mut().unwrap().remove("geo_diagnostic");
+        expected["preferred_mode"] = serde_json::json!("offline");
+        assert_eq!(
+            value["data"]["request"]["body"]["confirmed_rows"][0],
+            expected
+        );
     }
 }
 
@@ -6059,12 +6065,34 @@ fn parse_json_preserves_mode_and_rejects_business_flag_overrides() {
 /// Preserve opaque business fields in preview and never authorize rows containing backend errors.
 #[test]
 fn import_preserves_business_fields_and_backend_errors() {
-    for parsed in [
-        serde_json::json!({"description":"audit","requirement_type":"alien"}),
-        serde_json::json!({"description":"audit","preferred_mode":"telepathy"}),
-        serde_json::json!({"description":"audit","requirement_type":null}),
-        serde_json::json!({"description":"audit","preferred_mode":null}),
+    for (parsed, expected_mode) in [
+        (
+            serde_json::json!({"description":"audit","requirement_type":"alien"}),
+            "offline",
+        ),
+        (
+            serde_json::json!({"description":"audit","preferred_mode":"telepathy"}),
+            "offline",
+        ),
+        (
+            serde_json::json!({"description":"audit","requirement_type":null}),
+            "offline",
+        ),
+        (
+            serde_json::json!({"description":"audit","preferred_mode":null}),
+            "offline",
+        ),
+        (
+            serde_json::json!({"description":"audit","preferred_mode":"hybrid"}),
+            "offline",
+        ),
+        (
+            serde_json::json!({"description":"audit","preferred_mode":"online"}),
+            "online",
+        ),
     ] {
+        let mut expected = parsed.clone();
+        expected["preferred_mode"] = serde_json::json!(expected_mode);
         let source = serde_json::json!({"rows":[{"parsed":parsed,"errors":[],"confirmation_reasons":[],"can_auto_commit":true,"needs_confirmation":false}]}).to_string();
         let value = run_json_expect_code(
             &[
@@ -6082,7 +6110,7 @@ fn import_preserves_business_fields_and_backend_errors() {
         );
         assert_eq!(
             value["data"]["request"]["body"]["confirmed_rows"][0],
-            parsed
+            expected
         );
         let confirmed =
             serde_json::json!({"confirmed_rows":[parsed],"idempotency_key":"review"}).to_string();
@@ -6100,7 +6128,7 @@ fn import_preserves_business_fields_and_backend_errors() {
         );
         assert_eq!(
             value["data"]["request"]["body"]["confirmed_rows"][0],
-            parsed
+            expected
         );
     }
     let source = r#"{"rows":[{"parsed":{"description":"audit"},"can_auto_commit":false,"needs_confirmation":true,"confirmation_reasons":["unreviewed"],"errors":["unreviewed"]}]}"#;
@@ -6287,6 +6315,8 @@ fn import_parse_output_warnings_do_not_block_or_rewrite_business_fields() {
         "description": "audit", "condition": {"requester_gender": "未明确"},
         "compensation": {"amount_min": "1.2E2", "billing_period": "未知计费方式"}
     });
+    let mut expected = parsed.clone();
+    expected["preferred_mode"] = serde_json::json!("offline");
     // Warnings remain non-blocking; verdict fields must still obey the backend protocol.
     let source = serde_json::json!({"rows": [{
         "can_auto_commit": true, "errors": [], "needs_confirmation": false,
@@ -6309,7 +6339,7 @@ fn import_parse_output_warnings_do_not_block_or_rewrite_business_fields() {
     );
     assert_eq!(
         value["data"]["request"]["body"]["confirmed_rows"],
-        serde_json::json!([parsed])
+        serde_json::json!([expected])
     );
     assert_eq!(
         value["data"]["request"]["body"]["idempotency_key"],
@@ -6325,6 +6355,8 @@ fn import_raw_backend_decisions_preserve_warning_rows_and_write_controls() {
         "condition": {"requester_gender": "未明确", "confidence": 0.0},
         "compensation": {"amount_min": "90", "amount_max": "1.2E2"}
     });
+    let mut expected = parsed.clone();
+    expected["preferred_mode"] = serde_json::json!("offline");
     let result = serde_json::json!({
         "summary": {"auto_commit_ready": 1, "needs_confirmation": 3},
         "rows": [
@@ -6407,7 +6439,7 @@ fn import_raw_backend_decisions_preserve_warning_rows_and_write_controls() {
             assert!(requests[2].starts_with("POST /api/v1/agent/requirements/batch-import "));
             serde_json::from_str(requests[2].split("\r\n\r\n").nth(1).unwrap()).unwrap()
         };
-        assert_eq!(payload["confirmed_rows"], serde_json::json!([parsed]));
+        assert_eq!(payload["confirmed_rows"], serde_json::json!([expected]));
         assert_eq!(payload["idempotency_key"], "warning-key");
         assert_eq!(value["data"]["dry_run"], flag == "--dry-run");
         assert_eq!(value["meta"]["committed"], flag == "--yes");
@@ -6740,7 +6772,7 @@ fn invalid_binding_revoke_and_logout_preserve_local_credential() {
 
 /// Backend-approved opaque fields reach submission; partial backend failures are preserved unchanged.
 #[test]
-fn import_raw_unknown_enums_reach_backend_submission() {
+fn import_raw_preserves_unknown_business_enums_and_defaults_delivery() {
     for field in ["requirement_type", "preferred_mode"] {
         let mut parsed = serde_json::json!({"description":"audit"});
         parsed[field] = serde_json::json!("unknown");
@@ -6775,7 +6807,12 @@ fn import_raw_unknown_enums_reach_backend_submission() {
         assert_eq!(requests.len(), 3);
         let submitted: serde_json::Value =
             serde_json::from_str(requests[2].split("\r\n\r\n").nth(1).unwrap()).unwrap();
-        assert_eq!(submitted["confirmed_rows"][0][field], "unknown");
+        let expected = if field == "preferred_mode" {
+            "offline"
+        } else {
+            "unknown"
+        };
+        assert_eq!(submitted["confirmed_rows"][0][field], expected);
         assert!(requests[0].starts_with("POST /api/v1/agent/requirements/batch-parse-jobs "));
         assert!(
             requests[1].starts_with("GET /api/v1/agent/requirements/batch-parse-jobs/job-review ")

@@ -23,7 +23,7 @@
       "properties": {
         "mode": {
           "default": "lenient",
-          "description": "CSV/XLSX和标签文本按字段名及可识别别名映射到21字段整理规范，允许任意列数/顺序，缺失可选字段留空；未知/非编号重复字段聚合为非阻断 FIELD_RECOGNITION_NOTICE，重复编号为 error。默认 lenient，不调用 AI；CLI --file 只读取 UTF-8 TXT/CSV，不上传二进制 XLSX。",
+          "description": "服务器解析器按字段名及其已支持的别名映射到21字段，允许任意列数/顺序；这不是开放式自然语言语义解析，默认 lenient 也不调用 AI。Agent 整理时按内嵌 requirements-format 指南依据事实对象、用途和岗位范围归位，并对照全文把明确但漏解析的事实补入 confirmed_rows。缺失可选字段留空；未知/非编号重复字段聚合为非阻断 FIELD_RECOGNITION_NOTICE，重复编号为 error。CLI --file 只读取 UTF-8 TXT/CSV，不上传二进制 XLSX。",
           "enum": [
             "strict",
             "lenient"

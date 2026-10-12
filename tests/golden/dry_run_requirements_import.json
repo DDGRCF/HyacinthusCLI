@@ -7,7 +7,8 @@
           {
             "description": "高一数学",
             "requirement_type": "tutoring",
-            "title": "高一数学"
+            "title": "高一数学",
+            "preferred_mode": "offline"
           }
         ],
         "idempotency_key": "snapshot-key"
