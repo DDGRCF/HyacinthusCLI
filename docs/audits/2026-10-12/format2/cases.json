@@ -1,0 +1,399 @@
+{
+  "cases": [
+    {
+      "id": "BKB673",
+      "provenance": "existing_source",
+      "city": "宁波市",
+      "raw": "编号：BKB673\n信息：初一男生，全科偏理，一周5次，晚上6点30开始，140-160/2h\n地址：鄞州区钟盈小区\n要求：男生，宁波大学，经验丰富，理科优秀，有耐心负责任",
+      "normalized": "编号：BKB673\n年级：初一\n科目：全科辅导\n需求方角色：家长\n需求方性别：男\n需求方学历：\n要求的性别：男\n要求的学历：\n要求的学校：宁波大学\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：140-160元/2小时\n时间：每周5次；晚上18:30开始\n地址：宁波市鄞州区钟盈小区\n要求：经验丰富，理科优秀，有耐心负责任\n备注：全科偏理\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "男",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "初一",
+        "科目": "全科辅导",
+        "需求方性别": "男",
+        "要求的学校": "宁波大学",
+        "薪酬": "140-160元/2小时",
+        "时间": "每周5次；晚上18:30开始",
+        "地址": "宁波市鄞州区钟盈小区",
+        "要求": "经验丰富，理科优秀，有耐心负责任",
+        "备注": "全科偏理",
+        "编号": "BKB673"
+      },
+      "expected": {
+        "grade_ids": [
+          8
+        ],
+        "subject_ids": [
+          15
+        ],
+        "condition.requester_gender": "male",
+        "condition.required_gender": "male",
+        "compensation.amount_min": "140",
+        "compensation.amount_max": "160",
+        "weekly_frequency_min": 5,
+        "weekly_frequency_max": 5
+      }
+    },
+    {
+      "id": "BKB609",
+      "provenance": "existing_source",
+      "city": "宁波市",
+      "raw": "编号：BKB609\n信息：幼儿园中班男生，泰语，日常需要，后续可能出国，周末一周一次，120-140/2h（可议价）\n地址：慈溪复地一期御溪雅苑\n要求：男老师优先\n￼",
+      "normalized": "编号：BKB609\n年级：中班\n科目：泰语\n需求方角色：家长\n需求方性别：男\n需求方学历：\n要求的性别：不限\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：120-140元/2小时（可议价）\n时间：每周1次；周末\n地址：宁波市慈溪复地一期御溪雅苑\n要求：泰语日常学习，后续可能出国；男老师优先\n备注：原文科目：泰语；现目录无等价项\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "中班",
+        "科目": "泰语",
+        "需求方性别": "男",
+        "薪酬": "120-140元/2小时（可议价）",
+        "时间": "每周1次；周末",
+        "地址": "宁波市慈溪复地一期御溪雅苑",
+        "要求": "泰语日常学习，后续可能出国；男老师优先",
+        "备注": "原文科目：泰语；现目录无等价项",
+        "编号": "BKB609"
+      },
+      "expected": {
+        "grade_ids": [
+          16
+        ],
+        "subject_ids": [
+          29
+        ],
+        "condition.requester_gender": "male",
+        "condition.required_gender": "any",
+        "compensation.amount_min": "120",
+        "weekly_frequency_min": 1,
+        "weekly_frequency_max": 1,
+        "catalog_gap": "泰语",
+        "catalog_fallback": "其他；原科目泰语保留在要求/备注，不等于已匹配独立科目"
+      }
+    },
+    {
+      "id": "TEST30003",
+      "provenance": "screenshot_excerpt_with_synthetic_context",
+      "city": "杭州市",
+      "raw": "编号：TEST30003\n学员：高二\n补习科目：数学\n要求：专职老师280元一个小时\n补习地点：杭州市上城区留香园",
+      "normalized": "编号：TEST30003\n年级：高二\n科目：数学\n需求方角色：家长\n需求方性别：\n需求方学历：\n要求的性别：不限\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：专职教师\n薪酬：280元/小时\n时间：\n地址：杭州市上城区留香园\n要求：\n备注：\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线下",
+        "要求的资格": "专职教师",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "高二",
+        "科目": "数学",
+        "薪酬": "280元/小时",
+        "地址": "杭州市上城区留香园",
+        "编号": "TEST30003"
+      },
+      "expected": {
+        "grade_ids": [
+          12
+        ],
+        "subject_ids": [
+          2
+        ],
+        "condition.required_occupation": "full_time_teacher",
+        "compensation.amount_min": "280",
+        "compensation.billing_period": "hourly"
+      }
+    },
+    {
+      "id": "TEST30004",
+      "provenance": "synthetic_control",
+      "city": "杭州市",
+      "raw": "编号：TEST30004\n科目：高一数学\n学员情况：男孩\n辅导地址：杭州市西湖区文三路\n课时费：每小时150元",
+      "normalized": "编号：TEST30004\n年级：高一\n科目：数学\n需求方角色：家长\n需求方性别：男\n需求方学历：\n要求的性别：不限\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：150元/小时\n时间：\n地址：杭州市西湖区文三路\n要求：\n备注：\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "高一",
+        "科目": "数学",
+        "需求方性别": "男",
+        "薪酬": "150元/小时",
+        "地址": "杭州市西湖区文三路",
+        "编号": "TEST30004"
+      },
+      "expected": {
+        "grade_ids": [
+          11
+        ],
+        "subject_ids": [
+          2
+        ],
+        "condition.requester_gender": "male",
+        "compensation.amount_min": "150"
+      }
+    },
+    {
+      "id": "TEST30005",
+      "provenance": "synthetic_control",
+      "city": "嘉兴市",
+      "raw": "编号：TEST30005\n学员五年级男生，学电子琴，每周一次。\n补习地点：嘉兴市南湖区南湖天地\n教师要求：女生优先",
+      "normalized": "编号：TEST30005\n年级：五年级\n科目：乐器\n需求方角色：家长\n需求方性别：男\n需求方学历：\n要求的性别：不限\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：\n时间：每周1次\n地址：嘉兴市南湖区南湖天地\n要求：女生优先\n备注：具体科目：电子琴\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "五年级",
+        "科目": "乐器",
+        "需求方性别": "男",
+        "时间": "每周1次",
+        "地址": "嘉兴市南湖区南湖天地",
+        "要求": "女生优先",
+        "备注": "具体科目：电子琴",
+        "编号": "TEST30005"
+      },
+      "expected": {
+        "grade_ids": [
+          6
+        ],
+        "subject_ids": [
+          25
+        ],
+        "condition.requester_gender": "male",
+        "condition.required_gender": "any",
+        "weekly_frequency_min": 1,
+        "weekly_frequency_max": 1
+      }
+    },
+    {
+      "id": "TEST30006",
+      "provenance": "synthetic_control",
+      "city": "武汉市",
+      "raw": "编号：TEST30006\n初一女孩补习英语，必须女老师。\n上门地址：武汉市洪山区光谷天地\n时间：每周五次，每次两小时",
+      "normalized": "编号：TEST30006\n年级：初一\n科目：英语\n需求方角色：家长\n需求方性别：女\n需求方学历：\n要求的性别：女\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：\n时间：每周5次，每次2小时\n地址：武汉市洪山区光谷天地\n要求：必须女老师\n备注：\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "女",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "初一",
+        "科目": "英语",
+        "需求方性别": "女",
+        "时间": "每周5次，每次2小时",
+        "地址": "武汉市洪山区光谷天地",
+        "要求": "必须女老师",
+        "编号": "TEST30006"
+      },
+      "expected": {
+        "grade_ids": [
+          8
+        ],
+        "subject_ids": [
+          3
+        ],
+        "condition.requester_gender": "female",
+        "condition.required_gender": "female",
+        "weekly_frequency_min": 5,
+        "weekly_frequency_max": 5,
+        "session_duration_minutes_min": 120,
+        "session_duration_minutes_max": 120
+      }
+    },
+    {
+      "id": "TEST30007",
+      "provenance": "synthetic_control",
+      "city": "杭州市",
+      "raw": "编号：TEST30007\n学生：初二男生，英语\n一周两到三次，每次一个半到两个小时，周末时间协商。\n地址：杭州市拱墅区九龙仓君玺",
+      "normalized": "编号：TEST30007\n年级：初二\n科目：英语\n需求方角色：家长\n需求方性别：男\n需求方学历：\n要求的性别：不限\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：\n时间：每周2-3次，每次1.5-2小时；周末时间协商\n地址：杭州市拱墅区九龙仓君玺\n要求：\n备注：\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "初二",
+        "科目": "英语",
+        "需求方性别": "男",
+        "时间": "每周2-3次，每次1.5-2小时；周末时间协商",
+        "地址": "杭州市拱墅区九龙仓君玺",
+        "编号": "TEST30007"
+      },
+      "expected": {
+        "grade_ids": [
+          9
+        ],
+        "subject_ids": [
+          3
+        ],
+        "weekly_frequency_min": 2,
+        "weekly_frequency_max": 3,
+        "session_duration_minutes_min": 90,
+        "session_duration_minutes_max": 120
+      }
+    },
+    {
+      "id": "TEST30008",
+      "provenance": "synthetic_control",
+      "city": "杭州市",
+      "raw": "编号：TEST30008\n学员：初一女生，数学\n老师需有教过五年级的经验，男老师优先。\n面试：浙江大学紫金港校区\n实际授课：杭州市拱墅区文樾上院",
+      "normalized": "编号：TEST30008\n年级：初一\n科目：数学\n需求方角色：家长\n需求方性别：女\n需求方学历：\n要求的性别：不限\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：\n时间：\n地址：杭州市拱墅区文樾上院\n要求：老师需有教过五年级的经验；男老师优先\n备注：面试地点：浙江大学紫金港校区\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "初一",
+        "科目": "数学",
+        "需求方性别": "女",
+        "地址": "杭州市拱墅区文樾上院",
+        "要求": "老师需有教过五年级的经验；男老师优先",
+        "备注": "面试地点：浙江大学紫金港校区",
+        "编号": "TEST30008"
+      },
+      "expected": {
+        "grade_ids": [
+          8
+        ],
+        "subject_ids": [
+          2
+        ],
+        "condition.requester_gender": "female",
+        "condition.required_gender": "any"
+      }
+    },
+    {
+      "id": "TEST30009",
+      "provenance": "synthetic_control",
+      "city": "杭州市",
+      "raw": "编号：TEST30009\n家教地址：杭州市滨江区丹枫实验小学附近，上门辅导。\n孩子二年级，女，语文数学\n要求：大学生，有经验\n时间：每次90分钟，每周3次",
+      "normalized": "编号：TEST30009\n年级：二年级\n科目：语文、数学\n需求方角色：家长\n需求方性别：女\n需求方学历：\n要求的性别：不限\n要求的学历：大学生在读\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：\n时间：每周3次，每次90分钟\n地址：杭州市滨江区丹枫实验小学附近\n要求：大学生，有经验\n备注：\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "二年级",
+        "科目": "语文、数学",
+        "需求方性别": "女",
+        "地址": "杭州市滨江区丹枫实验小学附近",
+        "要求的学历": "大学生在读",
+        "要求": "大学生，有经验",
+        "时间": "每周3次，每次90分钟",
+        "编号": "TEST30009"
+      },
+      "expected": {
+        "grade_ids": [
+          3
+        ],
+        "subject_ids": [
+          1,
+          2
+        ],
+        "condition.requester_gender": "female",
+        "condition.required_occupation": "part_time_teacher",
+        "weekly_frequency_min": 3,
+        "session_duration_minutes_min": 90,
+        "session_duration_minutes_max": 90
+      }
+    },
+    {
+      "id": "TEST30010",
+      "provenance": "synthetic_control",
+      "city": "杭州市",
+      "raw": "编号：TEST30010\n五岁女孩，全英语陪玩，不是五年级。\n授课地点：杭州市西湖区求是新村\n老师认真负责，男女不限",
+      "normalized": "编号：TEST30010\n年级：\n科目：英语\n需求方角色：家长\n需求方性别：女\n需求方学历：\n要求的性别：不限\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：\n时间：\n地址：杭州市西湖区求是新村\n要求：全英语陪玩；老师认真负责\n备注：学员五岁，原文明确不是五年级；未写就读年级\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "科目": "英语",
+        "需求方性别": "女",
+        "地址": "杭州市西湖区求是新村",
+        "要求": "全英语陪玩；老师认真负责",
+        "备注": "学员五岁，原文明确不是五年级；未写就读年级",
+        "编号": "TEST30010"
+      },
+      "expected": {
+        "grade_ids": [],
+        "subject_ids": [
+          3
+        ],
+        "condition.requester_gender": "female",
+        "condition.required_gender": "any"
+      }
+    },
+    {
+      "id": "TEST30011",
+      "provenance": "synthetic_control",
+      "city": "杭州市",
+      "raw": "编号：TEST30011\n高二数学同步辅导\n线上网课，上课地点所在城市：杭州市\n一周一次，每次两小时\n费用280元每小时",
+      "normalized": "编号：TEST30011\n年级：高二\n科目：数学\n需求方角色：家长\n需求方性别：\n需求方学历：\n要求的性别：不限\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线上\n要求的资格：普通兼职\n薪酬：280元/小时\n时间：每周1次，每次2小时\n地址：杭州市\n要求：数学同步辅导\n备注：\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线上",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "高二",
+        "科目": "数学",
+        "薪酬": "280元/小时",
+        "时间": "每周1次，每次2小时",
+        "地址": "杭州市",
+        "要求": "数学同步辅导",
+        "编号": "TEST30011"
+      },
+      "expected": {
+        "grade_ids": [
+          12
+        ],
+        "subject_ids": [
+          2
+        ],
+        "preferred_mode": "online",
+        "compensation.amount_min": "280",
+        "weekly_frequency_min": 1,
+        "session_duration_minutes_min": 120
+      }
+    },
+    {
+      "id": "TEST30012",
+      "provenance": "synthetic_negative_control",
+      "city": "杭州市",
+      "raw": "编号：TEST30012\n学生：初三男生\n学习内容：同步辅导\n授课地点：杭州市萧山区金鸡路附近\n女生优先，暂时未确定具体科目\n费用120元/2小时",
+      "normalized": "编号：TEST30012\n年级：初三\n科目：\n需求方角色：家长\n需求方性别：男\n需求方学历：\n要求的性别：不限\n要求的学历：\n要求的学校：\n学校的资质：\n授课方式：线下\n要求的资格：普通兼职\n薪酬：120元/2小时\n时间：\n地址：杭州市萧山区金鸡路附近\n要求：同步辅导；女生优先；暂时未确定具体科目\n备注：\n用户电话：\n用户微信：\n管理员电话：\n管理员微信：semantic_fixture_admin",
+      "fields": {
+        "需求方角色": "家长",
+        "要求的性别": "不限",
+        "授课方式": "线下",
+        "要求的资格": "普通兼职",
+        "管理员微信": "semantic_fixture_admin",
+        "年级": "初三",
+        "需求方性别": "男",
+        "地址": "杭州市萧山区金鸡路附近",
+        "要求": "同步辅导；女生优先；暂时未确定具体科目",
+        "薪酬": "120元/2小时",
+        "编号": "TEST30012"
+      },
+      "expected": {
+        "grade_ids": [
+          10
+        ],
+        "subject_ids": [],
+        "condition.required_gender": "any",
+        "compensation.amount_min": "120",
+        "no_duration_inference": true
+      }
+    }
+  ],
+  "note": "2 actual saved-source paragraphs; remaining cases use screenshot excerpts or synthetic controls. Fake contacts are isolated fixture defaults, not source facts. Semantic normalization was produced by the current agent using the bundled field guide; no independent model run."
+}

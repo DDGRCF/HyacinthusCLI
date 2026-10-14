@@ -1,0 +1,703 @@
+[
+  {
+    "id": "BKB673",
+    "provenance": "existing_source",
+    "raw": [
+      {
+        "field": "subject_ids",
+        "expected": [
+          15
+        ],
+        "actual": []
+      },
+      {
+        "field": "condition.requester_gender",
+        "expected": "male",
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_min",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "address_detail",
+        "expected": "宁波市鄞州区钟盈小区",
+        "actual": "鄞州区钟盈小区"
+      }
+    ],
+    "normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 5,
+        "actual": null
+      }
+    ],
+    "strict_normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 5,
+        "actual": null
+      }
+    ],
+    "cli_import_preview": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 5,
+        "actual": null
+      }
+    ]
+  },
+  {
+    "id": "BKB609",
+    "provenance": "existing_source",
+    "raw": [
+      {
+        "field": "subject_ids",
+        "expected": [
+          29
+        ],
+        "actual": []
+      },
+      {
+        "field": "condition.requester_gender",
+        "expected": "male",
+        "actual": null
+      },
+      {
+        "field": "condition.required_gender",
+        "expected": "any",
+        "actual": "male"
+      },
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 1,
+        "actual": null
+      }
+    ],
+    "normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 1,
+        "actual": null
+      }
+    ],
+    "strict_normalized": [
+      {
+        "field": "subject_ids",
+        "expected": [
+          29
+        ],
+        "actual": []
+      },
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 1,
+        "actual": null
+      }
+    ],
+    "cli_import_preview": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 1,
+        "actual": null
+      }
+    ]
+  },
+  {
+    "id": "TEST30003",
+    "provenance": "screenshot_excerpt_with_synthetic_context",
+    "raw": [
+      {
+        "field": "condition.required_occupation",
+        "expected": "full_time_teacher",
+        "actual": "part_time_teacher"
+      },
+      {
+        "field": "compensation.billing_period",
+        "expected": "hourly",
+        "actual": null
+      },
+      {
+        "field": "address_detail",
+        "expected": "杭州市上城区留香园",
+        "actual": null
+      }
+    ],
+    "normalized": [],
+    "strict_normalized": [],
+    "cli_import_preview": []
+  },
+  {
+    "id": "TEST30004",
+    "provenance": "synthetic_control",
+    "raw": [
+      {
+        "field": "grade_ids",
+        "expected": [
+          11
+        ],
+        "actual": []
+      },
+      {
+        "field": "subject_ids",
+        "expected": [
+          2
+        ],
+        "actual": [
+          29
+        ]
+      },
+      {
+        "field": "condition.requester_gender",
+        "expected": "male",
+        "actual": null
+      }
+    ],
+    "normalized": [],
+    "strict_normalized": [],
+    "cli_import_preview": []
+  },
+  {
+    "id": "TEST30005",
+    "provenance": "synthetic_control",
+    "raw": [
+      {
+        "field": "subject_ids",
+        "expected": [
+          25
+        ],
+        "actual": []
+      },
+      {
+        "field": "condition.requester_gender",
+        "expected": "male",
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "address_detail",
+        "expected": "嘉兴市南湖区南湖天地",
+        "actual": null
+      }
+    ],
+    "normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 1,
+        "actual": null
+      }
+    ],
+    "strict_normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 1,
+        "actual": null
+      }
+    ],
+    "cli_import_preview": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 1,
+        "actual": null
+      }
+    ]
+  },
+  {
+    "id": "TEST30006",
+    "provenance": "synthetic_control",
+    "raw": [
+      {
+        "field": "condition.requester_gender",
+        "expected": "female",
+        "actual": null
+      },
+      {
+        "field": "condition.required_gender",
+        "expected": "female",
+        "actual": "any"
+      },
+      {
+        "field": "weekly_frequency_min",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 120,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 120,
+        "actual": null
+      },
+      {
+        "field": "address_detail",
+        "expected": "武汉市洪山区光谷天地",
+        "actual": null
+      }
+    ],
+    "normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 120,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 120,
+        "actual": null
+      }
+    ],
+    "strict_normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 120,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 120,
+        "actual": null
+      }
+    ],
+    "cli_import_preview": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 5,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 120,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 120,
+        "actual": null
+      }
+    ]
+  },
+  {
+    "id": "TEST30007",
+    "provenance": "synthetic_control",
+    "raw": [
+      {
+        "field": "grade_ids",
+        "expected": [
+          9
+        ],
+        "actual": []
+      },
+      {
+        "field": "subject_ids",
+        "expected": [
+          3
+        ],
+        "actual": []
+      },
+      {
+        "field": "weekly_frequency_min",
+        "expected": 2,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 3,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 90,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 120,
+        "actual": null
+      }
+    ],
+    "normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 2,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 3,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 90,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 120,
+        "actual": null
+      }
+    ],
+    "strict_normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 2,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 3,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 90,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 120,
+        "actual": null
+      }
+    ],
+    "cli_import_preview": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 2,
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_max",
+        "expected": 3,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 90,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 120,
+        "actual": null
+      }
+    ]
+  },
+  {
+    "id": "TEST30008",
+    "provenance": "synthetic_control",
+    "raw": [
+      {
+        "field": "grade_ids",
+        "expected": [
+          8
+        ],
+        "actual": [
+          6,
+          8
+        ]
+      },
+      {
+        "field": "condition.requester_gender",
+        "expected": "female",
+        "actual": null
+      },
+      {
+        "field": "address_detail",
+        "expected": "杭州市拱墅区文樾上院",
+        "actual": null
+      }
+    ],
+    "normalized": [],
+    "strict_normalized": [],
+    "cli_import_preview": []
+  },
+  {
+    "id": "TEST30009",
+    "provenance": "synthetic_control",
+    "raw": [
+      {
+        "field": "condition.requester_gender",
+        "expected": "female",
+        "actual": null
+      },
+      {
+        "field": "weekly_frequency_min",
+        "expected": 3,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 90,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 90,
+        "actual": null
+      },
+      {
+        "field": "address_detail",
+        "expected": "杭州市滨江区丹枫实验小学附近",
+        "actual": "杭州市滨江区丹枫实验小学附近，上门辅导。"
+      }
+    ],
+    "normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 3,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 90,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 90,
+        "actual": null
+      }
+    ],
+    "strict_normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 3,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 90,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 90,
+        "actual": null
+      }
+    ],
+    "cli_import_preview": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 3,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 90,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_max",
+        "expected": 90,
+        "actual": null
+      }
+    ]
+  },
+  {
+    "id": "TEST30010",
+    "provenance": "synthetic_control",
+    "raw": [
+      {
+        "field": "grade_ids",
+        "expected": [],
+        "actual": [
+          6
+        ]
+      },
+      {
+        "field": "condition.requester_gender",
+        "expected": "female",
+        "actual": null
+      },
+      {
+        "field": "address_detail",
+        "expected": "杭州市西湖区求是新村",
+        "actual": null
+      }
+    ],
+    "normalized": [],
+    "strict_normalized": [],
+    "cli_import_preview": []
+  },
+  {
+    "id": "TEST30011",
+    "provenance": "synthetic_control",
+    "raw": [
+      {
+        "field": "preferred_mode",
+        "expected": "online",
+        "actual": "offline"
+      },
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 120,
+        "actual": null
+      },
+      {
+        "field": "address_detail",
+        "expected": "杭州市",
+        "actual": null
+      }
+    ],
+    "normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 120,
+        "actual": null
+      }
+    ],
+    "strict_normalized": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 120,
+        "actual": null
+      }
+    ],
+    "cli_import_preview": [
+      {
+        "field": "weekly_frequency_min",
+        "expected": 1,
+        "actual": null
+      },
+      {
+        "field": "session_duration_minutes_min",
+        "expected": 120,
+        "actual": null
+      }
+    ]
+  },
+  {
+    "id": "TEST30012",
+    "provenance": "synthetic_negative_control",
+    "raw": [
+      {
+        "field": "grade_ids",
+        "expected": [
+          10
+        ],
+        "actual": []
+      },
+      {
+        "field": "address_detail",
+        "expected": "杭州市萧山区金鸡路附近",
+        "actual": null
+      }
+    ],
+    "normalized": [],
+    "strict_normalized": [],
+    "cli_import_preview": []
+  }
+]

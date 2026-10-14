@@ -1,0 +1,40 @@
+diff --git a/src/domains/business/requirements/worker.rs b/src/domains/business/requirements/worker.rs
+index e654ead..97bcae0 100644
+--- a/src/domains/business/requirements/worker.rs
++++ b/src/domains/business/requirements/worker.rs
+@@ -1952,6 +1952,36 @@ mod tests {
+     use crate::infra::storage::UnavailableObjectStorage;
+     use std::io::Write;
+
++    /// Runs an isolated format audit without database, geocoder, or production writes.
++    #[tokio::test]
++    async fn cli_format2_semantic_probe() {
++        let dir = std::path::PathBuf::from(std::env::var("FORMAT2_AUDIT_DIR").unwrap());
++        let options: Value = serde_json::from_slice(&std::fs::read(dir.join("options.json")).unwrap()).unwrap();
++        let fixtures: Value = serde_json::from_slice(&std::fs::read(dir.join("cases.json")).unwrap()).unwrap();
++        let entries = |name: &str| -> BTreeMap<String, i64> {
++            options["data"][name].as_array().unwrap().iter().map(|item| (
++                item["name"].as_str().unwrap().to_owned(), item["id"].as_i64().unwrap()
++            )).collect()
++        };
++        let catalog = RequirementParseCatalog {
++            subjects: entries("subjects"), grades: entries("grades"),
++            roles: BTreeMap::new(), schools: BTreeMap::new(), priority_rules: Vec::new(),
++        };
++        let parser = processor();
++        let mut results = Vec::new();
++        for case in fixtures["cases"].as_array().unwrap() {
++            let mut settings = payload();
++            settings.preset_city = Some(case["city"].as_str().unwrap().to_owned());
++            settings.preset_contact_wechat = Some("semantic_fixture_admin".to_owned());
++            let raw = parser.parse_rows(RequirementSourceDocument::Text(case["raw"].as_str().unwrap().to_owned()), &settings, &catalog).unwrap();
++            let normalized = parser.parse_rows(RequirementSourceDocument::Text(case["normalized"].as_str().unwrap().to_owned()), &settings, &catalog).unwrap();
++            settings.mode = RequirementParseMode::Strict;
++            let strict_normalized = parser.parse_rows(RequirementSourceDocument::Text(case["normalized"].as_str().unwrap().to_owned()), &settings, &catalog).unwrap();
++            results.push(json!({"id": case["id"], "raw": raw, "normalized": normalized, "strict_normalized": strict_normalized}));
++        }
++        std::fs::write(dir.join("parser-results.json"), serde_json::to_vec_pretty(&results).unwrap()).unwrap();
++    }
++
+     /// Provides the narrow requirement location boundary for parser format unit tests.
+     struct StubLocationResolver;

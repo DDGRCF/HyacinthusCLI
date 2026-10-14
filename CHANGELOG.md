@@ -3,6 +3,7 @@
 
 ## Unreleased
 
+- Archive the 2026-10-12 Format 2 and bundled-rule audits with their reproducible fixtures under `docs/audits/2026-10-12`.
 - Limit age-based grade defaults to age 3 -> 小班, age 4 -> 中班, ages 5–6 -> 大班, and age 18 or above -> 成人; explicit learner grades take precedence, other ages are not inferred, and age plus the inference basis remains in remarks.
 - Clarify entity attribution, separate facts combined in one sentence, preserve negation and conditional scope, and retain teacher gender preferences in the description instead of turning them into hard restrictions.
 - Normalize batch-import `preferred_mode` to `offline` unless the value is explicitly `online`, so blank, null, hybrid, and unrecognized values cannot stall prepared Format 2 jobs. Align the bundled field guide and capability description with this behavior, preserving mixed arrangements in descriptive text.
