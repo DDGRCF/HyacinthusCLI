@@ -1,4 +1,4 @@
-// 改动说明：导入契约测试对齐已批准的默认线下及诊断字段剥离，保留业务字段、后端裁决和授权校验。
+// 改动说明：覆盖立即过期命令的独立路由、预览、权限确认与 CLI 0.1.17 回执。
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -699,7 +699,7 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 27);
+    assert_eq!(value["data"]["capability_count"], 28);
     assert_eq!(value["meta"]["source"], "embedded");
 }
 
@@ -6946,4 +6946,120 @@ fn priority_rule_matches_enforces_page_limit_locally() {
         .as_str()
         .unwrap()
         .contains("must be <= 100"));
+}
+
+#[test]
+fn requirements_expire_dry_run_builds_request() {
+    let value = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "--instance-id",
+        "1",
+        "requirements",
+        "expire",
+        "KKH347",
+        "--dry-run",
+    ]);
+
+    assert_eq!(value["data"]["request"]["method"], "POST");
+    assert_eq!(
+        value["data"]["request"]["path"],
+        "/api/v1/agent/requirements/expire"
+    );
+    assert_eq!(value["data"]["request"]["body"]["instance_id"], 1);
+    assert_eq!(
+        value["data"]["request"]["body"]["requirement_code"],
+        "KKH347"
+    );
+    assert!(value["data"]["request"]["body"].get("expires_at").is_none());
+    assert_eq!(value["meta"]["capability"], "requirements.expire");
+}
+
+#[test]
+fn requirements_expire_real_execution_requires_yes() {
+    let output = cli()
+        .args([
+            "--base-url",
+            "http://localhost:8000",
+            "--instance-id",
+            "1",
+            "requirements",
+            "expire",
+            "KKH347",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:write")
+        .output()
+        .expect("requirements expire write confirmation");
+    assert_eq!(output.status.code(), Some(10));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["error"]["type"], "confirmation_required");
+    assert_eq!(
+        value["error"]["risk"]["action"],
+        "hyacinthus requirements expire"
+    );
+}
+
+#[test]
+fn requirements_expire_yes_posts_to_backend() {
+    let base_url = mock_once_expect_request(
+        r#"{"code":0,"message":"success","data":{"requirement_id":123,"requirement_code":"KKH347","expires_at":"2026-07-10T12:00:00+08:00"}}"#,
+        "POST /api/v1/agent/requirements/expire HTTP/1.1",
+    );
+    let output = cli()
+        .args([
+            "--base-url",
+            &base_url,
+            "--instance-id",
+            "1",
+            "requirements",
+            "expire",
+            "KKH347",
+            "--yes",
+        ])
+        .env_clear()
+        .env("HYACINTHUS_CLIENT_INSTANCE_ID", "hermes-wechat-a")
+        .env("HYACINTHUS_CLIENT_DISPLAY_NAME", "Hermes WeChat A")
+        .env("HYACINTHUS_CLIENT_TYPE", "hermes")
+        .env("HYACINTHUS_CONFIG_DIR", tempfile::tempdir().unwrap().path())
+        .env("HYACINTHUS_AGENT_TOKEN", "test-token")
+        .env("HYACINTHUS_AGENT_SCOPES", "requirements:write")
+        .output()
+        .expect("requirements expire yes");
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(value["data"]["requirement_id"], 123);
+    assert_eq!(value["data"]["requirement_code"], "KKH347");
+    assert_eq!(value["meta"]["capability"], "requirements.expire");
+}
+
+/// Immediate expiry must not accept an arbitrary client-computed future deadline.
+#[test]
+fn requirements_expire_rejects_a_client_deadline_before_http() {
+    let value = run_json_expect_code(
+        &[
+            "capability",
+            "run",
+            "requirements.expire",
+            "--data",
+            r#"{"requirement_code":"EXPIRE-1","expires_at":"2099-01-01T00:00:00Z"}"#,
+            "--dry-run",
+        ],
+        &[("HYACINTHUS_AGENT_SCOPES", "requirements:write")],
+        2,
+    );
+    assert_eq!(value["ok"], false);
+    assert!(value["error"]["message"]
+        .as_str()
+        .expect("validation message")
+        .contains("expires_at"));
 }

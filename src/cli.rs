@@ -1,4 +1,4 @@
-// 改动说明：增加学校目录只读查询，支持正式名、别名、标识码、资质和精确匹配。
+// 改动说明：增加按准确业务编号立即过期的独立命令，和默认有效期延期明确区分。
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -407,6 +407,7 @@ pub enum RequirementsSubcommand {
     Options,
     Search(RequirementsSearchArgs),
     Extend(RequirementsExtendArgs),
+    Expire(RequirementsExpireArgs),
     Parse(RequirementsParseArgs),
     /// Query an existing parse job without creating another task.
     ParseJob(RequirementsParseJobArgs),
@@ -608,6 +609,20 @@ pub struct RequirementsSearchArgs {
     pub skip: u64,
     #[arg(long, default_value_t = 20)]
     pub limit: u64,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+/// Arguments for immediately expiring one exact business code without a client deadline.
+#[derive(Clone, Debug, Args)]
+pub struct RequirementsExpireArgs {
+    pub requirement_code: String,
+    #[arg(long)]
+    pub instance_id: Option<i64>,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
     #[arg(long, short = 'o')]
     pub output: Option<String>,
 }

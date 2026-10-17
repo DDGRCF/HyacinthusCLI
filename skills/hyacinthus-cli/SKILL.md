@@ -16,7 +16,7 @@ metadata:
 | 任务 | 指南 | 命令 |
 | --- | --- | --- |
 | 安装、授权、检查实例或排障 | [授权和环境](references/auth.md) | `auth` / `config` / `doctor --strict` |
-| 找需求、查编号、单条延期 | [查询和延期](references/requirements-query.md) | `requirements search/extend` |
+| 找需求、查编号、单条延期或过期 | [查询和延期](references/requirements-query.md) | `requirements search/extend/expire` |
 | 整理文本、核对字段 | [字段格式](references/requirements-format.md) | TXT / CSV / JSON 映射 |
 | 解析、复核、导入、恢复解析任务 | [解析和导入](references/requirements-import.md) | `requirements parse/parse-job/import/import-raw` |
 | 科目、年级、学校资质、缺失目录和排序 | [目录管理](references/catalog.md) | `requirements options/catalog` |

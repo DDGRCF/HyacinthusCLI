@@ -1,4 +1,4 @@
-# 查询和延期
+# 查询、延期和过期
 
 实际调用遵循[公共规则](shared.md)。
 
@@ -31,3 +31,18 @@ hyacinthus requirements extend HZ260514701 --yes
 成功报告 `requirement_id/requirement_code/expires_at`。编号为空、不存在、重复或时间无效时，按返回 code/hint 处理。
 
 批量延期及其当前限制见[批次指南](batch-and-geo.md#批量延期限制)。
+
+## 单条立即过期
+
+按准确业务编号执行，需 `requirements:write`：
+
+```bash
+hyacinthus requirements expire HZ260514701 --dry-run
+hyacinthus requirements expire HZ260514701 --yes
+```
+
+`expire` 只将截止时间设为服务端当前时刻或保留更早的既有截止时间，不延期、不删除、不改变匹配或下架状态。公开列表和地图按截止时间过滤后不再展示该需求。重复执行不会把已经过期的期限向后移动；不接受客户端指定日期。
+
+`extend` 才是重新延期：按后台默认有效期从服务端当前时刻重新计时，恢复 open 并清除旧匹配及下架标记；它不是立即过期。普通编辑接口不得替代这两个动作。
+
+先核对准确编号，再预览及确认，成功回读 `requirement_id/requirement_code/expires_at`。未找到或授权失败必须报告实际错误，不能提示成功；不要用生产岗位做写入测试。

@@ -12,7 +12,7 @@
       },
       "name": "hyacinthus-cli",
       "path": "skills/hyacinthus-cli/SKILL.md",
-      "version": "0.1.16"
+      "version": "0.1.17"
     },
     {
       "description": "检查或整理家教岗位邮件；用户要求上传邮件里的家教岗位时，选择邮件、保存来源、按21字段整理，并通过 Hyacinthus CLI 授权、复核导入和回读。包含错误CSV、进度续接和重复上传处理。",
@@ -21,7 +21,7 @@
       },
       "name": "tutoring-job-mail-upload",
       "path": "skills/tutoring-job-mail-upload/SKILL.md",
-      "version": "0.1.16"
+      "version": "0.1.17"
     }
   ],
   "meta": {

@@ -15,13 +15,13 @@ use crate::cli::{
     AdminSubcommand, AuthLoginArgs, AuthSubcommand, AuthTokenSubcommand, AuthWaitArgs,
     CapabilitySubcommand, Cli, Command, ConfigSubcommand, RequirementsCatalogCreateMissingArgs,
     RequirementsCatalogReorderArgs, RequirementsCatalogSchoolsArgs, RequirementsCatalogSubcommand,
-    RequirementsExtendArgs, RequirementsImportArgs, RequirementsImportRawArgs,
-    RequirementsParseArgs, RequirementsParseJobArgs, RequirementsPriorityRuleAddArgs,
-    RequirementsPriorityRuleExportJsonArgs, RequirementsPriorityRuleIdWriteArgs,
-    RequirementsPriorityRuleImportJsonArgs, RequirementsPriorityRuleMatchesArgs,
-    RequirementsPriorityRuleUpdateArgs, RequirementsPriorityRulesListArgs,
-    RequirementsPriorityRulesSubcommand, RequirementsSearchArgs, RequirementsSubcommand,
-    UserSubcommand, UserUpdateArgs,
+    RequirementsExpireArgs, RequirementsExtendArgs, RequirementsImportArgs,
+    RequirementsImportRawArgs, RequirementsParseArgs, RequirementsParseJobArgs,
+    RequirementsPriorityRuleAddArgs, RequirementsPriorityRuleExportJsonArgs,
+    RequirementsPriorityRuleIdWriteArgs, RequirementsPriorityRuleImportJsonArgs,
+    RequirementsPriorityRuleMatchesArgs, RequirementsPriorityRuleUpdateArgs,
+    RequirementsPriorityRulesListArgs, RequirementsPriorityRulesSubcommand, RequirementsSearchArgs,
+    RequirementsSubcommand, UserSubcommand, UserUpdateArgs,
 };
 use crate::client::{self, ApiClient};
 use crate::config::{self, Profile, RuntimeContext};
@@ -138,6 +138,7 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
             RequirementsSubcommand::Options => requirements_options(cli),
             RequirementsSubcommand::Search(args) => requirements_search(cli, args),
             RequirementsSubcommand::Extend(args) => requirements_extend(cli, args),
+            RequirementsSubcommand::Expire(args) => requirements_expire(cli, args),
             RequirementsSubcommand::Parse(args) => requirements_parse(cli, args),
             RequirementsSubcommand::ParseJob(args) => requirements_parse_job(cli, args),
             RequirementsSubcommand::Import(args) => requirements_import(cli, args),
@@ -1815,6 +1816,48 @@ fn requirements_extend(cli: &Cli, args: &RequirementsExtendArgs) -> CliResult<(V
     Ok((
         data,
         json!({ "command": "requirements extend", "capability": "requirements.extend" }),
+    ))
+}
+
+/// Immediately expire one exact code through its distinct scoped write endpoint.
+fn requirements_expire(cli: &Cli, args: &RequirementsExpireArgs) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        args.instance_id.or(cli.instance_id),
+        cli.request_id.as_deref(),
+    )?;
+    let capability = manifest::find_capability("requirements.expire")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    let requirement_code = args.requirement_code.trim();
+    if requirement_code.is_empty() {
+        return Err(CliError::validation("requirement_code is required"));
+    }
+    let payload = json!({
+        "instance_id": ctx.instance_id,
+        "requirement_code": requirement_code,
+    });
+    validate_request_payload(&capability, &payload)?;
+    if args.dry_run {
+        return Ok((
+            dry_run_payload(
+                "POST",
+                "/api/v1/agent/requirements/expire",
+                payload,
+                None,
+                ctx.request_id.as_deref(),
+            ),
+            json!({ "command": "requirements expire", "capability": "requirements.expire" }),
+        ));
+    }
+    ensure_execution_confirmed(args.yes, &capability)?;
+    let data = ApiClient::new(ctx)?.post("/api/v1/agent/requirements/expire", payload)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements expire", "capability": "requirements.expire" }),
     ))
 }
 

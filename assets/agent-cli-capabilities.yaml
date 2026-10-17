@@ -539,6 +539,57 @@ capabilities:
       - title: 使用默认延期时间
         command: hyacinthus requirements extend KKH347 --yes
 
+  - id: requirements.expire
+    title: 立即过期需求
+    description: 按准确业务编号立即过期，服务端设置截止时间；保留匹配和下架状态，重复过期不向后移动期限。
+    domain: requirements
+    command: hyacinthus requirements expire
+    method: POST
+    path: /api/v1/agent/requirements/expire
+    required_scopes:
+      - requirements:write
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.0"
+    request_schema:
+      type: object
+      additionalProperties: false
+      required:
+        - requirement_code
+      properties:
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 可选请求实例标识（i64 正整数）；授权身份由绑定 Agent token 确定，不用于选择授权用户。
+        requirement_code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 需求编号。
+    response_schema:
+      type: object
+      required:
+        - requirement_id
+        - requirement_code
+        - expires_at
+      properties:
+        requirement_id:
+          type: integer
+        requirement_code:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    examples:
+      - title: 立即过期一个准确编号
+        command: hyacinthus requirements expire KKH347 --yes
+
   - id: requirements.search
     title: 搜索需求
     description: Agent 专用需求关键字搜索能力，返回匹配总数和简表结果。
