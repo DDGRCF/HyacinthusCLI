@@ -1,4 +1,4 @@
-// 改动说明：新增有来源的学校事实查询，并将批量导入中缺失或空值授课方式统一补为线下。
+// Change note: unify extend-only renewal, explicit deadline shortening, expiry and confirmed deletion.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
@@ -21,7 +21,7 @@ use crate::cli::{
     RequirementsPriorityRuleIdWriteArgs, RequirementsPriorityRuleImportJsonArgs,
     RequirementsPriorityRuleMatchesArgs, RequirementsPriorityRuleUpdateArgs,
     RequirementsPriorityRulesListArgs, RequirementsPriorityRulesSubcommand, RequirementsSearchArgs,
-    RequirementsSubcommand, UserSubcommand, UserUpdateArgs,
+    RequirementsSetDeadlineArgs, RequirementsSubcommand, UserSubcommand, UserUpdateArgs,
 };
 use crate::client::{self, ApiClient};
 use crate::config::{self, Profile, RuntimeContext};
@@ -139,6 +139,8 @@ fn dispatch(cli: &Cli) -> CliResult<(Value, Value)> {
             RequirementsSubcommand::Search(args) => requirements_search(cli, args),
             RequirementsSubcommand::Extend(args) => requirements_extend(cli, args),
             RequirementsSubcommand::Expire(args) => requirements_expire(cli, args),
+            RequirementsSubcommand::SetDeadline(args) => requirements_set_deadline(cli, args),
+            RequirementsSubcommand::Delete(args) => requirements_delete(cli, args),
             RequirementsSubcommand::Parse(args) => requirements_parse(cli, args),
             RequirementsSubcommand::ParseJob(args) => requirements_parse_job(cli, args),
             RequirementsSubcommand::Import(args) => requirements_import(cli, args),
@@ -1819,6 +1821,52 @@ fn requirements_extend(cli: &Cli, args: &RequirementsExtendArgs) -> CliResult<(V
     ))
 }
 
+/// Explicitly sets a future deadline and requires confirmation before permitting shortening.
+fn requirements_set_deadline(
+    cli: &Cli,
+    args: &RequirementsSetDeadlineArgs,
+) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        args.instance_id.or(cli.instance_id),
+        cli.request_id.as_deref(),
+    )?;
+    let capability = manifest::find_capability("requirements.set_deadline")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    let requirement_code = args.requirement_code.trim();
+    if requirement_code.is_empty() {
+        return Err(CliError::validation("requirement_code is required"));
+    }
+    let mut payload = json!({
+        "instance_id": ctx.instance_id,
+        "requirement_code": requirement_code,
+    });
+    payload["expires_at"] = json!(normalize_requirement_deadline(&args.expires_at)?);
+    validate_request_payload(&capability, &payload)?;
+    if args.dry_run {
+        return Ok((
+            dry_run_payload(
+                "POST",
+                "/api/v1/agent/requirements/deadline",
+                payload,
+                None,
+                ctx.request_id.as_deref(),
+            ),
+            json!({ "command": "requirements set-deadline", "capability": "requirements.set_deadline" }),
+        ));
+    }
+    ensure_execution_confirmed(args.yes, &capability)?;
+    let data = ApiClient::new(ctx)?.post("/api/v1/agent/requirements/deadline", payload)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements set-deadline", "capability": "requirements.set_deadline" }),
+    ))
+}
+
 /// Immediately expire one exact code through its distinct scoped write endpoint.
 fn requirements_expire(cli: &Cli, args: &RequirementsExpireArgs) -> CliResult<(Value, Value)> {
     let ctx = config::resolve_context(
@@ -1858,6 +1906,48 @@ fn requirements_expire(cli: &Cli, args: &RequirementsExpireArgs) -> CliResult<(V
     Ok((
         data,
         json!({ "command": "requirements expire", "capability": "requirements.expire" }),
+    ))
+}
+
+/// Permanently delete one exact code through its distinct scoped write endpoint.
+fn requirements_delete(cli: &Cli, args: &RequirementsExpireArgs) -> CliResult<(Value, Value)> {
+    let ctx = config::resolve_context(
+        cli.profile.as_deref(),
+        cli.base_url.as_deref(),
+        args.instance_id.or(cli.instance_id),
+        cli.request_id.as_deref(),
+    )?;
+    let capability = manifest::find_capability("requirements.delete")?;
+    manifest::ensure_supported(&capability)?;
+    ensure_scopes(&ctx, &capability.required_scopes)?;
+    let requirement_code = args.requirement_code.trim();
+    if requirement_code.is_empty() {
+        return Err(CliError::validation("requirement_code is required"));
+    }
+    let payload = json!({
+        "instance_id": ctx.instance_id,
+        "requirement_code": requirement_code,
+    });
+    validate_request_payload(&capability, &payload)?;
+    if args.dry_run {
+        return Ok((
+            dry_run_payload(
+                "POST",
+                "/api/v1/agent/requirements/delete",
+                payload,
+                None,
+                ctx.request_id.as_deref(),
+            ),
+            json!({ "command": "requirements delete", "capability": "requirements.delete" }),
+        ));
+    }
+    ensure_execution_confirmed(args.yes, &capability)?;
+    let data = ApiClient::new(ctx)?.post("/api/v1/agent/requirements/delete", payload)?;
+    validate_response_payload(&capability, &data)?;
+    write_output_if_needed(&data, args.output.as_deref())?;
+    Ok((
+        data,
+        json!({ "command": "requirements delete", "capability": "requirements.delete" }),
     ))
 }
 

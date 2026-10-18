@@ -1,4 +1,4 @@
-// 改动说明：覆盖立即过期命令的独立路由、预览、权限确认与 CLI 0.1.17 回执。
+// Change note: verify deadline adjustments and deletion use distinct confirmed routes.
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -654,7 +654,7 @@ fn capability_list_returns_embedded_manifest() {
     let value = run_json(&["capability", "list"]);
 
     assert_eq!(value["ok"], true);
-    assert_eq!(value["data"]["version"], "2026-10-08");
+    assert_eq!(value["data"]["version"], "2026-10-19");
     assert!(value["data"]["capabilities"]
         .as_array()
         .unwrap()
@@ -699,7 +699,7 @@ fn capability_verify_reports_embedded_manifest_integrity() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["ok"], true);
     assert_eq!(value["data"]["issue_count"], 0);
-    assert_eq!(value["data"]["capability_count"], 28);
+    assert_eq!(value["data"]["capability_count"], 30);
     assert_eq!(value["meta"]["source"], "embedded");
 }
 
@@ -4148,7 +4148,7 @@ fn jq_filters_success_envelope() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value, "2026-10-08");
+    assert_eq!(value, "2026-10-19");
 }
 
 #[test]
@@ -7062,4 +7062,99 @@ fn requirements_expire_rejects_a_client_deadline_before_http() {
         .as_str()
         .expect("validation message")
         .contains("expires_at"));
+}
+
+/// Exact adjustment uses a required Beijing deadline and its own endpoint.
+#[test]
+fn set_deadline_dry_run_and_confirmation_are_explicit() {
+    let args = [
+        "--base-url",
+        "http://localhost:8000",
+        "requirements",
+        "set-deadline",
+        "KKH347",
+        "--expires-at",
+        "2027-07-10T12:00:00",
+        "--dry-run",
+    ];
+    let result = run_json(&args);
+    assert_eq!(
+        result["data"]["request"]["path"],
+        "/api/v1/agent/requirements/deadline"
+    );
+    assert_eq!(
+        result["data"]["request"]["body"]["expires_at"],
+        "2027-07-10T12:00:00+08:00"
+    );
+    let result = run_json_expect_code(
+        &args[..args.len() - 1],
+        &[("HYACINTHUS_AGENT_SCOPES", "requirements:write")],
+        10,
+    );
+    assert_eq!(result["error"]["type"], "confirmation_required");
+}
+
+/// Deletion is distinct from expiry and requires the additional administrative scope.
+#[test]
+fn delete_requires_admin_scope_and_confirmation() {
+    let args = [
+        "--base-url",
+        "http://localhost:8000",
+        "requirements",
+        "delete",
+        "KKH347",
+    ];
+    let schema = run_json(&["schema", "requirements.delete"]);
+    assert!(schema["data"]["required_scopes"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("admin:read")));
+    let confirmation = run_json_expect_code(
+        &args,
+        &[("HYACINTHUS_AGENT_SCOPES", "requirements:write,admin:read")],
+        10,
+    );
+    assert_eq!(confirmation["error"]["type"], "confirmation_required");
+    let result = run_json(&[
+        "--base-url",
+        "http://localhost:8000",
+        "requirements",
+        "delete",
+        "KKH347",
+        "--dry-run",
+    ]);
+    assert_eq!(
+        result["data"]["request"]["path"],
+        "/api/v1/agent/requirements/delete"
+    );
+    assert!(result["data"]["request"]["body"]
+        .get("expires_at")
+        .is_none());
+}
+
+/// Confirmed explicit adjustment returns the actual server deadline from the dedicated route.
+#[test]
+fn set_deadline_yes_posts_and_returns_actual_deadline() {
+    let base = mock_once_expect_request(
+        r#"{"code":0,"message":"success","data":{"requirement_id":123,"requirement_code":"KKH347","expires_at":"2027-07-10T12:00:00+08:00"}}"#,
+        "POST /api/v1/agent/requirements/deadline HTTP/1.1",
+    );
+    let value = run_json_expect_code(
+        &[
+            "--base-url",
+            &base,
+            "requirements",
+            "set-deadline",
+            "KKH347",
+            "--expires-at",
+            "2027-07-10T12:00:00+08:00",
+            "--yes",
+        ],
+        &[
+            ("HYACINTHUS_AGENT_SCOPES", "requirements:write"),
+            ("HYACINTHUS_AGENT_TOKEN", "test-token"),
+        ],
+        0,
+    );
+    assert_eq!(value["data"]["expires_at"], "2027-07-10T12:00:00+08:00");
 }

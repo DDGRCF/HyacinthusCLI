@@ -7,6 +7,8 @@
 | `requirements.batch_parse` | `requirements parse` | [requirements-import.md](requirements-import.md) |
 | `requirements.batch_import` | `requirements import` | [requirements-import.md](requirements-import.md) |
 | `requirements.expire` | `requirements expire` | [requirements-query.md](requirements-query.md) |
+| `requirements.set_deadline` | `requirements set-deadline` | [requirements-query.md](requirements-query.md) |
+| `requirements.delete` | `requirements delete` | [requirements-query.md](requirements-query.md) |
 | `requirements.extend` | `requirements extend` | [requirements-query.md](requirements-query.md) |
 | `requirements.search` | `requirements search` | [requirements-query.md](requirements-query.md) |
 | `requirements.priority_rules.list` | `requirements priority-rules list` | [priority-rules.md](priority-rules.md) |

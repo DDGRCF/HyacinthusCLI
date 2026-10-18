@@ -1,4 +1,4 @@
-// 改动说明：增加按准确业务编号立即过期的独立命令，和默认有效期延期明确区分。
+// Change note: unify extend-only renewal, explicit deadline shortening, expiry and confirmed deletion.
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -408,6 +408,10 @@ pub enum RequirementsSubcommand {
     Search(RequirementsSearchArgs),
     Extend(RequirementsExtendArgs),
     Expire(RequirementsExpireArgs),
+    /// Explicitly adjusts a future deadline, allowing shortening.
+    SetDeadline(RequirementsSetDeadlineArgs),
+    /// Permanently deletes a requirement; distinct from immediate expiry.
+    Delete(RequirementsExpireArgs),
     Parse(RequirementsParseArgs),
     /// Query an existing parse job without creating another task.
     ParseJob(RequirementsParseJobArgs),
@@ -633,6 +637,22 @@ pub struct RequirementsExtendArgs {
     pub requirement_code: String,
     #[arg(long)]
     pub expires_at: Option<String>,
+    #[arg(long)]
+    pub instance_id: Option<i64>,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub yes: bool,
+    #[arg(long, short = 'o')]
+    pub output: Option<String>,
+}
+
+/// Arguments for an explicit exact deadline adjustment, including deliberate shortening.
+#[derive(Clone, Debug, Args)]
+pub struct RequirementsSetDeadlineArgs {
+    pub requirement_code: String,
+    #[arg(long)]
+    pub expires_at: String,
     #[arg(long)]
     pub instance_id: Option<i64>,
     #[arg(long)]

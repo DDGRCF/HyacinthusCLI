@@ -42,4 +42,4 @@ release 只选择 write_status=created/updated 的真实行，**不会重试需�
 
 ## 批量延期限制
 
-batch_extend_v2 和单条 extend 虽接收 expires_at，当前都使用后端默认有效期，不能指定截止日期。批量延期保留 matched 状态；单条延期恢复 open 并取消匹配，不能互相替代。按真实 expires_at、extended/write_failed 报告，不按预览推断日期已生效。
+batch_extend_v2 和单条 extend 统一只延长不缩短：取原截止时间与候选较晚者；expires_at 可指定未来候选，省略时用处理时刻加后台有效期。两者均保留 matched，其他状态恢复 open 并清理下架。相同 client_run_id 重放原回执，不重新续期；明确缩短使用单条 set-deadline，立即过期和删除是独立操作。按真实 expires_at、extended/write_failed 报告，不按预览推断日期已生效。

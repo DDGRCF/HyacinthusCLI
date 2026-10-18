@@ -1,5 +1,5 @@
 # 改动说明：区分服务器标签解析与CLI语义整理，统一格式二关系归位规则及字段默认值，并说明常规导入的非线上归线下行为。
-version: "2026-10-08"
+version: "2026-10-19"
 backend_min_version: "0.1.0"
 capabilities:
   - id: requirements.batch_parse
@@ -485,7 +485,7 @@ capabilities:
 
   - id: requirements.extend
     title: 延期需求
-    description: 按需求编号刷新默认截止时间，恢复 open 并清除匹配；当前后端未使用请求 expires_at。
+    description: 普通延期只延长不缩短：取原截止时间和本次候选截止时间较晚者；未指定 expires_at 时用处理时刻加后台有效期。保留 matched，其他状态恢复 open 并清除下架。
     domain: requirements
     command: hyacinthus requirements extend
     method: POST
@@ -520,7 +520,7 @@ capabilities:
             - string
             - "null"
           format: date-time
-          description: 接受 RFC 3339；CLI 未带时区按 +08:00 解释。当前后端未应用此值，实际使用默认有效期。
+          description: 可选未来候选截止时间，接受 RFC 3339；CLI 未带时区按 +08:00 解释。仅延长，不会缩短原期限；缩短使用 requirements.set_deadline。
     response_schema:
       type: object
       required:
@@ -589,6 +589,112 @@ capabilities:
     examples:
       - title: 立即过期一个准确编号
         command: hyacinthus requirements expire KKH347 --yes
+
+  - id: requirements.set_deadline
+    title: 调整需求截止时间
+    description: 显式设置未来截止时间，允许缩短。过去或当前时间使用立即过期；保留状态与匹配，不删除记录。
+    domain: requirements
+    command: hyacinthus requirements set-deadline
+    method: POST
+    path: /api/v1/agent/requirements/deadline
+    required_scopes:
+      - requirements:write
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.18"
+    request_schema:
+      type: object
+      required:
+        - requirement_code
+        - expires_at
+      properties:
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 可选请求实例标识（i64 正整数）；授权身份由绑定 Agent token 确定，不用于选择授权用户。
+        requirement_code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 需求编号。
+        expires_at:
+          type: string
+          format: date-time
+          description: 必填未来截止时间；CLI 无时区按北京时间 +08:00，允许明确缩短。
+    response_schema:
+      type: object
+      required:
+        - requirement_id
+        - requirement_code
+        - expires_at
+      properties:
+        requirement_id:
+          type: integer
+        requirement_code:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    examples:
+      - title: 显式设置未来截止时间
+        command: hyacinthus requirements set-deadline KKH347 --yes
+
+  - id: requirements.delete
+    title: 删除需求
+    description: 永久删除准确编号的岗位，独立于立即过期；同时要求 requirements:write 与 admin:read，需明确确认。
+    domain: requirements
+    command: hyacinthus requirements delete
+    method: POST
+    path: /api/v1/agent/requirements/delete
+    required_scopes:
+      - requirements:write
+      - admin:read
+    risk_level: write
+    supports_dry_run: cli
+    supports_idempotency: false
+    supports_pagination: false
+    supports_file_upload: false
+    min_backend_version: "0.1.0"
+    introduced_in: "0.1.18"
+    request_schema:
+      type: object
+      additionalProperties: false
+      required:
+        - requirement_code
+      properties:
+        instance_id:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 可选请求实例标识（i64 正整数）；授权身份由绑定 Agent token 确定，不用于选择授权用户。
+        requirement_code:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 需求编号。
+    response_schema:
+      type: object
+      required:
+        - requirement_id
+        - requirement_code
+        - deleted
+      properties:
+        requirement_id:
+          type: integer
+        requirement_code:
+          type: string
+        deleted:
+          type: boolean
+    examples:
+      - title: 删除一个准确编号
+        command: hyacinthus requirements delete KKH347 --yes
 
   - id: requirements.search
     title: 搜索需求
@@ -2250,7 +2356,7 @@ capabilities:
 
   - id: requirements.batch_extend_v2
     title: 批量延期并复用坐标
-    description: 最多100条按准确编号使用默认有效期延期，保留 matched 状态和已验证坐标，不调用地图；当前未使用逐行 expires_at。
+    description: 最多100条按准确编号只延长不缩短：取原截止与逐行 expires_at 候选较晚者；省略候选时使用同一个处理时刻加后台有效期。保留 matched 和已验证坐标，不调用地图；同一 client_run_id 重放不续期。
     domain: requirements
     command: hyacinthus capability run requirements.batch_extend_v2
     method: POST

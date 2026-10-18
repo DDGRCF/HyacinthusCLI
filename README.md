@@ -113,7 +113,7 @@ For review before writing, use `parse` once, save and review `confirmed_rows`, t
 
 Map resolution runs during the parse job to produce candidate coordinates, then import/upload_run resolves the submitted address again or reuses an existing requirement's verified location before writing. Client-supplied parse coordinates do not authorize a write. Ordinary import has no geography run handle; report map failures from `failed_rows`, and use upload-run outcomes for the persistent workflow.
 
-Both `batch_extend_v2` and single-row `requirements extend` use the server’s default expiry; supplied `expires_at` is not applied. A requested deadline cannot currently be set through either command. Single-row extension restores `open` and clears matching; batch extension preserves `matched`. See the bundled [batch and geography guide](skills/hyacinthus-cli/references/batch-and-geo.md).
+Both `batch_extend_v2` and `requirements extend` keep the later of the existing deadline and the requested future candidate (default: processing time plus configured validity). Both preserve `matched`. Explicit shortening uses `requirements set-deadline`; immediate expiry and permanent deletion are separate confirmed operations. See the bundled [batch and geography guide](skills/hyacinthus-cli/references/batch-and-geo.md).
 
 ## Environment Variables
 
@@ -241,7 +241,7 @@ hyacinthus requirements extend KKH347 --dry-run
 hyacinthus requirements extend KKH347 --yes
 ```
 
-The backend refreshes `expires_at` from its configured default validity window, restores `open`, and clears matching and invalidation flags. `--expires-at` is accepted but not applied; batch extension also uses the default window and preserves `matched`. Report the actual returned deadline.
+The backend keeps the later of the existing deadline and the future candidate supplied with `--expires-at`, or processing time plus configured validity when omitted. Single and batch extension preserve `matched`; other statuses reopen and clear invalidation. Use `set-deadline` to explicitly shorten a future deadline, `expire` to end validity now, or the separately authorized `delete` to permanently remove the record. Report the actual returned deadline.
 
 Successful output data:
 
@@ -379,3 +379,7 @@ Shell 安装器同样向已存在的 Agent 目录自动安装并核对 Skills；
 Requirement geocoding is owned by the server. Complete-address geocoding runs first; lower-confidence results may use POI suggestions for additional evidence. A failed suggestion request does not erase an existing forward coordinate.
 
 `requirements import-raw` exposes `geocoding` with each parsed row's index, address, location and `geo_diagnostic`, and retains coordinates and diagnostics on skipped rows. Backend `errors` decide admission; warnings and address confidence do not add a CLI threshold. Imported business rows exclude the top-level parser diagnostic. Before writing, the server verifies the source address or reuses a valid verified location; client coordinates alone do not authorize a write. No CLI loop guesses addresses or retries completed rows automatically.
+
+### 期限操作
+
+`requirements extend CODE` 只延长不缩短；`--expires-at` 指定候选未来时间，省略时使用后台默认有效期。`requirements set-deadline CODE --expires-at ISO --yes` 允许明确缩短；`requirements expire CODE --yes` 立即停止展示并保留记录；`requirements delete CODE --yes` 永久删除且额外要求 `admin:read`。时间未带时区按北京时间解释；先用 `--dry-run` 核对编号与请求。
