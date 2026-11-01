@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- Match the current requester-gender verification contract in the offline SOP regression, asserting the rejected actual value and expected field value as well as the diagnostic.
+
+- Preserve automatic Skills installation on macOS Bash 3.2 with `set -u` by safely iterating the initially empty deduplication array.
+
 - Describe upload guards in the capability manifest: `source_published_at`, `overwrite_manual_edit`, row `warnings`, and the `identity_lookup` `stored` snapshot. These fields require the matching backend upgrade.
 - Archive the 2026-10-12 Format 2 and bundled-rule audits with their reproducible fixtures under `docs/audits/2026-10-12`.
 - Limit age-based grade defaults to age 3 -> 小班, age 4 -> 中班, ages 5–6 -> 大班, and age 18 or above -> 成人; explicit learner grades take precedence, other ages are not inferred, and age plus the inference basis remains in remarks.

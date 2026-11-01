@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 改动说明：校验 CLI 下载后自动向已存在的 Agent 目录安装并核对完整 Skills，支持显式目录和跳过。
+# 改动说明：自动安装完整 Skills，并在 macOS Bash 3.2 的 nounset 模式下安全遍历空目录去重数组。
 set -euo pipefail
 
 repo="${HYACINTHUS_CLI_REPO:-DDGRCF/HyacinthusCLI}"
@@ -100,7 +100,7 @@ else
   for agent_home in "${skill_homes[@]}"; do
     [[ -d "${agent_home}" ]] || continue
     duplicate=0
-    for previous_home in "${installed_homes[@]}"; do
+    for previous_home in "${installed_homes[@]-}"; do
       [[ "${previous_home}" != "${agent_home}" ]] || duplicate=1
     done
     [[ "${duplicate}" == "0" ]] || continue
