@@ -27,6 +27,7 @@ hyacinthus capability run requirements.upload_run --data @tasks/<run_id>/upload.
 preflight.json 顶层只放 rows；upload.json 另加 client_run_id，可按 schema 加 instance_id。不要把上传请求原样用于预检。
 
 upload_run/preflight_v2 的 rows[] 用 `client_row_id`、可选 `revision_key/operation_key` 和嵌套 `requirement`。requirement 按[业务行格式](requirements-format.md#json-构造规则)构造；内嵌 schema 只标 object，预览通过不代表业务通过。
+n可选 `source_published_at` 传来源消息时间，早于后台已存时间的行失败并返回 `REQUIREMENT_SOURCE_STALE`。上次上传后被网页修改过的岗位：内容未变的重复上传只延期（`extended`、`REQUIREMENT_MANUAL_EDIT_PRESERVED`），内容有变则失败（`REQUIREMENT_MANUAL_EDIT_CONFLICT`）；只有确认要覆盖时才传 `overwrite_manual_edit: true`。回执的 `warnings` 列出入库时被丢弃或调整的字段，`identity_lookup` 的 `stored` 可核对入库内容。这些字段需要后台已升级。
 
 upload_run/batch_extend_v2 用稳定 client_run_id/client_row_id，不加普通导入的 idempotency_key。同请求断线后用原能力、原键、原内容续读，改变内容会冲突。revision_key 是来源修订证据，**不是并发锁**；duplicate 要求提交修订键与已保存的相同，不能只凭编号认定。
 

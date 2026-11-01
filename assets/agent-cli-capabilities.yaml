@@ -1,5 +1,5 @@
 # 改动说明：区分服务器标签解析与CLI语义整理，统一格式二关系归位规则及字段默认值，并说明常规导入的非线上归线下行为。
-version: "2026-10-19"
+version: "2026-11-02"
 backend_min_version: "0.1.0"
 capabilities:
   - id: requirements.batch_parse
@@ -2239,6 +2239,8 @@ capabilities:
               client_row_id: {type: string, minLength: 1, maxLength: 160}
               revision_key: {type: [string, "null"], maxLength: 160}
               operation_key: {type: [string, "null"], maxLength: 200}
+              source_published_at: {type: [string, "null"], format: date-time, description: "来源消息时间；早于后台已存时间的行返回 REQUIREMENT_SOURCE_STALE。"}
+              overwrite_manual_edit: {type: boolean, description: "明确覆盖上次上传后的网页人工修改。"}
               requirement: {type: object}
     response_schema: &requirement_upload_run_response
       type: object
@@ -2281,6 +2283,7 @@ capabilities:
               geo_job_id: {type: [string, "null"]}
               geocode_attempts: {type: integer, minimum: 0}
               queue_wait_ms: {type: [integer, "null"], minimum: 0}
+              warnings: {type: array, items: {type: string}}
     examples:
       - title: 写入一批并取得运行单
         command: hyacinthus capability run requirements.upload_run --data @upload-run.json --yes
@@ -2437,6 +2440,7 @@ capabilities:
           requirement_id: {type: [integer, "null"]}
           current_revision_key: {type: [string, "null"]}
           classification: {type: string, enum: [new, update, duplicate]}
+          stored: {type: [object, "null"], description: "后台当前入库字段快照，用于核对字段是否被丢弃或修改。"}
     examples:
       - title: 上传前查询版本动作
         command: hyacinthus capability run requirements.identity_lookup --data @identity-lookup.json
@@ -2473,6 +2477,8 @@ capabilities:
               client_row_id: {type: string, minLength: 1, maxLength: 160}
               revision_key: {type: [string, "null"], maxLength: 160}
               operation_key: {type: [string, "null"], maxLength: 200}
+              source_published_at: {type: [string, "null"], format: date-time, description: "来源消息时间；早于后台已存时间的行返回 REQUIREMENT_SOURCE_STALE。"}
+              overwrite_manual_edit: {type: boolean, description: "明确覆盖上次上传后的网页人工修改。"}
               requirement: {type: object}
     response_schema:
       type: object

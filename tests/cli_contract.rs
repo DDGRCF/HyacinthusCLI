@@ -654,7 +654,7 @@ fn capability_list_returns_embedded_manifest() {
     let value = run_json(&["capability", "list"]);
 
     assert_eq!(value["ok"], true);
-    assert_eq!(value["data"]["version"], "2026-10-19");
+    assert_eq!(value["data"]["version"], "2026-11-02");
     assert!(value["data"]["capabilities"]
         .as_array()
         .unwrap()
@@ -4148,7 +4148,7 @@ fn jq_filters_success_envelope() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(value, "2026-10-19");
+    assert_eq!(value, "2026-11-02");
 }
 
 #[test]
