@@ -150,7 +150,11 @@ fn batch_import_defaults_missing_delivery_mode_to_offline() {
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(
             value["data"]["request"]["body"]["confirmed_rows"][0]["preferred_mode"],
-            "offline"
+            if key == "delivery-default-hybrid" {
+                "hybrid"
+            } else {
+                "offline"
+            }
         );
     }
 }
@@ -249,7 +253,7 @@ fn mail_and_general_guides_share_the_current_twenty_one_fields() {
         })
         .collect();
     assert_eq!(fields, labels);
-    assert!(general.contains("原文明确线上时填线上/`online`"));
+    assert!(general.contains("原文明确纯线上时填线上/`online`"));
     assert!(general.contains("其他情况（包括未说明）默认填线下/`offline`"));
     assert!(general.contains("未说明授课方式不询问、不阻断上传"));
     assert!(general.contains("按事实关系归位，不靠别名清单"));

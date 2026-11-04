@@ -1,4 +1,4 @@
-<!-- 改动说明：补齐学校查询与后端同步前提，保留SOP v5入口及 raw 地图 errors 裁决说明。 -->
+<!-- 改动说明：纯线上免地址定位、混合授课保留真实地点；同步后台前提和上传回执说明。 -->
 # Hyacinthus CLI
 
 Agent-oriented CLI for 风信子家教中心 backend operations. The CLI supports Hermes, Codex, Claude Code, Pi, and direct `hyacinthus-cli` authorization identities with a stable, structured, auditable command surface.
@@ -45,6 +45,8 @@ Skill installation targets are `hermes`, `codex`, `claude`, and `pi`. Pi install
 Normal `install` also exports and verifies bundled Skills in detected Hermes/Codex/Claude/Pi homes. Select one using `--skills-target <agent>`, a custom directory using `--skills-dir <dir>`, or a binary-only installation using `--skip-skills`. Reload the Agent session after installation. Export/check cover every reference file. A subsequent export removes only retired entry files recorded by the installer manifest, retaining unrelated Skills and custom files.
 
 The wrapper package lives in `npm/hyacinthus-cli` and can be published privately with `npm publish --access restricted`. Private npm access only controls the wrapper download; GitHub release access is still checked separately by GitHub.
+
+Pure online imports (`online`) require no address or geocoding after the matching backend update; successful upload runs report `geo_status=not_required`. Explicit hybrid teaching (`hybrid`) is preserved and requires a real verified venue, just like offline teaching. The CLI never invents a default map point.
 
 ## Backend target
 

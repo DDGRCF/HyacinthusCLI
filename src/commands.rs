@@ -1,3 +1,4 @@
+// Change: retain explicit hybrid teaching mode instead of coercing it to offline.
 // Change note: unify extend-only renewal, explicit deadline shortening, expiry and confirmed deletion.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -3120,7 +3121,10 @@ fn normalize_parsed_row_for_import(mut parsed: Value) -> Value {
     if object.get("time_slots").is_some_and(Value::is_null) {
         object.insert("time_slots".to_string(), json!([]));
     }
-    if object.get("preferred_mode").and_then(Value::as_str) != Some("online") {
+    if !matches!(
+        object.get("preferred_mode").and_then(Value::as_str),
+        Some("online" | "hybrid")
+    ) {
         object.insert("preferred_mode".to_string(), json!("offline"));
     }
     parsed

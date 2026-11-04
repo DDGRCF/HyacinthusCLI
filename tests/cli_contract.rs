@@ -5452,7 +5452,7 @@ fn requirements_import_projects_complete_backend_parser_draft() {
     let row = &value["data"]["request"]["body"]["confirmed_rows"][0];
     assert!(row.get("geo_diagnostic").is_none());
     assert_eq!(row["requirement_type"], "tutoring");
-    assert_eq!(row["preferred_mode"], "offline");
+    assert_eq!(row["preferred_mode"], "hybrid");
     assert_eq!(row["time_slots"], serde_json::json!([]));
     assert_eq!(row["weekly_frequency_max"], 2);
     assert_eq!(row["ext"]["source"], "audit");
@@ -6084,7 +6084,7 @@ fn import_preserves_business_fields_and_backend_errors() {
         ),
         (
             serde_json::json!({"description":"audit","preferred_mode":"hybrid"}),
-            "offline",
+            "hybrid",
         ),
         (
             serde_json::json!({"description":"audit","preferred_mode":"online"}),

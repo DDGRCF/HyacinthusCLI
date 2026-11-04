@@ -339,7 +339,7 @@ capabilities:
                   - online
                   - offline
                   - hybrid
-                description: 授课方式；格式二整理遵循内嵌 requirements-format 指南。requirements import/import-raw 仅保留明确的 online，其余值（含 hybrid、未说明）全部归为 offline；混合安排保留在 description 或 ext.remark。
+                description: 授课方式；格式二整理遵循内嵌 requirements-format 指南。requirements import/import-raw 保留明确的 online/hybrid，未说明归为 offline；online 无需地址和坐标，hybrid 保留真实授课地点。
               weekly_frequency_min:
                 type: [integer, "null"]
                 minimum: 1
@@ -2207,7 +2207,7 @@ capabilities:
 
   - id: requirements.upload_run
     title: 创建或续读岗位上传运行单
-    description: 最多100条的持久化写入通道；先解析地址或复用已有有效定位，再写入通过行，断线后以 client_run_id 续读相同结果。
+    description: 最多100条的持久化写入通道；纯 online 无需地址和定位，成功 geo_status=not_required；offline/hybrid 先解析地址或复用有效定位，断线后以 client_run_id 续读相同结果。
     domain: requirements
     command: hyacinthus capability run requirements.upload_run
     method: POST

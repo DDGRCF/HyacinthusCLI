@@ -33,7 +33,7 @@ upload_run/batch_extend_v2 用稳定 client_run_id/client_row_id，不加普通�
 
 ## 地图在哪一步
 
-upload_run 包括 online 在内，**先定位或复用有效定位，再写入**。定位失败行 write_status=failed；即使 geo_status=needs_review/unavailable，也不能算已入库。
+纯 online 直接写入，地址可空、不生成或复用坐标，成功回执为 write_status=created/updated 且 geo_status=not_required；not_required 不是定位失败，不提交地图复核。offline/hybrid **先定位或复用有效定位，再写入**。定位失败行 write_status=failed；即使 geo_status=needs_review/unavailable，也不能算已入库。
 
 按 row_outcomes 汇报：write_status 为 pending/created/updated/extended/failed，geo_status 为 pending/resolved/needs_review/invalid/unavailable/not_required。write_failed/geo_pending 是计数。只有真实返回非空 geo_run_id 才查询 geocode_run，runner 不自动轮询全流程。
 
